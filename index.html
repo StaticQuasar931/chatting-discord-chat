@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Static Chat</title>
+  <link rel="stylesheet" href="style.css" />
+  <link rel="icon" type="image/png" href="https://cdn.jsdelivr.net/gh/StaticQuasar931/Images@main/icon.png" />
+</head>
+<body>
+
+  <!-- ====== LOGIN SCREEN ====== -->
+  <div id="login-screen" class="login-screen">
+    <div class="login-card">
+      <img class="login-logo" src="https://cdn.jsdelivr.net/gh/StaticQuasar931/Images@main/icon.png" alt="logo" />
+      <h1>Welcome to Static Chat</h1>
+      <p class="login-sub">A school-safe chat for messaging your friends.</p>
+      <button id="google-signin-btn" class="btn-google">
+        <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+          <path fill="#fff" d="M21.35 11.1H12v2.9h5.35c-.23 1.5-1.7 4.4-5.35 4.4-3.22 0-5.85-2.66-5.85-5.95S8.78 6.5 12 6.5c1.83 0 3.06.78 3.76 1.45l2.56-2.47C16.78 3.97 14.6 3 12 3 6.95 3 2.85 7.06 2.85 12.45S6.95 21.9 12 21.9c6.93 0 9.5-4.86 9.5-7.4 0-.5-.05-.95-.15-1.4z"/>
+        </svg>
+        Sign in with Google
+      </button>
+      <p class="login-footer">By signing in you agree to use this chat respectfully.</p>
+    </div>
+  </div>
+
+  <!-- ====== MAIN APP ====== -->
+  <div id="app" class="app hidden">
+
+    <!-- LEFT NAV RAIL: home button + group chat avatars -->
+    <nav class="rail">
+      <button class="rail-btn rail-home active" id="rail-home" title="Direct Messages">
+        <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
+          <path fill="currentColor" d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H6l-4 4V6c0-1.1.9-2 2-2zm0 14h12.17l1.83 1.83V6H4v12zm3-7h2v2H7v-2zm4 0h2v2h-2v-2zm4 0h2v2h-2v-2z"/>
+        </svg>
+      </button>
+      <div class="rail-divider"></div>
+      <div class="rail-groups" id="rail-groups">
+        <!-- group chat avatars injected here -->
+      </div>
+      <button class="rail-btn rail-add" id="rail-create-group" title="Create group chat">
+        <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
+          <path fill="currentColor" d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6z"/>
+        </svg>
+      </button>
+    </nav>
+
+    <!-- SIDEBAR: friends button, DMs/groups list, user panel -->
+    <aside class="sidebar">
+      <div class="sidebar-header">
+        <input type="text" id="sidebar-search" placeholder="Find or start a conversation" />
+      </div>
+
+      <div class="sidebar-content">
+        <button class="side-btn" id="open-friends-btn">
+          <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+            <path fill="currentColor" d="M16 11c1.66 0 3-1.34 3-3s-1.34-3-3-3-3 1.34-3 3 1.34 3 3 3zm-8 0c1.66 0 3-1.34 3-3S9.66 5 8 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5C15 14.17 10.33 13 8 13zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z"/>
+          </svg>
+          <span>Friends</span>
+        </button>
+
+        <div class="side-section-label">
+          <span>Direct Messages</span>
+          <button class="icon-btn" id="new-dm-btn" title="Start new DM">
+            <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path fill="currentColor" d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6z"/></svg>
+          </button>
+        </div>
+        <div class="side-list" id="dm-list">
+          <!-- DMs injected here -->
+        </div>
+
+        <div class="side-section-label">
+          <span>Group Chats</span>
+        </div>
+        <div class="side-list" id="group-list">
+          <!-- groups injected here -->
+        </div>
+      </div>
+
+      <!-- User panel at bottom -->
+      <div class="user-panel" id="user-panel">
+        <img class="user-panel-avatar" id="user-panel-avatar" src="" alt="" />
+        <div class="user-panel-info">
+          <div class="user-panel-name" id="user-panel-name">…</div>
+          <div class="user-panel-status">Online</div>
+        </div>
+        <button class="icon-btn" id="signout-btn" title="Sign out">
+          <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+            <path fill="currentColor" d="M17 7l-1.41 1.41L18.17 11H8v2h10.17l-2.58 2.58L17 17l5-5-5-5zM4 5h8V3H4c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h8v-2H4V5z"/>
+          </svg>
+        </button>
+      </div>
+    </aside>
+
+    <!-- MAIN AREA -->
+    <main class="main">
+
+      <!-- FRIENDS VIEW -->
+      <section id="friends-view" class="view">
+        <header class="main-header">
+          <div class="main-header-title">
+            <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
+              <path fill="currentColor" d="M16 11c1.66 0 3-1.34 3-3s-1.34-3-3-3-3 1.34-3 3 1.34 3 3 3zm-8 0c1.66 0 3-1.34 3-3S9.66 5 8 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5C15 14.17 10.33 13 8 13zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z"/>
+            </svg>
+            Friends
+          </div>
+          <nav class="tabs">
+            <button class="tab active" data-tab="all">All</button>
+            <button class="tab" data-tab="pending">Pending</button>
+            <button class="tab tab-cta" data-tab="add">Add Friend</button>
+          </nav>
+        </header>
+
+        <div class="friends-body">
+          <!-- ALL FRIENDS TAB -->
+          <div class="tab-panel" data-panel="all">
+            <div class="panel-search">
+              <input type="text" id="friends-filter" placeholder="Search friends" />
+            </div>
+            <h3 class="panel-title" id="all-count">All Friends</h3>
+            <div class="friends-list" id="friends-list">
+              <!-- friends rows -->
+            </div>
+            <p class="empty" id="friends-empty" hidden>You don't have any friends yet. Try the Add Friend tab.</p>
+          </div>
+
+          <!-- PENDING TAB -->
+          <div class="tab-panel hidden" data-panel="pending">
+            <h3 class="panel-title">Incoming Requests</h3>
+            <div class="friends-list" id="incoming-list"></div>
+            <p class="empty" id="incoming-empty" hidden>No incoming requests.</p>
+
+            <h3 class="panel-title" style="margin-top:24px;">Sent Requests</h3>
+            <div class="friends-list" id="outgoing-list"></div>
+            <p class="empty" id="outgoing-empty" hidden>No outgoing requests.</p>
+          </div>
+
+          <!-- ADD FRIEND TAB -->
+          <div class="tab-panel hidden" data-panel="add">
+            <h3 class="panel-title">Add Friend</h3>
+            <p class="panel-sub">Search for someone by their display name to send them a friend request.</p>
+            <div class="add-friend-row">
+              <input type="text" id="add-friend-input" placeholder="Type a name…" />
+              <button class="btn-primary" id="add-friend-search-btn">Search</button>
+            </div>
+            <div class="search-results" id="search-results"></div>
+            <p class="hint" id="search-hint">Names are matched starting from the beginning. Try the first few letters.</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- CHAT VIEW -->
+      <section id="chat-view" class="view hidden">
+        <header class="main-header chat-header">
+          <div class="chat-header-info">
+            <img class="chat-header-avatar" id="chat-header-avatar" src="" alt="" />
+            <div>
+              <div class="chat-header-name" id="chat-header-name">—</div>
+              <div class="chat-header-sub" id="chat-header-sub"></div>
+            </div>
+          </div>
+          <div class="chat-header-actions">
+            <button class="icon-btn" id="chat-add-member-btn" title="Add members" hidden>
+              <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+                <path fill="currentColor" d="M15 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm-9-2V7H4v3H1v2h3v3h2v-3h3v-2H6zm9 4c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/>
+              </svg>
+            </button>
+            <button class="icon-btn" id="chat-leave-btn" title="Leave chat" hidden>
+              <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+                <path fill="currentColor" d="M17 7l-1.41 1.41L18.17 11H8v2h10.17l-2.58 2.58L17 17l5-5-5-5zM4 5h8V3H4c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h8v-2H4V5z"/>
+              </svg>
+            </button>
+          </div>
+        </header>
+
+        <div class="messages" id="messages"></div>
+
+        <div class="composer">
+          <div class="composer-inner">
+            <button class="icon-btn composer-emoji-btn" id="emoji-btn" title="Emoji">
+              <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
+                <path fill="currentColor" d="M11.99 2C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2zM12 20c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8zm3.5-9c.83 0 1.5-.67 1.5-1.5S16.33 8 15.5 8 14 8.67 14 9.5s.67 1.5 1.5 1.5zm-7 0C9.33 11 10 10.33 10 9.5S9.33 8 8.5 8 7 8.67 7 9.5 7.67 11 8.5 11zm3.5 6.5c2.33 0 4.31-1.46 5.11-3.5H6.89c.8 2.04 2.78 3.5 5.11 3.5z"/>
+              </svg>
+            </button>
+            <div class="composer-input-wrap">
+              <textarea id="composer-input" placeholder="Message…" rows="1"></textarea>
+            </div>
+            <button class="icon-btn composer-send-btn" id="send-btn" title="Send">
+              <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
+                <path fill="currentColor" d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/>
+              </svg>
+            </button>
+          </div>
+          <div class="composer-hint">
+            Format with **bold**, *italic*, __underline__, `code`, ```code block```. Try emoji like :rofl: or :Static:
+          </div>
+        </div>
+
+        <!-- Emoji picker -->
+        <div id="emoji-picker" class="emoji-picker hidden" role="dialog" aria-label="Emoji picker">
+          <div class="emoji-picker-header">
+            <input type="text" id="emoji-search" placeholder="Search emoji…" />
+          </div>
+          <div class="emoji-picker-grid" id="emoji-grid"></div>
+        </div>
+      </section>
+
+      <!-- EMPTY STATE (no view) -->
+      <section id="empty-view" class="view hidden empty-view">
+        <img src="https://cdn.jsdelivr.net/gh/StaticQuasar931/Images@main/icon.png" alt="" />
+        <h2>Select a conversation</h2>
+        <p>Pick a friend or group from the sidebar to start chatting.</p>
+      </section>
+    </main>
+  </div>
+
+  <!-- ====== MODALS ====== -->
+
+  <!-- Create Group Modal -->
+  <div class="modal hidden" id="create-group-modal">
+    <div class="modal-card">
+      <div class="modal-head">
+        <h2>Create Group Chat</h2>
+        <button class="icon-btn modal-close" data-close="create-group-modal">✕</button>
+      </div>
+      <div class="modal-body">
+        <label class="modal-label">Group name</label>
+        <input type="text" id="group-name-input" placeholder="My study squad" maxlength="50" />
+
+        <label class="modal-label" style="margin-top:14px;">Add friends</label>
+        <div class="modal-friend-list" id="modal-friend-list"></div>
+      </div>
+      <div class="modal-foot">
+        <button class="btn-secondary" data-close="create-group-modal">Cancel</button>
+        <button class="btn-primary" id="create-group-confirm-btn">Create</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Add to Group Modal -->
+  <div class="modal hidden" id="add-member-modal">
+    <div class="modal-card">
+      <div class="modal-head">
+        <h2>Add Friends to Group</h2>
+        <button class="icon-btn modal-close" data-close="add-member-modal">✕</button>
+      </div>
+      <div class="modal-body">
+        <label class="modal-label">Friends not in this group</label>
+        <div class="modal-friend-list" id="add-member-list"></div>
+      </div>
+      <div class="modal-foot">
+        <button class="btn-secondary" data-close="add-member-modal">Cancel</button>
+        <button class="btn-primary" id="add-member-confirm-btn">Add</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast -->
+  <div id="toast" class="toast hidden"></div>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>
