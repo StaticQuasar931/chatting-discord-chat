@@ -1,66 +1,16 @@
 /* =====================================================================
-   Static Chat — app.js
-   School-safe Discord-inspired chat using Firebase modular SDK.
-   ---------------------------------------------------------------------
-   FIRESTORE STRUCTURE
-   ---------------------------------------------------------------------
-   users/{uid}
-       uid             string   (== document id)
-       displayName     string   (== username, kept in sync)
-       displayNameLower string  (lowercased, used for prefix search)
-       username        string   (chosen display name, 3-32 chars)
-       discriminator   string   (4-digit zero-padded, e.g. "0042")
-       bio             string   (optional, up to 200 chars)
-       email           string   (private — never shown in UI)
-       photoURL        string|null
-       createdAt       timestamp
-
-   friendRequests/{requestId}     -- pending friend requests
-       fromUid / toUid / fromName / fromPhoto / toName / toPhoto / createdAt
-
-   friendships/{friendshipId}     -- sortedUids.join("_")
-       users [uidA, uidB] / createdAt
-
-   chats/{chatId}                 -- DM or group chat
-       type / members / name / createdBy / createdAt / lastMessage / lastMessageAt
-       messages/{messageId}
-           text / senderUid / senderName / senderPhoto / createdAt
-
-   DM chatId: "dm_<uidA>_<uidB>" (sorted)
+   Static Chat — app.js  (full rewrite with all features)
    ===================================================================== */
 
-
-/* =====================================================================
-   1) FIREBASE CONFIG
-   ===================================================================== */
+import { isNameBlocked, generateSafeName } from "./name-blocklist.js";
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import {
-  getAuth,
-  GoogleAuthProvider,
-  signInWithPopup,
-  signOut,
-  onAuthStateChanged
+  getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import {
-  getFirestore,
-  doc,
-  collection,
-  setDoc,
-  getDoc,
-  getDocs,
-  addDoc,
-  updateDoc,
-  deleteDoc,
-  query,
-  where,
-  orderBy,
-  limit,
-  startAt,
-  endAt,
-  onSnapshot,
-  serverTimestamp,
-  arrayUnion,
-  writeBatch
+  getFirestore, doc, collection, setDoc, getDoc, getDocs, addDoc,
+  updateDoc, deleteDoc, query, where, orderBy, limit, startAt, endAt,
+  onSnapshot, serverTimestamp, arrayUnion, writeBatch
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
 const firebaseConfig = {
@@ -69,51 +19,367 @@ const firebaseConfig = {
   projectId: "claude-static-chat",
   storageBucket: "claude-static-chat.firebasestorage.app",
   messagingSenderId: "217707625831",
-  appId: "1:217707625831:web:25d5bbbc72e7965a9f83c2",
-  measurementId: "G-X3DN5PWEYL"
+  appId: "1:217707625831:web:25d5bbbc72e7965a9f83c2"
 };
-
-const app = initializeApp(firebaseConfig);
-const auth = getAuth(app);
-const db = getFirestore(app);
+const app   = initializeApp(firebaseConfig);
+const auth  = getAuth(app);
+const db    = getFirestore(app);
 const provider = new GoogleAuthProvider();
 
 
 /* =====================================================================
-   2) STATE
+   EMOJI DATA
+   ===================================================================== */
+const STATIC_EMOJI_URL = "https://cdn.jsdelivr.net/gh/StaticQuasar931/Images@main/icon.png";
+
+const EMOJI_CATS = [
+  { id: "all",      label: "★"  },
+  { id: "smileys",  label: "😄" },
+  { id: "gestures", label: "👍" },
+  { id: "hearts",   label: "❤️" },
+  { id: "nature",   label: "🌿" },
+  { id: "food",     label: "🍕" },
+  { id: "animals",  label: "🐶" },
+  { id: "objects",  label: "💻" },
+  { id: "special",  label: "⭐" },
+];
+
+const EMOJI_DATA = [
+  // smileys
+  { name:"smile",         char:"😄", alt:["happy","grin"],           cat:"smileys" },
+  { name:"grin",          char:"😀", alt:["big smile"],              cat:"smileys" },
+  { name:"joy",           char:"😂", alt:["crying laughing","lol","haha"], cat:"smileys" },
+  { name:"rofl",          char:"🤣", alt:["rolling","floor"],        cat:"smileys" },
+  { name:"laughing",      char:"😆", alt:["lmao"],                   cat:"smileys" },
+  { name:"sweat_smile",   char:"😅", alt:["nervous laugh"],          cat:"smileys" },
+  { name:"wink",          char:"😉", alt:[],                         cat:"smileys" },
+  { name:"blush",         char:"😊", alt:["sweet","happy"],          cat:"smileys" },
+  { name:"kiss",          char:"😘", alt:["smooch","kissing"],       cat:"smileys" },
+  { name:"heart_eyes",    char:"😍", alt:["love","adore"],           cat:"smileys" },
+  { name:"star_struck",   char:"🤩", alt:["wow","star eyes"],        cat:"smileys" },
+  { name:"yum",           char:"😋", alt:["delicious","yummy"],      cat:"smileys" },
+  { name:"smirk",         char:"😏", alt:["sly","devious"],          cat:"smileys" },
+  { name:"thinking",      char:"🤔", alt:["hmm","ponder"],           cat:"smileys" },
+  { name:"neutral_face",  char:"😐", alt:["meh","straight"],         cat:"smileys" },
+  { name:"expressionless",char:"😑", alt:["dead","blank"],           cat:"smileys" },
+  { name:"roll_eyes",     char:"🙄", alt:["eyeroll","ugh"],          cat:"smileys" },
+  { name:"pensive",       char:"😔", alt:["sad","dejected"],         cat:"smileys" },
+  { name:"worried",       char:"😟", alt:["anxious"],                cat:"smileys" },
+  { name:"confused",      char:"😕", alt:["puzzled"],                cat:"smileys" },
+  { name:"flushed",       char:"😳", alt:["embarrassed","surprised"],cat:"smileys" },
+  { name:"scream",        char:"😱", alt:["shocked","scared"],       cat:"smileys" },
+  { name:"angry",         char:"😠", alt:["mad","upset"],            cat:"smileys" },
+  { name:"rage",          char:"😡", alt:["furious","red"],          cat:"smileys" },
+  { name:"sob",           char:"😭", alt:["crying","bawling","sad"], cat:"smileys" },
+  { name:"cry",           char:"😢", alt:["tear","sad"],             cat:"smileys" },
+  { name:"pleading",      char:"🥺", alt:["puppy eyes","please","uwu"], cat:"smileys" },
+  { name:"sleeping",      char:"😴", alt:["sleep","zzz","tired"],    cat:"smileys" },
+  { name:"yawn",          char:"🥱", alt:["tired","sleepy","bored"], cat:"smileys" },
+  { name:"sunglasses",    char:"😎", alt:["cool","awesome"],         cat:"smileys" },
+  { name:"nerd",          char:"🤓", alt:["glasses","smart"],        cat:"smileys" },
+  { name:"cowboy",        char:"🤠", alt:["yeehaw","hat"],           cat:"smileys" },
+  { name:"clown",         char:"🤡", alt:[],                         cat:"smileys" },
+  { name:"robot",         char:"🤖", alt:["bot","machine"],          cat:"smileys" },
+  { name:"skull",         char:"💀", alt:["dead","bones"],           cat:"smileys" },
+  { name:"ghost",         char:"👻", alt:["boo","spooky"],           cat:"smileys" },
+  { name:"alien",         char:"👽", alt:["ufo"],                    cat:"smileys" },
+  { name:"poop",          char:"💩", alt:["poo"],                    cat:"smileys" },
+  // gestures
+  { name:"thumbsup",       char:"👍", alt:["+1","like","agree","yes"], cat:"gestures" },
+  { name:"thumbsdown",     char:"👎", alt:["-1","dislike","no"],       cat:"gestures" },
+  { name:"ok_hand",        char:"👌", alt:["ok","perfect"],            cat:"gestures" },
+  { name:"clap",           char:"👏", alt:["applause","bravo"],        cat:"gestures" },
+  { name:"wave",           char:"👋", alt:["hi","hello","bye"],        cat:"gestures" },
+  { name:"muscle",         char:"💪", alt:["flex","strong","bicep"],   cat:"gestures" },
+  { name:"point_right",    char:"👉", alt:["this","right"],            cat:"gestures" },
+  { name:"point_left",     char:"👈", alt:["left","that"],             cat:"gestures" },
+  { name:"point_up",       char:"👆", alt:["above","up"],              cat:"gestures" },
+  { name:"point_down",     char:"👇", alt:["below","down"],            cat:"gestures" },
+  { name:"pray",           char:"🙏", alt:["please","namaste","thanks"],cat:"gestures" },
+  { name:"raised_hands",   char:"🙌", alt:["celebrate","praise","yay"],cat:"gestures" },
+  { name:"handshake",      char:"🤝", alt:["deal","agreement"],        cat:"gestures" },
+  { name:"fist",           char:"✊", alt:["bump","power"],            cat:"gestures" },
+  { name:"crossed_fingers",char:"🤞", alt:["luck","hope"],             cat:"gestures" },
+  { name:"metal",          char:"🤘", alt:["rock","rock on"],          cat:"gestures" },
+  { name:"call_me",        char:"🤙", alt:["hang loose","shaka"],      cat:"gestures" },
+  { name:"shrug",          char:"🤷", alt:["idk","whatever","dunno"],  cat:"gestures" },
+  { name:"facepalm",       char:"🤦", alt:["smh","ugh","duh"],         cat:"gestures" },
+  // hearts / symbols
+  { name:"heart",           char:"❤️", alt:["love","red heart"],      cat:"hearts" },
+  { name:"orange_heart",    char:"🧡", alt:["love"],                   cat:"hearts" },
+  { name:"yellow_heart",    char:"💛", alt:["love","friend"],          cat:"hearts" },
+  { name:"green_heart",     char:"💚", alt:["love","nature"],          cat:"hearts" },
+  { name:"blue_heart",      char:"💙", alt:["love"],                   cat:"hearts" },
+  { name:"purple_heart",    char:"💜", alt:["love"],                   cat:"hearts" },
+  { name:"black_heart",     char:"🖤", alt:["dark","love"],            cat:"hearts" },
+  { name:"white_heart",     char:"🤍", alt:["pure","love"],            cat:"hearts" },
+  { name:"broken_heart",    char:"💔", alt:["sad","heartbreak"],       cat:"hearts" },
+  { name:"sparkling_heart", char:"💖", alt:["love","sparkle"],         cat:"hearts" },
+  { name:"two_hearts",      char:"💕", alt:["love","couple"],          cat:"hearts" },
+  { name:"revolving_hearts",char:"💞", alt:["love"],                   cat:"hearts" },
+  { name:"fire",            char:"🔥", alt:["hot","lit","flame"],      cat:"hearts" },
+  { name:"100",             char:"💯", alt:["perfect","score"],        cat:"hearts" },
+  { name:"star",            char:"⭐", alt:["rating","favorite"],      cat:"hearts" },
+  { name:"sparkles",        char:"✨", alt:["glitter","magic","shine"],cat:"hearts" },
+  { name:"boom",            char:"💥", alt:["explosion","blast"],      cat:"hearts" },
+  { name:"zzz",             char:"💤", alt:["sleep","tired"],          cat:"hearts" },
+  { name:"tada",            char:"🎉", alt:["party","celebrate"],      cat:"hearts" },
+  // nature
+  { name:"sun",       char:"☀️", alt:["sunny","bright","day"],   cat:"nature" },
+  { name:"moon",      char:"🌙", alt:["night","crescent"],       cat:"nature" },
+  { name:"cloud",     char:"☁️", alt:["cloudy","overcast"],      cat:"nature" },
+  { name:"rainbow",   char:"🌈", alt:["colorful","pride"],       cat:"nature" },
+  { name:"snowflake", char:"❄️", alt:["cold","ice","winter"],    cat:"nature" },
+  { name:"zap",       char:"⚡", alt:["lightning","electric"],   cat:"nature" },
+  { name:"umbrella",  char:"☂️", alt:["rain","wet"],             cat:"nature" },
+  { name:"tornado",   char:"🌪️", alt:["twister","storm"],       cat:"nature" },
+  { name:"ocean",     char:"🌊", alt:["wave","sea","water"],     cat:"nature" },
+  { name:"earth",     char:"🌍", alt:["world","globe"],          cat:"nature" },
+  { name:"volcano",   char:"🌋", alt:["eruption","mountain"],    cat:"nature" },
+  { name:"tree",      char:"🌳", alt:["forest","nature"],        cat:"nature" },
+  { name:"palm_tree", char:"🌴", alt:["tropical","beach"],       cat:"nature" },
+  { name:"cactus",    char:"🌵", alt:["desert"],                 cat:"nature" },
+  { name:"rose",      char:"🌹", alt:["flower","love"],          cat:"nature" },
+  { name:"sunflower", char:"🌻", alt:["flower","bright"],        cat:"nature" },
+  { name:"leaf",      char:"🍃", alt:["leaves","wind"],          cat:"nature" },
+  // food
+  { name:"pizza",      char:"🍕", alt:["pie","slice"],              cat:"food" },
+  { name:"burger",     char:"🍔", alt:["hamburger","cheeseburger"],  cat:"food" },
+  { name:"fries",      char:"🍟", alt:["chips","potato"],           cat:"food" },
+  { name:"taco",       char:"🌮", alt:[],                           cat:"food" },
+  { name:"burrito",    char:"🌯", alt:["wrap"],                     cat:"food" },
+  { name:"sushi",      char:"🍣", alt:[],                           cat:"food" },
+  { name:"ramen",      char:"🍜", alt:["noodles","soup"],           cat:"food" },
+  { name:"coffee",     char:"☕", alt:["hot drink","cafe","morning"],cat:"food" },
+  { name:"boba",       char:"🧋", alt:["bubble tea","milk tea"],    cat:"food" },
+  { name:"tea",        char:"🍵", alt:["green tea","hot drink"],    cat:"food" },
+  { name:"cake",       char:"🎂", alt:["birthday","dessert"],       cat:"food" },
+  { name:"cupcake",    char:"🧁", alt:["dessert","sweet"],          cat:"food" },
+  { name:"cookie",     char:"🍪", alt:["snack","sweet"],            cat:"food" },
+  { name:"donut",      char:"🍩", alt:["doughnut"],                 cat:"food" },
+  { name:"ice_cream",  char:"🍦", alt:["soft serve","dessert"],     cat:"food" },
+  { name:"apple",      char:"🍎", alt:["fruit","red"],              cat:"food" },
+  { name:"banana",     char:"🍌", alt:["fruit","yellow"],           cat:"food" },
+  { name:"strawberry", char:"🍓", alt:["fruit","red"],              cat:"food" },
+  { name:"watermelon", char:"🍉", alt:["fruit","summer"],           cat:"food" },
+  { name:"grapes",     char:"🍇", alt:["fruit","purple"],           cat:"food" },
+  { name:"popcorn",    char:"🍿", alt:["movie","snack"],            cat:"food" },
+  { name:"avocado",    char:"🥑", alt:["toast"],                    cat:"food" },
+  // animals
+  { name:"dog",      char:"🐶", alt:["puppy","woof"],              cat:"animals" },
+  { name:"cat",      char:"🐱", alt:["kitty","meow"],              cat:"animals" },
+  { name:"fox",      char:"🦊", alt:[],                            cat:"animals" },
+  { name:"bear",     char:"🐻", alt:[],                            cat:"animals" },
+  { name:"panda",    char:"🐼", alt:[],                            cat:"animals" },
+  { name:"lion",     char:"🦁", alt:[],                            cat:"animals" },
+  { name:"tiger",    char:"🐯", alt:[],                            cat:"animals" },
+  { name:"pig",      char:"🐷", alt:["oink"],                      cat:"animals" },
+  { name:"monkey",   char:"🐵", alt:["ape"],                       cat:"animals" },
+  { name:"penguin",  char:"🐧", alt:[],                            cat:"animals" },
+  { name:"unicorn",  char:"🦄", alt:["mythical","magical"],        cat:"animals" },
+  { name:"bee",      char:"🐝", alt:["honey","buzz"],              cat:"animals" },
+  { name:"butterfly",char:"🦋", alt:[],                            cat:"animals" },
+  { name:"dragon",   char:"🐉", alt:["fire"],                      cat:"animals" },
+  { name:"shark",    char:"🦈", alt:[],                            cat:"animals" },
+  { name:"whale",    char:"🐳", alt:[],                            cat:"animals" },
+  { name:"octopus",  char:"🐙", alt:[],                            cat:"animals" },
+  { name:"parrot",   char:"🦜", alt:["bird"],                      cat:"animals" },
+  { name:"owl",      char:"🦉", alt:["wise"],                      cat:"animals" },
+  { name:"wolf",     char:"🐺", alt:[],                            cat:"animals" },
+  { name:"frog",     char:"🐸", alt:["kermit"],                    cat:"animals" },
+  { name:"rabbit",   char:"🐰", alt:["bunny","easter"],            cat:"animals" },
+  { name:"hamster",  char:"🐹", alt:["cute"],                      cat:"animals" },
+  // objects
+  { name:"book",       char:"📚", alt:["read","study","school"],   cat:"objects" },
+  { name:"pencil",     char:"✏️", alt:["write","edit"],            cat:"objects" },
+  { name:"computer",   char:"💻", alt:["laptop","pc","tech"],      cat:"objects" },
+  { name:"phone",      char:"📱", alt:["mobile","cell","smartphone"],cat:"objects" },
+  { name:"clock",      char:"⏰", alt:["alarm","time"],            cat:"objects" },
+  { name:"music",      char:"🎵", alt:["note","song","audio"],     cat:"objects" },
+  { name:"headphones", char:"🎧", alt:["headset","audio"],         cat:"objects" },
+  { name:"guitar",     char:"🎸", alt:["instrument","rock"],       cat:"objects" },
+  { name:"soccer",     char:"⚽", alt:["football","sport"],        cat:"objects" },
+  { name:"basketball", char:"🏀", alt:["sport"],                   cat:"objects" },
+  { name:"videogame",  char:"🎮", alt:["gaming","controller","game"],cat:"objects" },
+  { name:"art",        char:"🎨", alt:["paint","creative"],        cat:"objects" },
+  { name:"camera",     char:"📷", alt:["photo","picture"],         cat:"objects" },
+  { name:"rocket",     char:"🚀", alt:["launch","space","fast"],   cat:"objects" },
+  { name:"car",        char:"🚗", alt:["drive","vehicle"],         cat:"objects" },
+  { name:"trophy",     char:"🏆", alt:["win","champion","award"],  cat:"objects" },
+  { name:"gift",       char:"🎁", alt:["present","birthday"],      cat:"objects" },
+  { name:"money",      char:"💸", alt:["cash","dollar","rich"],    cat:"objects" },
+  { name:"gem",        char:"💎", alt:["diamond","jewel"],         cat:"objects" },
+  { name:"crown",      char:"👑", alt:["king","queen","royalty"],  cat:"objects" },
+  { name:"eyes",       char:"👀", alt:["look","see","watching"],   cat:"objects" },
+  { name:"brain",      char:"🧠", alt:["smart","think","mind"],    cat:"objects" },
+  { name:"lock",       char:"🔒", alt:["secure","private"],        cat:"objects" },
+  { name:"key",        char:"🔑", alt:["unlock","access"],         cat:"objects" },
+  { name:"check",      char:"✅", alt:["done","yes","correct","ok"],cat:"objects" },
+  { name:"x",          char:"❌", alt:["no","wrong","cancel"],     cat:"objects" },
+  { name:"warning",    char:"⚠️", alt:["caution","alert"],         cat:"objects" },
+  { name:"question",   char:"❓", alt:["huh","what","ask"],        cat:"objects" },
+  { name:"exclamation",char:"❗", alt:["important","alert"],       cat:"objects" },
+  // special
+  { name:"Static", char:null, alt:["logo","app","static"], cat:"special", isStatic:true },
+];
+
+// Flat map for :name: → char lookups in message formatter
+const EMOJI_MAP = {};
+for (const e of EMOJI_DATA) {
+  if (!e.isStatic) EMOJI_MAP[e.name] = e.char;
+  for (const a of (e.alt || [])) { if (!EMOJI_MAP[a]) EMOJI_MAP[a] = e.char; }
+}
+
+
+/* =====================================================================
+   FUN COMMANDS DATA
+   ===================================================================== */
+const EIGHT_BALL = [
+  "It is certain.","It is decidedly so.","Without a doubt.","Yes, definitely.",
+  "You may rely on it.","As I see it, yes.","Most likely.","Outlook good.",
+  "Yes.","Signs point to yes.","Reply hazy, try again.","Ask again later.",
+  "Better not tell you now.","Cannot predict now.","Concentrate and ask again.",
+  "Don't count on it.","My reply is no.","My sources say no.",
+  "Outlook not so good.","Very doubtful."
+];
+const TRUTHS = [
+  "What's the most embarrassing thing you've ever done?",
+  "What's your biggest fear?","Have you ever lied to get out of trouble?",
+  "What's the worst gift you've ever received?",
+  "What's the most childish thing you still do?",
+  "Have you ever cheated on a test?","What's your most bizarre habit?",
+  "What's the pettiest thing you've ever done?",
+  "Have you ever blamed someone else for something you did?",
+  "What's the most trouble you've ever gotten into?",
+  "What's the most embarrassing song on your playlist?",
+  "Have you ever faked being sick?",
+  "What's the weirdest dream you've ever had?",
+  "What's a secret you've never told anyone?",
+  "Have you ever stood someone up?"
+];
+const DARES = [
+  "Do your best impression of a teacher for 30 seconds.",
+  "Speak in rhymes for the next 5 minutes.",
+  "Do 20 jumping jacks right now.",
+  "Change your status to 'I smell like cheese' for 10 minutes.",
+  "Talk in an accent of the group's choosing for 3 minutes.",
+  "Do your best robot dance.",
+  "Give the person to your right a genuine compliment.",
+  "Try to lick your elbow.",
+  "Make up a short rap about this chat.",
+  "Act like a cat for 1 minute.",
+  "Describe a movie using only emojis.",
+  "Tell an original joke you made up on the spot.",
+  "Sing the next thing you want to say.",
+  "Send a sincere compliment to someone random in this chat.",
+  "Write a haiku about the weather right now."
+];
+const JOKES = [
+  ["Why don't scientists trust atoms?","Because they make up everything!"],
+  ["Why did the math book look sad?","It had too many problems."],
+  ["What do you call a fish with no eyes?","A fsh!"],
+  ["What do you call a fake noodle?","An impasta!"],
+  ["Why did the scarecrow win an award?","He was outstanding in his field!"],
+  ["What do you call cheese that isn't yours?","Nacho cheese!"],
+  ["Why did the bicycle fall over?","Because it was two-tired!"],
+  ["What do you call a sleeping dinosaur?","A dino-snore!"],
+  ["How do you organize a space party?","You planet!"],
+  ["Why did the golfer bring extra socks?","In case he got a hole in one!"],
+  ["What did the ocean say to the beach?","Nothing, it just waved."],
+  ["Why can't you give Elsa a balloon?","She'll let it go."],
+  ["What do you call a nervous javelin thrower?","Shakespeare!"],
+  ["Why do cows wear bells?","Because their horns don't work!"],
+  ["What's a computer's favourite snack?","Microchips!"]
+];
+const FORTUNES = [
+  "A beautiful, smart, and loving person will be coming into your life.",
+  "Accept something that you cannot change, and you will feel better.",
+  "Adventure can be real happiness.",
+  "All the effort you are making will ultimately pay off.",
+  "Be confident that things will begin to improve.",
+  "Every flower blooms at a different pace.",
+  "Good things come to those who hustle.",
+  "Help! I'm trapped in a fortune cookie factory.",
+  "Keep your feet on the ground and your thoughts at lofty heights.",
+  "Luck is coming your way — be ready for it.",
+  "Now is a good time to try something new.",
+  "Share your happiness with others today.",
+  "Something wonderful is about to happen.",
+  "The best is yet to come.",
+  "Change is happening. Embrace it."
+];
+const ADVICE = [
+  "Drink more water. Seriously, you're probably dehydrated.",
+  "Take a deep breath. Whatever it is, you can handle it.",
+  "Go outside for at least 5 minutes today.",
+  "Tell someone you appreciate them.",
+  "Sleep more. Most problems look smaller after rest.",
+  "Start with the small task first — momentum is everything.",
+  "It's okay to say no to things that drain you.",
+  "Stretch. Your future self will thank you.",
+  "One step at a time is still moving forward.",
+  "Don't compare your chapter 1 to someone else's chapter 20.",
+  "Write down three things you're grateful for.",
+  "Reach out to an old friend today.",
+  "Mistakes are just data — learn and keep going.",
+  "You don't need to respond to everything immediately.",
+  "Celebrate small wins. They add up."
+];
+
+const BANNER_COLORS = [
+  "#5865F2","#EB459E","#ED4245","#FEE75C","#57F287",
+  "#00B0F4","#FF7373","#FF9B6B","#9B59B6","#2ECC71",
+  "#1ABC9C","#E67E22","#3498DB","#16213E","#2C3333"
+];
+
+function rnd(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
+
+
+/* =====================================================================
+   STATE
    ===================================================================== */
 const state = {
-  user: null,            // current user profile
-  friends: [],
-  incoming: [],
-  outgoing: [],
-  chats: [],
-  activeChatId: null,
-  activeChat: null,
-  messages: [],
+  user: null,
+  friends: [], incoming: [], outgoing: [], chats: [], messages: [],
+  activeChatId: null, activeChat: null,
   userCache: {},
   unsubscribers: {
-    friendships: null,
-    incoming: null,
-    outgoing: null,
-    chats: null,
-    messages: null,
-    ownProfile: null    // live own-profile updates
+    friendships: null, incoming: null, outgoing: null,
+    chats: null, messages: null, ownProfile: null
   },
   filters: { sidebar: "" },
   groupSelections: new Set(),
   addMemberSelections: new Set(),
   soundEnabled: localStorage.getItem("sc_sound") !== "false",
-  chatInitialized: new Set(),   // chatIds whose first snapshot has loaded
-  incomingInitialized: false    // skips sound on first incoming-requests snapshot
+  chatInitialized: new Set(),
+  incomingInitialized: false,
+  // new
+  theme:       localStorage.getItem("sc_theme")  || "dark",
+  status:      localStorage.getItem("sc_status") || "online",
+  bannerColor: null,
+  isPrivate:   false,
+  emojiAcIndex: -1,
+  emojiAcTriggerPos: -1,
+  activeCat: "all"
 };
+
+// Apply theme before anything renders
+(function initTheme() {
+  document.body.dataset.theme = state.theme;
+})();
+
+function applyTheme(t) {
+  state.theme = t;
+  document.body.dataset.theme = t;
+  localStorage.setItem("sc_theme", t);
+}
 
 
 /* =====================================================================
-   3) DOM HELPERS
+   DOM HELPERS
    ===================================================================== */
-const $ = (sel) => document.querySelector(sel);
-const $$ = (sel) => document.querySelectorAll(sel);
+const $ = s => document.querySelector(s);
+const $$ = s => document.querySelectorAll(s);
 
 function showToast(msg, ms = 2400) {
   const t = $("#toast");
@@ -125,252 +391,155 @@ function showToast(msg, ms = 2400) {
 
 function escapeHtml(text) {
   return String(text)
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
+    .replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")
+    .replace(/"/g,"&quot;").replace(/'/g,"&#39;");
 }
 
-function avatarMarkup(displayName, photoURL, sizeClass = "side-row-avatar", fallbackClass = "side-row-fallback") {
-  if (photoURL) {
-    return `<img class="${sizeClass}" src="${escapeHtml(photoURL)}" alt="" />`;
-  }
-  const initial = (displayName || "?").trim().charAt(0).toUpperCase() || "?";
+function avatarMarkup(displayName, photoURL, sizeClass="side-row-avatar", fallbackClass="side-row-fallback") {
+  if (photoURL) return `<img class="${sizeClass}" src="${escapeHtml(photoURL)}" alt="" />`;
+  const initial = (displayName||"?").trim().charAt(0).toUpperCase()||"?";
   return `<div class="${fallbackClass}">${escapeHtml(initial)}</div>`;
 }
 
 function groupInitials(name) {
   if (!name) return "G";
-  const words = name.trim().split(/\s+/).slice(0, 2);
-  return words.map(w => w[0]).join("").toUpperCase() || "G";
+  return name.trim().split(/\s+/).slice(0,2).map(w=>w[0]).join("").toUpperCase()||"G";
 }
 
 function formatTime(ts) {
   if (!ts) return "";
   const d = ts.toDate ? ts.toDate() : new Date(ts);
   const today = new Date();
-  const isToday = d.toDateString() === today.toDateString();
-  const yesterday = new Date(today.getTime() - 86400000);
-  const isYesterday = d.toDateString() === yesterday.toDateString();
-  const time = d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  const isToday = d.toDateString()===today.toDateString();
+  const yest = new Date(today-86400000);
+  const isYest = d.toDateString()===yest.toDateString();
+  const time = d.toLocaleTimeString([],{hour:"numeric",minute:"2-digit"});
   if (isToday) return `Today at ${time}`;
-  if (isYesterday) return `Yesterday at ${time}`;
+  if (isYest)  return `Yesterday at ${time}`;
   return `${d.toLocaleDateString()} ${time}`;
 }
 
 function shortTime(ts) {
   if (!ts) return "";
   const d = ts.toDate ? ts.toDate() : new Date(ts);
-  return d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  return d.toLocaleTimeString([],{hour:"numeric",minute:"2-digit"});
 }
 
 function genDiscriminator() {
-  return String(Math.floor(Math.random() * 10000)).padStart(4, "0");
+  return String(Math.floor(Math.random()*10000)).padStart(4,"0");
+}
+
+function genJoinCode() {
+  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  let c = "";
+  for (let i=0;i<8;i++) c += chars[Math.floor(Math.random()*chars.length)];
+  return c;
 }
 
 
 /* =====================================================================
-   4) PROFANITY FILTER (placeholder — customize as needed)
-   ---------------------------------------------------------------------
-   Add lowercase words to PROFANITY_LIST. They'll be replaced with
-   asterisks before sending. Real moderation should also be enforced
-   server-side; this is intentionally simple as a starting point.
+   MESSAGE FORMATTER  (markdown-lite + emoji + URLs)
    ===================================================================== */
-const PROFANITY_LIST = [
-  // "examplebadword",
-];
+const IMAGE_URL_RE = /\.(jpg|jpeg|png|gif|webp|svg)(\?[^\s]*)?$/i;
+const GIPHY_RE     = /giphy\.com|tenor\.com/i;
 
-function filterProfanity(text) {
-  if (!PROFANITY_LIST.length) return text;
-  let out = text;
-  for (const word of PROFANITY_LIST) {
-    const re = new RegExp(`\\b${word.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "gi");
-    out = out.replace(re, "*".repeat(word.length));
-  }
-  return out;
-}
-
-
-/* =====================================================================
-   5) EMOJI MAP + special :Static: image
-   ===================================================================== */
-const STATIC_EMOJI_URL = "https://cdn.jsdelivr.net/gh/StaticQuasar931/Images@main/icon.png";
-
-const EMOJI_MAP = {
-  // faces
-  smile: "😄", grin: "😀", joy: "😂", rofl: "🤣", laughing: "😆",
-  sweat_smile: "😅", wink: "😉", blush: "😊", kiss: "😘", heart_eyes: "😍",
-  yum: "😋", smirk: "😏", thinking: "🤔", neutral_face: "😐",
-  expressionless: "😑", no_mouth: "😶", roll_eyes: "🙄", pensive: "😔",
-  worried: "😟", confused: "😕", flushed: "😳", scream: "😱", angry: "😠",
-  rage: "😡", sob: "😭", cry: "😢", sleeping: "😴", yawn: "🥱",
-  sunglasses: "😎", nerd: "🤓", cool: "🆒", pleading: "🥺", smiley: "😃",
-  // gestures
-  thumbsup: "👍", "+1": "👍", thumbsdown: "👎", "-1": "👎",
-  ok_hand: "👌", clap: "👏", wave: "👋", muscle: "💪", point_right: "👉",
-  point_left: "👈", point_up: "👆", point_down: "👇", pray: "🙏",
-  raised_hands: "🙌", handshake: "🤝", fist: "✊", crossed_fingers: "🤞",
-  // hearts / symbols
-  heart: "❤️", broken_heart: "💔", sparkling_heart: "💖", two_hearts: "💕",
-  fire: "🔥", "100": "💯", star: "⭐", sparkles: "✨", boom: "💥",
-  zzz: "💤", eyes: "👀", brain: "🧠", warning: "⚠️", check: "✅",
-  white_check_mark: "✅", x: "❌", question: "❓", exclamation: "❗",
-  tada: "🎉", confetti_ball: "🎊", gift: "🎁", trophy: "🏆", medal: "🏅",
-  // weather
-  sun: "☀️", moon: "🌙", cloud: "☁️", rainbow: "🌈", snowflake: "❄️",
-  zap: "⚡", umbrella: "☂️", fog: "🌫️",
-  // food
-  pizza: "🍕", burger: "🍔", fries: "🍟", taco: "🌮", sushi: "🍣",
-  ramen: "🍜", coffee: "☕", tea: "🍵", cake: "🎂", cookie: "🍪",
-  apple: "🍎", banana: "🍌", strawberry: "🍓", watermelon: "🍉", grapes: "🍇",
-  popcorn: "🍿", donut: "🍩",
-  // animals
-  dog: "🐶", cat: "🐱", fox: "🦊", bear: "🐻", panda: "🐼",
-  lion: "🦁", tiger: "🐯", pig: "🐷", monkey: "🐵", penguin: "🐧",
-  unicorn: "🦄", bee: "🐝", bug: "🐛", butterfly: "🦋",
-  // objects
-  book: "📚", pencil: "✏️", computer: "💻", phone: "📱", clock: "⏰",
-  music: "🎵", headphones: "🎧", soccer: "⚽", basketball: "🏀",
-  football: "🏈", baseball: "⚾", videogame: "🎮", art: "🎨",
-  camera: "📷", rocket: "🚀", airplane: "✈️", car: "🚗", bike: "🚲",
-  earth: "🌍", school: "🏫", house: "🏠", office: "🏢", park: "🏞️",
-};
-
-function emojiPickerItems() {
-  const items = [{
-    name: "Static",
-    html: `<img src="${STATIC_EMOJI_URL}" alt=":Static:" />`,
-    insert: ":Static:",
-    keywords: "static logo special"
-  }];
-  for (const [name, char] of Object.entries(EMOJI_MAP)) {
-    items.push({ name, html: char, insert: char, keywords: name });
-  }
-  return items;
-}
-
-
-/* =====================================================================
-   6) MESSAGE FORMATTER (markdown-lite + emoji)
-   ---------------------------------------------------------------------
-   Order matters — passes build on each other.
-   ===================================================================== */
 function formatMessage(raw) {
   if (!raw) return "";
   let text = escapeHtml(raw);
 
-  // Code blocks ``` ... ``` (multiline)
+  // Code blocks
   const codeBlocks = [];
-  text = text.replace(/```([\s\S]*?)```/g, (_m, inner) => {
-    codeBlocks.push(inner.replace(/^\n/, ""));
-    return ` CB${codeBlocks.length - 1} `;
+  text = text.replace(/```([\s\S]*?)```/g, (_,inner) => {
+    codeBlocks.push(inner.replace(/^\n/,""));
+    return ` CB${codeBlocks.length-1} `;
   });
-
-  // Inline code ` ... `
   const inlineCodes = [];
-  text = text.replace(/`([^`\n]+)`/g, (_m, inner) => {
+  text = text.replace(/`([^`\n]+)`/g, (_,inner) => {
     inlineCodes.push(inner);
-    return ` IC${inlineCodes.length - 1} `;
+    return ` IC${inlineCodes.length-1} `;
   });
 
-  // Bold ** ... **
-  text = text.replace(/\*\*([^*\n][^*\n]*?)\*\*/g, "<strong>$1</strong>");
-  // Underline __ ... __
-  text = text.replace(/__([^_\n][^_\n]*?)__/g, "<u>$1</u>");
-  // Italic * ... * (after bold so we don't eat **)
-  text = text.replace(/(^|[^*])\*([^*\n]+?)\*(?!\*)/g, "$1<em>$2</em>");
+  // Markdown
+  text = text.replace(/\*\*([^*\n][^*\n]*?)\*\*/g,"<strong>$1</strong>");
+  text = text.replace(/__([^_\n][^_\n]*?)__/g,"<u>$1</u>");
+  text = text.replace(/(^|[^*])\*([^*\n]+?)\*(?!\*)/g,"$1<em>$2</em>");
 
-  // Emoji shortcuts :name:
-  text = text.replace(/:([A-Za-z0-9_+\-]+):/g, (m, name) => {
-    if (name === "Static") {
+  // Emoji :name:
+  text = text.replace(/:([A-Za-z0-9_+\-]+):/g,(m,name)=>{
+    if (name==="Static")
       return `<img class="msg-emoji" src="${STATIC_EMOJI_URL}" alt=":Static:" title=":Static:" />`;
-    }
     if (EMOJI_MAP[name]) return EMOJI_MAP[name];
     return m;
   });
 
-  // Restore code placeholders
-  text = text.replace(/ IC(\d+) /g, (_m, i) => `<code class="inline-code">${inlineCodes[+i]}</code>`);
-  text = text.replace(/ CB(\d+) /g, (_m, i) => `<pre class="code-block"><code>${codeBlocks[+i]}</code></pre>`);
+  // Restore code
+  text = text.replace(/ IC(\d+) /g,(_,i)=>`<code class="inline-code">${inlineCodes[+i]}</code>`);
+  text = text.replace(/ CB(\d+) /g,(_,i)=>`<pre class="code-block"><code>${codeBlocks[+i]}</code></pre>`);
 
-  // Newlines -> <br>
-  text = text.replace(/\n/g, "<br>");
+  // URLs → embeds or links (after other formatting)
+  text = text.replace(/https?:\/\/[^\s<>"]+/g, url => {
+    if (IMAGE_URL_RE.test(url) || GIPHY_RE.test(url)) {
+      return `<a href="${url}" target="_blank" rel="noopener"><img class="msg-embed-img" src="${url}" alt="image" onerror="this.style.display='none'" /></a>`;
+    }
+    return `<a class="msg-link" href="${url}" target="_blank" rel="noopener noreferrer">${url}</a>`;
+  });
 
+  text = text.replace(/\n/g,"<br>");
   return text;
 }
 
 
 /* =====================================================================
-   7) NOTIFICATION SOUNDS (Web Audio API — no file needed)
+   NOTIFICATION SOUNDS
    ===================================================================== */
 let _audioCtx = null;
-
 function getAudioCtx() {
-  if (!_audioCtx) {
-    try { _audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (_) {}
-  }
+  if (!_audioCtx) try { _audioCtx = new (window.AudioContext||window.webkitAudioContext)(); } catch(_){}
   return _audioCtx;
 }
-
-function playSound(type = "message") {
+function playSound(type="message") {
   if (!state.soundEnabled) return;
   try {
-    const ctx = getAudioCtx();
-    if (!ctx) return;
-
-    const osc = ctx.createOscillator();
-    const gain = ctx.createGain();
-    osc.connect(gain);
-    gain.connect(ctx.destination);
-    osc.type = "sine";
-
-    if (type === "message") {
-      // Quick upward tone
-      osc.frequency.setValueAtTime(700, ctx.currentTime);
-      osc.frequency.exponentialRampToValueAtTime(980, ctx.currentTime + 0.09);
-      gain.gain.setValueAtTime(0.18, ctx.currentTime);
-      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.28);
-      osc.start(ctx.currentTime);
-      osc.stop(ctx.currentTime + 0.28);
-    } else if (type === "ping") {
-      // Two-note ping — friend request
-      osc.frequency.setValueAtTime(1047, ctx.currentTime);
-      osc.frequency.setValueAtTime(1319, ctx.currentTime + 0.12);
-      gain.gain.setValueAtTime(0.14, ctx.currentTime);
-      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.35);
-      osc.start(ctx.currentTime);
-      osc.stop(ctx.currentTime + 0.35);
+    const ctx = getAudioCtx(); if (!ctx) return;
+    const osc=ctx.createOscillator(), gain=ctx.createGain();
+    osc.connect(gain); gain.connect(ctx.destination); osc.type="sine";
+    if (type==="message") {
+      osc.frequency.setValueAtTime(700,ctx.currentTime);
+      osc.frequency.exponentialRampToValueAtTime(980,ctx.currentTime+0.09);
+      gain.gain.setValueAtTime(0.18,ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001,ctx.currentTime+0.28);
+      osc.start(ctx.currentTime); osc.stop(ctx.currentTime+0.28);
+    } else if (type==="ping") {
+      osc.frequency.setValueAtTime(1047,ctx.currentTime);
+      osc.frequency.setValueAtTime(1319,ctx.currentTime+0.12);
+      gain.gain.setValueAtTime(0.14,ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001,ctx.currentTime+0.35);
+      osc.start(ctx.currentTime); osc.stop(ctx.currentTime+0.35);
     }
-  } catch (_) { /* audio not available */ }
+  } catch(_){}
 }
 
 
 /* =====================================================================
-   8) AUTH
+   AUTH
    ===================================================================== */
-$("#google-signin-btn").addEventListener("click", async () => {
-  try {
-    await signInWithPopup(auth, provider);
-  } catch (e) {
-    console.error(e);
-    showToast("Sign-in failed: " + (e.message || e.code));
-  }
+$("#google-signin-btn").addEventListener("click", async ()=>{
+  try { await signInWithPopup(auth,provider); }
+  catch(e){ showToast("Sign-in failed: "+(e.message||e.code)); }
 });
 
-$("#signout-btn").addEventListener("click", async () => {
+$("#signout-btn").addEventListener("click", async ()=>{
   cleanupAllSubscriptions();
   await signOut(auth);
 });
 
-onAuthStateChanged(auth, async (firebaseUser) => {
+onAuthStateChanged(auth, async firebaseUser => {
   if (firebaseUser) {
-    // Fetch existing Firestore profile
     let existing = null;
     try {
-      const snap = await getDoc(doc(db, "users", firebaseUser.uid));
+      const snap = await getDoc(doc(db,"users",firebaseUser.uid));
       if (snap.exists()) existing = snap.data();
-    } catch (e) { console.error("profile fetch:", e); }
+    } catch(e){ console.error("profile fetch:",e); }
 
     state.user = {
       uid: firebaseUser.uid,
@@ -380,21 +549,19 @@ onAuthStateChanged(auth, async (firebaseUser) => {
       bio: existing?.bio || "",
       email: firebaseUser.email || "",
       photoURL: (existing && existing.photoURL !== undefined)
-        ? existing.photoURL
-        : (firebaseUser.photoURL || null),
-      googlePhotoURL: firebaseUser.photoURL || null
+        ? existing.photoURL : (firebaseUser.photoURL||null),
+      googlePhotoURL: firebaseUser.photoURL||null,
+      createdAt: existing?.createdAt || null
     };
-
     state.userCache[state.user.uid] = { ...state.user };
 
     if (!existing?.username) {
-      // First sign-in — show profile setup modal
       showProfileSetupModal();
     } else {
-      // Returning user
       await upsertUserProfile();
       showAppUI();
       bootSubscriptions();
+      bootBlocklistCheck();
     }
   } else {
     state.user = null;
@@ -405,48 +572,73 @@ onAuthStateChanged(auth, async (firebaseUser) => {
 
 async function upsertUserProfile() {
   const u = state.user;
-  // merge:true so we don't clobber email set on first creation
-  await setDoc(doc(db, "users", u.uid), {
+  await setDoc(doc(db,"users",u.uid), {
     uid: u.uid,
     displayName: u.username,
     displayNameLower: u.username.toLowerCase(),
     username: u.username,
     discriminator: u.discriminator,
-    bio: u.bio || "",
-    photoURL: u.photoURL || null
-  }, { merge: true });
+    bio: u.bio||"",
+    photoURL: u.photoURL||null
+  }, {merge:true});
 }
 
 
 /* =====================================================================
-   8.5) PROFILE SETUP MODAL — first sign-in only
+   NAME BLOCKLIST BOOT CHECK
+   ===================================================================== */
+async function bootBlocklistCheck() {
+  const u = state.user;
+  if (!u?.username) return;
+  if (!isNameBlocked(u.username)) return;
+  const newName = generateSafeName();
+  const newDisc = genDiscriminator();
+  showToast(`⚠️ Your username was flagged and replaced with "${newName}".`, 5000);
+  try {
+    await setDoc(doc(db,"flaggedUsers",u.uid), {
+      uid: u.uid,
+      originalName: u.username,
+      discriminator: u.discriminator,
+      reason: "blocklist",
+      flaggedAt: serverTimestamp()
+    }, {merge:true});
+    await updateDoc(doc(db,"users",u.uid), {
+      displayName: newName,
+      displayNameLower: newName.toLowerCase(),
+      username: newName,
+      discriminator: newDisc
+    });
+    state.user.username = newName;
+    state.user.displayName = newName;
+    state.user.discriminator = newDisc;
+    state.userCache[u.uid] = { ...state.user };
+    updateUserPanel();
+  } catch(err){ console.error("bootBlocklistCheck:",err); }
+}
+
+
+/* =====================================================================
+   PROFILE SETUP MODAL
    ===================================================================== */
 function showProfileSetupModal() {
   const u = state.user;
-  const defaultPhoto = u.googlePhotoURL || null;
-  // Pre-fill photo field with Google photo URL
-  $("#setup-photo-input").value = defaultPhoto || "";
-  updateAvatarPreview("setup", "", defaultPhoto);
+  $("#setup-photo-input").value = u.googlePhotoURL||"";
+  updateAvatarPreview("setup","",u.googlePhotoURL||null);
   openModal("profile-setup-modal");
 }
 
-// Live avatar preview
-$("#setup-photo-input").addEventListener("input", () => {
-  updateAvatarPreview(
-    "setup",
+$("#setup-photo-input").addEventListener("input",()=>{
+  updateAvatarPreview("setup",
     $("#setup-username-input").value.trim(),
-    $("#setup-photo-input").value.trim() || state.user?.googlePhotoURL || null
-  );
+    $("#setup-photo-input").value.trim()||state.user?.googlePhotoURL||null);
 });
-$("#setup-username-input").addEventListener("input", () => {
-  updateAvatarPreview(
-    "setup",
+$("#setup-username-input").addEventListener("input",()=>{
+  updateAvatarPreview("setup",
     $("#setup-username-input").value.trim(),
-    $("#setup-photo-input").value.trim() || state.user?.googlePhotoURL || null
-  );
+    $("#setup-photo-input").value.trim()||state.user?.googlePhotoURL||null);
 });
 
-function updateAvatarPreview(prefix, name, photoURL) {
+function updateAvatarPreview(prefix,name,photoURL) {
   const preview = $(`#${prefix}-avatar-preview`);
   const initial = $(`#${prefix}-avatar-initial`);
   if (!preview) return;
@@ -455,39 +647,36 @@ function updateAvatarPreview(prefix, name, photoURL) {
   if (photoURL) {
     const img = document.createElement("img");
     img.src = photoURL;
-    img.onerror = () => { img.remove(); if (initial) initial.style.display = ""; };
-    if (initial) initial.style.display = "none";
+    img.onerror = ()=>{ img.remove(); if(initial) initial.style.display=""; };
+    if (initial) initial.style.display="none";
     preview.appendChild(img);
   } else {
     if (initial) {
-      initial.style.display = "";
+      initial.style.display="";
       initial.textContent = name ? name.charAt(0).toUpperCase() : "?";
     }
   }
 }
 
-$("#setup-confirm-btn").addEventListener("click", async () => {
+$("#setup-confirm-btn").addEventListener("click", async ()=>{
   const username = $("#setup-username-input").value.trim();
-  const bio = $("#setup-bio-input").value.trim();
+  const bio      = $("#setup-bio-input").value.trim();
   const photoInput = $("#setup-photo-input").value.trim();
-  const errEl = $("#setup-error");
+  const errEl    = $("#setup-error");
   errEl.textContent = "";
 
-  if (!username || username.length < 3) {
-    errEl.textContent = "Username must be at least 3 characters.";
-    return;
-  }
-  if (username.length > 32) {
-    errEl.textContent = "Username must be 32 characters or fewer.";
-    return;
-  }
-  if (!/^[a-zA-Z0-9_]+$/.test(username)) {
-    errEl.textContent = "Username can only contain letters, numbers, and underscores.";
+  if (!username||username.length<3)    { errEl.textContent="Username must be at least 3 characters."; return; }
+  if (username.length>32)              { errEl.textContent="Username must be 32 characters or fewer."; return; }
+  if (!/^[a-zA-Z0-9_]+$/.test(username)){ errEl.textContent="Username: letters, numbers, underscores only."; return; }
+
+  if (isNameBlocked(username)) {
+    const safe = generateSafeName();
+    errEl.textContent = `That username isn't allowed. Try "${safe}" instead.`;
     return;
   }
 
   const discriminator = genDiscriminator();
-  const photoURL = photoInput || state.user.googlePhotoURL || null;
+  const photoURL = photoInput||state.user.googlePhotoURL||null;
 
   state.user.username = username;
   state.user.discriminator = discriminator;
@@ -496,37 +685,31 @@ $("#setup-confirm-btn").addEventListener("click", async () => {
   state.user.photoURL = photoURL;
 
   const btn = $("#setup-confirm-btn");
-  btn.disabled = true;
-  btn.textContent = "Saving…";
+  btn.disabled=true; btn.textContent="Saving…";
 
   try {
-    await setDoc(doc(db, "users", state.user.uid), {
+    await setDoc(doc(db,"users",state.user.uid),{
       uid: state.user.uid,
-      displayName: username,
-      displayNameLower: username.toLowerCase(),
-      username,
-      discriminator,
-      bio: bio || "",
-      email: state.user.email || "",
-      photoURL: photoURL || null,
+      displayName: username, displayNameLower: username.toLowerCase(),
+      username, discriminator,
+      bio: bio||"", email: state.user.email||"",
+      photoURL: photoURL||null,
       createdAt: serverTimestamp()
-    }, { merge: true });
-
+    },{merge:true});
     state.userCache[state.user.uid] = { ...state.user };
     closeModal("profile-setup-modal");
     showAppUI();
     bootSubscriptions();
-  } catch (err) {
-    errEl.textContent = "Failed to save: " + err.message;
+  } catch(err){
+    errEl.textContent="Failed to save: "+err.message;
   } finally {
-    btn.disabled = false;
-    btn.textContent = "Let's Go →";
+    btn.disabled=false; btn.textContent="Let's Go →";
   }
 });
 
 
 /* =====================================================================
-   9) UI ROUTING
+   UI ROUTING
    ===================================================================== */
 function showAppUI() {
   $("#login-screen").classList.add("hidden");
@@ -534,7 +717,6 @@ function showAppUI() {
   updateUserPanel();
   showFriendsView();
 }
-
 function showLoginUI() {
   $("#login-screen").classList.remove("hidden");
   $("#app").classList.add("hidden");
@@ -543,32 +725,26 @@ function showLoginUI() {
 function updateUserPanel() {
   const u = state.user;
   if (!u) return;
-  $("#user-panel-name").textContent = u.username || u.displayName || "User";
-  $("#user-panel-tag").textContent = u.discriminator ? `#${u.discriminator}` : "";
+  $("#user-panel-name").textContent = u.username||u.displayName||"User";
+  $("#user-panel-tag").textContent  = u.discriminator ? `#${u.discriminator}` : "";
   $("#user-panel-avatar-wrap").innerHTML = avatarMarkup(
-    u.username || u.displayName,
-    u.photoURL,
-    "user-panel-avatar",
-    "user-panel-avatar-fallback"
+    u.username||u.displayName, u.photoURL,
+    "user-panel-avatar","user-panel-avatar-fallback"
   );
+  const dot = $("#user-status-dot");
+  if (dot) dot.dataset.status = state.status||"online";
 }
 
 function showFriendsView() {
-  state.activeChatId = null;
-  state.activeChat = null;
+  state.activeChatId = null; state.activeChat = null;
   $("#rail-home").classList.add("active");
-  $$(".rail-group-avatar").forEach(el => el.classList.remove("active"));
-  $$(".side-row").forEach(el => el.classList.remove("active"));
+  $$(".rail-group-avatar").forEach(el=>el.classList.remove("active"));
+  $$(".side-row").forEach(el=>el.classList.remove("active"));
   $("#open-friends-btn").classList.add("active");
-
   $("#friends-view").classList.remove("hidden");
   $("#chat-view").classList.add("hidden");
   $("#empty-view").classList.add("hidden");
-
-  if (state.unsubscribers.messages) {
-    state.unsubscribers.messages();
-    state.unsubscribers.messages = null;
-  }
+  if (state.unsubscribers.messages) { state.unsubscribers.messages(); state.unsubscribers.messages=null; }
 }
 
 function showChatView() {
@@ -584,197 +760,189 @@ $("#open-friends-btn").addEventListener("click", showFriendsView);
 
 
 /* =====================================================================
-   10) SUBSCRIPTIONS — friends, requests, chats, own profile
+   STATUS PICKER  (click status dot to change)
+   ===================================================================== */
+const STATUS_LABELS = { online:"Online", idle:"Idle", dnd:"Do Not Disturb", invisible:"Invisible" };
+
+document.addEventListener("click", e=>{
+  const dot = e.target.closest("#user-status-dot");
+  if (dot) { e.stopPropagation(); toggleStatusPicker(dot); }
+});
+
+function toggleStatusPicker(anchor) {
+  let picker = $("#status-picker");
+  if (picker) { picker.remove(); return; }
+  picker = document.createElement("div");
+  picker.id = "status-picker";
+  picker.className = "status-picker";
+  picker.innerHTML = Object.entries(STATUS_LABELS).map(([s,label])=>`
+    <div class="status-picker-option${s===state.status?" active":""}" data-status="${s}">
+      <span class="status-dot-sm" data-status="${s}"></span>${label}
+    </div>`).join("");
+
+  const rect = anchor.getBoundingClientRect();
+  picker.style.left = (rect.right+8)+"px";
+  picker.style.top  = (rect.top-4)+"px";
+  document.body.appendChild(picker);
+
+  picker.addEventListener("click", async e2=>{
+    const opt = e2.target.closest("[data-status]");
+    if (!opt) return;
+    const ns = opt.dataset.status;
+    state.status = ns;
+    localStorage.setItem("sc_status",ns);
+    updateUserPanel();
+    picker.remove();
+    try { await updateDoc(doc(db,"users",state.user.uid),{status:ns}); } catch(_){}
+  });
+  setTimeout(()=>{
+    document.addEventListener("click",()=>{ document.getElementById("status-picker")?.remove(); },{once:true});
+  },0);
+}
+
+
+/* =====================================================================
+   SUBSCRIPTIONS
    ===================================================================== */
 function cleanupAllSubscriptions() {
   for (const k of Object.keys(state.unsubscribers)) {
-    if (state.unsubscribers[k]) {
-      try { state.unsubscribers[k](); } catch (_) {}
-      state.unsubscribers[k] = null;
-    }
+    if (state.unsubscribers[k]) { try{state.unsubscribers[k]();}catch(_){} state.unsubscribers[k]=null; }
   }
-  state.friends = [];
-  state.incoming = [];
-  state.outgoing = [];
-  state.chats = [];
-  state.messages = [];
-  state.activeChatId = null;
-  state.activeChat = null;
-  state.chatInitialized.clear();
-  state.incomingInitialized = false;
+  state.friends=[]; state.incoming=[]; state.outgoing=[];
+  state.chats=[]; state.messages=[];
+  state.activeChatId=null; state.activeChat=null;
+  state.chatInitialized.clear(); state.incomingInitialized=false;
 }
 
 function bootSubscriptions() {
   const uid = state.user.uid;
 
-  // Own profile — live updates so settings changes reflect instantly
-  state.unsubscribers.ownProfile = onSnapshot(
-    doc(db, "users", uid),
-    (snap) => {
-      if (!snap.exists()) return;
-      const data = snap.data();
-      if (data.username) {
-        state.user.username = data.username;
-        state.user.displayName = data.username;
-      }
-      if (data.discriminator) state.user.discriminator = data.discriminator;
-      state.user.bio = data.bio || "";
-      if (data.photoURL !== undefined) state.user.photoURL = data.photoURL;
-      state.userCache[uid] = { ...state.user, ...data };
-      updateUserPanel();
-    },
-    (err) => console.error("ownProfile listener:", err)
-  );
+  state.unsubscribers.ownProfile = onSnapshot(doc(db,"users",uid), snap=>{
+    if (!snap.exists()) return;
+    const data = snap.data();
+    if (data.username) { state.user.username=data.username; state.user.displayName=data.username; }
+    if (data.discriminator) state.user.discriminator=data.discriminator;
+    state.user.bio = data.bio||"";
+    if (data.photoURL!==undefined) state.user.photoURL=data.photoURL;
+    if (data.status) { state.status=data.status; localStorage.setItem("sc_status",data.status); }
+    if (data.bannerColor!==undefined) state.bannerColor=data.bannerColor||null;
+    if (data.isPrivate!==undefined) state.isPrivate=!!data.isPrivate;
+    if (data.createdAt) state.user.createdAt=data.createdAt;
+    state.userCache[uid] = { ...state.user, ...data };
+    updateUserPanel();
+  }, err=>console.error("ownProfile:",err));
 
-  // Friendships
   state.unsubscribers.friendships = onSnapshot(
-    query(collection(db, "friendships"), where("users", "array-contains", uid)),
-    async (snap) => {
-      const list = [];
+    query(collection(db,"friendships"),where("users","array-contains",uid)),
+    async snap=>{
+      const list=[];
       for (const d of snap.docs) {
-        const data = d.data();
-        const otherUid = data.users.find(u => u !== uid);
+        const data=d.data();
+        const otherUid=data.users.find(u=>u!==uid);
         if (!otherUid) continue;
-        const profile = await fetchUserProfile(otherUid);
-        list.push({
-          friendshipId: d.id,
-          uid: otherUid,
-          displayName: profile?.username || profile?.displayName || "Unknown",
-          discriminator: profile?.discriminator || null,
-          photoURL: profile?.photoURL || null
-        });
+        const profile=await fetchUserProfile(otherUid);
+        list.push({ friendshipId:d.id, uid:otherUid,
+          displayName:profile?.username||profile?.displayName||"Unknown",
+          discriminator:profile?.discriminator||null, photoURL:profile?.photoURL||null });
       }
-      list.sort((a, b) => a.displayName.localeCompare(b.displayName));
-      state.friends = list;
-      renderFriendsList();
-      renderModalFriendList();
-    },
-    (err) => console.error("friendships listener:", err)
-  );
+      list.sort((a,b)=>a.displayName.localeCompare(b.displayName));
+      state.friends=list;
+      renderFriendsList(); renderModalFriendList();
+    }, err=>console.error("friendships:",err));
 
-  // Incoming friend requests
   state.unsubscribers.incoming = onSnapshot(
-    query(collection(db, "friendRequests"), where("toUid", "==", uid)),
-    (snap) => {
-      const prevLen = state.incoming.length;
-      state.incoming = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-      if (state.incomingInitialized && state.incoming.length > prevLen) {
-        playSound("ping");
-      }
-      state.incomingInitialized = true;
+    query(collection(db,"friendRequests"),where("toUid","==",uid)),
+    snap=>{
+      const prevLen=state.incoming.length;
+      state.incoming=snap.docs.map(d=>({id:d.id,...d.data()}));
+      if (state.incomingInitialized && state.incoming.length>prevLen) playSound("ping");
+      state.incomingInitialized=true;
       renderPendingLists();
-    },
-    (err) => console.error("incoming listener:", err)
-  );
+    }, err=>console.error("incoming:",err));
 
-  // Outgoing friend requests
   state.unsubscribers.outgoing = onSnapshot(
-    query(collection(db, "friendRequests"), where("fromUid", "==", uid)),
-    (snap) => {
-      state.outgoing = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-      renderPendingLists();
-    },
-    (err) => console.error("outgoing listener:", err)
-  );
+    query(collection(db,"friendRequests"),where("fromUid","==",uid)),
+    snap=>{ state.outgoing=snap.docs.map(d=>({id:d.id,...d.data()})); renderPendingLists(); },
+    err=>console.error("outgoing:",err));
 
-  // Chats (DMs and groups)
   state.unsubscribers.chats = onSnapshot(
-    query(collection(db, "chats"), where("members", "array-contains", uid)),
-    async (snap) => {
-      const arr = [];
-      for (const d of snap.docs) arr.push({ id: d.id, ...d.data() });
+    query(collection(db,"chats"),where("members","array-contains",uid)),
+    async snap=>{
+      const arr=[];
+      for (const d of snap.docs) arr.push({id:d.id,...d.data()});
       for (const c of arr) {
-        if (c.type === "dm") {
-          const otherUid = c.members.find(m => m !== uid);
-          if (otherUid && !state.userCache[otherUid]) await fetchUserProfile(otherUid);
+        if (c.type==="dm") {
+          const o=c.members.find(m=>m!==uid);
+          if (o&&!state.userCache[o]) await fetchUserProfile(o);
         }
       }
-      arr.sort((a, b) => {
-        const at = a.lastMessageAt?.toMillis ? a.lastMessageAt.toMillis() : 0;
-        const bt = b.lastMessageAt?.toMillis ? b.lastMessageAt.toMillis() : 0;
-        return bt - at;
+      arr.sort((a,b)=>{
+        const at=a.lastMessageAt?.toMillis?a.lastMessageAt.toMillis():0;
+        const bt=b.lastMessageAt?.toMillis?b.lastMessageAt.toMillis():0;
+        return bt-at;
       });
-      state.chats = arr;
-      renderChatLists();
+      state.chats=arr; renderChatLists();
       if (state.activeChatId) {
-        const updated = state.chats.find(c => c.id === state.activeChatId);
-        if (updated) {
-          state.activeChat = updated;
-          renderChatHeader();
-        }
+        const updated=state.chats.find(c=>c.id===state.activeChatId);
+        if (updated) { state.activeChat=updated; renderChatHeader(); }
       }
-    },
-    (err) => console.error("chats listener:", err)
-  );
+    }, err=>console.error("chats:",err));
 }
 
 
 /* =====================================================================
-   11) USER PROFILE FETCH (cached)
+   USER PROFILE FETCH (cached)
    ===================================================================== */
 async function fetchUserProfile(uid) {
   if (state.userCache[uid]) return state.userCache[uid];
   try {
-    const d = await getDoc(doc(db, "users", uid));
-    if (d.exists()) {
-      state.userCache[uid] = d.data();
-      return state.userCache[uid];
-    }
-  } catch (e) { console.error("fetchUserProfile:", e); }
+    const d = await getDoc(doc(db,"users",uid));
+    if (d.exists()) { state.userCache[uid]=d.data(); return state.userCache[uid]; }
+  } catch(e){ console.error("fetchUserProfile:",e); }
   return null;
 }
 
 
 /* =====================================================================
-   12) RENDER — Friends list / pending / search
+   RENDER — Friends list / pending
    ===================================================================== */
 function renderFriendsList() {
-  const filterText = ($("#friends-filter")?.value || "").trim().toLowerCase();
-  const list = $("#friends-list");
-  const empty = $("#friends-empty");
-  const filtered = state.friends.filter(f =>
-    !filterText || f.displayName.toLowerCase().includes(filterText));
-
-  $("#all-count").textContent = `All Friends — ${state.friends.length}`;
-
-  if (state.friends.length === 0) {
-    list.innerHTML = "";
-    empty.hidden = false;
-    return;
-  }
-  empty.hidden = true;
-
-  list.innerHTML = filtered.map(f => `
+  const filterText = ($("#friends-filter")?.value||"").trim().toLowerCase();
+  const list=$("#friends-list"), empty=$("#friends-empty");
+  const filtered=state.friends.filter(f=>!filterText||f.displayName.toLowerCase().includes(filterText));
+  $("#all-count").textContent=`All Friends — ${state.friends.length}`;
+  if (!state.friends.length) { list.innerHTML=""; empty.hidden=false; return; }
+  empty.hidden=true;
+  list.innerHTML=filtered.map(f=>`
     <div class="friend-row" data-uid="${escapeHtml(f.uid)}">
-      ${avatarMarkup(f.displayName, f.photoURL, "friend-row-avatar", "friend-row-fallback")}
+      ${avatarMarkup(f.displayName,f.photoURL,"friend-row-avatar","friend-row-fallback")}
       <div class="friend-row-info">
         <div class="friend-row-name">${escapeHtml(f.displayName)}</div>
-        <div class="friend-row-tag">${f.discriminator ? `#${escapeHtml(f.discriminator)}` : ""}</div>
+        <div class="friend-row-tag">${f.discriminator?`#${escapeHtml(f.discriminator)}`:""}</div>
       </div>
       <div class="friend-row-actions">
         <button class="action-circle" title="Message" data-action="message" data-uid="${escapeHtml(f.uid)}">
           <svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2z"/></svg>
         </button>
+        <button class="action-circle" title="View Profile" data-action="view-profile" data-uid="${escapeHtml(f.uid)}">
+          <svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M12 12c2.7 0 5-2.3 5-5s-2.3-5-5-5-5 2.3-5 5 2.3 5 5 5zm0 2c-3.3 0-10 1.7-10 5v2h20v-2c0-3.3-6.7-5-10-5z"/></svg>
+        </button>
         <button class="action-circle decline" title="Remove friend" data-action="remove" data-uid="${escapeHtml(f.uid)}" data-friendship-id="${escapeHtml(f.friendshipId)}">
           <svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M19 13H5v-2h14v2z"/></svg>
         </button>
       </div>
-    </div>
-  `).join("");
+    </div>`).join("");
 }
 
 function renderPendingLists() {
-  const incomingList = $("#incoming-list");
-  const outgoingList = $("#outgoing-list");
-
-  $("#incoming-empty").hidden = state.incoming.length > 0;
-  $("#outgoing-empty").hidden = state.outgoing.length > 0;
-
-  incomingList.innerHTML = state.incoming.map(r => `
+  const incomingList=$("#incoming-list"), outgoingList=$("#outgoing-list");
+  $("#incoming-empty").hidden=state.incoming.length>0;
+  $("#outgoing-empty").hidden=state.outgoing.length>0;
+  incomingList.innerHTML=state.incoming.map(r=>`
     <div class="friend-row">
-      ${avatarMarkup(r.fromName, r.fromPhoto, "friend-row-avatar", "friend-row-fallback")}
+      ${avatarMarkup(r.fromName,r.fromPhoto,"friend-row-avatar","friend-row-fallback")}
       <div class="friend-row-info">
-        <div class="friend-row-name">${escapeHtml(r.fromName || "Unknown")}</div>
+        <div class="friend-row-name">${escapeHtml(r.fromName||"Unknown")}</div>
         <div class="friend-row-meta">Incoming friend request</div>
       </div>
       <div class="friend-row-actions">
@@ -785,14 +953,12 @@ function renderPendingLists() {
           <svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
         </button>
       </div>
-    </div>
-  `).join("");
-
-  outgoingList.innerHTML = state.outgoing.map(r => `
+    </div>`).join("");
+  outgoingList.innerHTML=state.outgoing.map(r=>`
     <div class="friend-row">
-      ${avatarMarkup(r.toName, r.toPhoto, "friend-row-avatar", "friend-row-fallback")}
+      ${avatarMarkup(r.toName,r.toPhoto,"friend-row-avatar","friend-row-fallback")}
       <div class="friend-row-info">
-        <div class="friend-row-name">${escapeHtml(r.toName || "Unknown")}</div>
+        <div class="friend-row-name">${escapeHtml(r.toName||"Unknown")}</div>
         <div class="friend-row-meta">Pending — waiting for them to accept</div>
       </div>
       <div class="friend-row-actions">
@@ -800,870 +966,1118 @@ function renderPendingLists() {
           <svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
         </button>
       </div>
-    </div>
-  `).join("");
+    </div>`).join("");
 }
 
-// Click delegation for friends views
-$("#friends-view").addEventListener("click", async (e) => {
+// Friends view delegation
+$("#friends-view").addEventListener("click", async e=>{
   const btn = e.target.closest("button[data-action]");
   if (!btn) return;
-  const action = btn.dataset.action;
-
-  if (action === "message") {
-    await openOrCreateDm(btn.dataset.uid);
-  } else if (action === "remove") {
+  const action=btn.dataset.action;
+  if      (action==="message")      await openOrCreateDm(btn.dataset.uid);
+  else if (action==="view-profile") showProfileCard(btn.dataset.uid, e);
+  else if (action==="remove") {
     if (!confirm("Remove this friend?")) return;
-    try {
-      await deleteDoc(doc(db, "friendships", btn.dataset.friendshipId));
-      showToast("Friend removed");
-    } catch (err) { showToast("Error: " + err.message); }
-  } else if (action === "accept") {
-    await acceptRequest(btn.dataset.id);
-  } else if (action === "decline" || action === "cancel-out") {
-    try {
-      await deleteDoc(doc(db, "friendRequests", btn.dataset.id));
-    } catch (err) { showToast("Error: " + err.message); }
+    try { await deleteDoc(doc(db,"friendships",btn.dataset.friendshipId)); showToast("Friend removed"); }
+    catch(err){ showToast("Error: "+err.message); }
+  }
+  else if (action==="accept")     await acceptRequest(btn.dataset.id);
+  else if (action==="decline"||action==="cancel-out") {
+    try { await deleteDoc(doc(db,"friendRequests",btn.dataset.id)); }
+    catch(err){ showToast("Error: "+err.message); }
   }
 });
 
 
 /* =====================================================================
-   13) FRIENDS PANEL — tabs, search, add-friend search
+   FRIENDS PANEL — tabs, search, add-friend
    ===================================================================== */
-$$(".tab").forEach(t => t.addEventListener("click", () => {
-  $$(".tab").forEach(x => x.classList.remove("active"));
-  t.classList.add("active");
-  const target = t.dataset.tab;
-  $$(".tab-panel").forEach(p => p.classList.add("hidden"));
-  $(`.tab-panel[data-panel="${target}"]`).classList.remove("hidden");
+$$(".tab").forEach(t=>t.addEventListener("click",()=>{
+  $$(".tab").forEach(x=>x.classList.remove("active")); t.classList.add("active");
+  $$(".tab-panel").forEach(p=>p.classList.add("hidden"));
+  $(`.tab-panel[data-panel="${t.dataset.tab}"]`).classList.remove("hidden");
 }));
 
 $("#friends-filter").addEventListener("input", renderFriendsList);
 $("#add-friend-search-btn").addEventListener("click", searchUsers);
-$("#add-friend-input").addEventListener("keydown", (e) => { if (e.key === "Enter") searchUsers(); });
+$("#add-friend-input").addEventListener("keydown", e=>{ if(e.key==="Enter") searchUsers(); });
 
 async function searchUsers() {
   const raw = $("#add-friend-input").value.trim();
   const results = $("#search-results");
-  results.innerHTML = "";
-  if (!raw) {
-    $("#search-hint").textContent = "Enter a username to search.";
-    return;
-  }
-  $("#search-hint").textContent = "Searching…";
+  results.innerHTML="";
+  if (!raw) { $("#search-hint").textContent="Enter a username to search."; return; }
+  $("#search-hint").textContent="Searching…";
 
   try {
-    let found = [];
-
-    // Check for username#1234 exact-match format
+    let found=[];
     const hashMatch = raw.match(/^(.+)#(\d{4})$/);
+
     if (hashMatch) {
-      const [, uname, disc] = hashMatch;
-      const term = uname.toLowerCase();
-      const q = query(
-        collection(db, "users"),
-        orderBy("displayNameLower"),
-        startAt(term),
-        endAt(term + ""),
-        limit(50)
-      );
-      const snap = await getDocs(q);
-      snap.forEach(d => {
-        const u = d.data();
-        if (u.uid && u.uid !== state.user.uid &&
-            u.displayNameLower === term && u.discriminator === disc) {
-          found.push(u);
-        }
-      });
+      const [,uname,disc]=hashMatch;
+      const term=uname.toLowerCase();
+      const q=query(collection(db,"users"),orderBy("displayNameLower"),startAt(term),endAt(term+""),limit(50));
+      const snap=await getDocs(q);
+      snap.forEach(d=>{ const u=d.data(); if(u.uid&&u.uid!==state.user.uid&&u.displayNameLower===term&&u.discriminator===disc) found.push(u); });
     } else {
-      // Prefix search by username
-      const term = raw.toLowerCase();
-      const q = query(
-        collection(db, "users"),
-        orderBy("displayNameLower"),
-        startAt(term),
-        endAt(term + ""),
-        limit(20)
-      );
-      const snap = await getDocs(q);
-      snap.forEach(d => {
-        const u = d.data();
-        if (u.uid && u.uid !== state.user.uid) found.push(u);
-      });
+      const term=raw.toLowerCase();
+      const q=query(collection(db,"users"),orderBy("displayNameLower"),startAt(term),endAt(term+""),limit(20));
+      const snap=await getDocs(q);
+      snap.forEach(d=>{ const u=d.data(); if(u.uid&&u.uid!==state.user.uid) found.push(u); });
     }
 
-    if (!found.length) {
-      $("#search-hint").textContent = "No users found.";
-      return;
-    }
+    if (!found.length) { $("#search-hint").textContent="No users found."; return; }
+    $("#search-hint").textContent=`Found ${found.length} user(s).`;
 
-    $("#search-hint").textContent = `Found ${found.length} user(s).`;
+    const friendUids=new Set(state.friends.map(f=>f.uid));
+    const incomingFromUids=new Set(state.incoming.map(r=>r.fromUid));
+    const outgoingToUids=new Set(state.outgoing.map(r=>r.toUid));
 
-    const friendUids = new Set(state.friends.map(f => f.uid));
-    const incomingFromUids = new Set(state.incoming.map(r => r.fromUid));
-    const outgoingToUids = new Set(state.outgoing.map(r => r.toUid));
-
-    results.innerHTML = found.map(u => {
-      const tag = u.discriminator ? `#${escapeHtml(u.discriminator)}` : "";
-      let actionHtml = `<button class="btn-primary" data-action="send-request" data-uid="${escapeHtml(u.uid)}" data-name="${escapeHtml(u.username || u.displayName || "")}" data-photo="${escapeHtml(u.photoURL || "")}">Add Friend</button>`;
-      if (friendUids.has(u.uid)) actionHtml = `<span class="friend-row-meta">Already friends</span>`;
-      else if (outgoingToUids.has(u.uid)) actionHtml = `<span class="friend-row-meta">Request sent</span>`;
-      else if (incomingFromUids.has(u.uid)) actionHtml = `<span class="friend-row-meta">Accept their request instead</span>`;
-
+    results.innerHTML=found.map(u=>{
+      const tag=u.discriminator?`#${escapeHtml(u.discriminator)}`:"";
+      const isPrivate=u.isPrivate&&!friendUids.has(u.uid);
+      const displayBio=isPrivate?"🔒 Private profile":(u.bio||"");
+      let actionHtml=`<button class="btn-primary" data-action="send-request" data-uid="${escapeHtml(u.uid)}" data-name="${escapeHtml(u.username||u.displayName||"")}" data-photo="${escapeHtml(u.photoURL||"")}">Add Friend</button>`;
+      if (friendUids.has(u.uid)) actionHtml=`<span class="friend-row-meta">Already friends</span>`;
+      else if (outgoingToUids.has(u.uid)) actionHtml=`<span class="friend-row-meta">Request sent</span>`;
+      else if (incomingFromUids.has(u.uid)) actionHtml=`<span class="friend-row-meta">Accept their request instead</span>`;
       return `
         <div class="friend-row">
-          ${avatarMarkup(u.username || u.displayName, u.photoURL, "friend-row-avatar", "friend-row-fallback")}
+          ${isPrivate?`<div class="friend-row-fallback" style="background:var(--t-muted)">?</div>`:avatarMarkup(u.username||u.displayName,u.photoURL,"friend-row-avatar","friend-row-fallback")}
           <div class="friend-row-info">
-            <div class="friend-row-name">${escapeHtml(u.username || u.displayName || "Unknown")}</div>
+            <div class="friend-row-name">${escapeHtml(u.username||u.displayName||"Unknown")}</div>
             <div class="friend-row-tag">${tag}</div>
+            ${displayBio?`<div class="friend-row-meta" style="font-size:11px;">${escapeHtml(displayBio.slice(0,60))}</div>`:""}
           </div>
-          <div class="friend-row-actions">${actionHtml}</div>
-        </div>
-      `;
+          <div class="friend-row-actions">
+            <button class="btn-ghost" style="font-size:12px;padding:4px 8px;" data-action="view-profile-search" data-uid="${escapeHtml(u.uid)}">Profile</button>
+            ${actionHtml}
+          </div>
+        </div>`;
     }).join("");
-  } catch (err) {
-    console.error(err);
-    $("#search-hint").textContent = "Search failed: " + err.message;
-  }
+  } catch(err){ console.error(err); $("#search-hint").textContent="Search failed: "+err.message; }
 }
 
-$("#search-results").addEventListener("click", async (e) => {
-  const btn = e.target.closest("button[data-action='send-request']");
-  if (!btn) return;
-  const toUid = btn.dataset.uid;
-  const toName = btn.dataset.name;
-  const toPhoto = btn.dataset.photo || null;
-  btn.disabled = true;
-  btn.textContent = "Sending…";
-  try {
-    if (state.friends.find(f => f.uid === toUid)) throw new Error("Already friends");
-    if (state.outgoing.find(r => r.toUid === toUid)) throw new Error("Already sent");
-    if (state.incoming.find(r => r.fromUid === toUid)) throw new Error("They already sent you one — accept it instead");
+$("#search-results").addEventListener("click", async e=>{
+  // View profile from search
+  const vpBtn=e.target.closest("[data-action='view-profile-search']");
+  if (vpBtn) { showProfileCard(vpBtn.dataset.uid, e); return; }
 
-    // Deterministic request ID: `${fromUid}_${toUid}`.
-    // Security rules verify a matching request exists when creating a friendship.
-    const reqId = `${state.user.uid}_${toUid}`;
-    await setDoc(doc(db, "friendRequests", reqId), {
-      fromUid: state.user.uid,
-      toUid,
-      fromName: state.user.displayName,
-      fromPhoto: state.user.photoURL || null,
-      toName,
-      toPhoto,
-      createdAt: serverTimestamp()
+  const btn=e.target.closest("button[data-action='send-request']");
+  if (!btn) return;
+  const toUid=btn.dataset.uid, toName=btn.dataset.name, toPhoto=btn.dataset.photo||null;
+  btn.disabled=true; btn.textContent="Sending…";
+  try {
+    if (state.friends.find(f=>f.uid===toUid)) throw new Error("Already friends");
+    if (state.outgoing.find(r=>r.toUid===toUid)) throw new Error("Already sent");
+    if (state.incoming.find(r=>r.fromUid===toUid)) throw new Error("Accept their request instead");
+    const reqId=`${state.user.uid}_${toUid}`;
+    await setDoc(doc(db,"friendRequests",reqId),{
+      fromUid:state.user.uid, toUid,
+      fromName:state.user.displayName, fromPhoto:state.user.photoURL||null,
+      toName, toPhoto, createdAt:serverTimestamp()
     });
-    btn.textContent = "Sent ✓";
-    showToast("Friend request sent");
-  } catch (err) {
-    btn.disabled = false;
-    btn.textContent = "Add Friend";
-    showToast("Error: " + err.message);
-  }
+    btn.textContent="Sent ✓"; showToast("Friend request sent");
+  } catch(err){ btn.disabled=false; btn.textContent="Add Friend"; showToast("Error: "+err.message); }
 });
 
 
 /* =====================================================================
-   14) FRIEND REQUEST ACCEPT
+   ACCEPT REQUEST  (auto-opens DM)
    ===================================================================== */
 async function acceptRequest(requestId) {
-  const req = state.incoming.find(r => r.id === requestId);
+  const req=state.incoming.find(r=>r.id===requestId);
   if (!req) return;
-  const me = state.user.uid;
-  const them = req.fromUid;
-  const sorted = [me, them].sort();
-  const friendshipId = sorted.join("_");
-
+  const me=state.user.uid, them=req.fromUid;
+  const sorted=[me,them].sort();
+  const friendshipId=sorted.join("_");
   try {
-    const batch = writeBatch(db);
-    batch.set(doc(db, "friendships", friendshipId), {
-      users: sorted,
-      createdAt: serverTimestamp()
-    });
-    batch.delete(doc(db, "friendRequests", requestId));
+    const batch=writeBatch(db);
+    batch.set(doc(db,"friendships",friendshipId),{users:sorted,createdAt:serverTimestamp()});
+    batch.delete(doc(db,"friendRequests",requestId));
     await batch.commit();
-    showToast("Friend added!");
-  } catch (err) {
-    showToast("Error: " + err.message);
-  }
+    showToast("Friend added! Opening DM…");
+    setTimeout(()=>openOrCreateDm(them),500);
+  } catch(err){ showToast("Error: "+err.message); }
 }
 
 
 /* =====================================================================
-   15) RENDER — sidebar DMs and groups; rail group avatars
+   RENDER — Sidebar lists + rail
    ===================================================================== */
 function renderChatLists() {
-  const filterText = state.filters.sidebar.toLowerCase();
-  const dms = state.chats.filter(c => c.type === "dm");
-  const groups = state.chats.filter(c => c.type === "group");
+  const filterText=state.filters.sidebar.toLowerCase();
+  const dms=state.chats.filter(c=>c.type==="dm");
+  const groups=state.chats.filter(c=>c.type==="group");
 
-  const dmList = $("#dm-list");
-  dmList.innerHTML = dms.map(c => {
-    const otherUid = c.members.find(m => m !== state.user.uid);
-    const profile = state.userCache[otherUid];
-    const name = profile?.username || profile?.displayName || "Direct Message";
-    const photo = profile?.photoURL || null;
-    if (filterText && !name.toLowerCase().includes(filterText)) return "";
-    const active = state.activeChatId === c.id ? "active" : "";
+  $("#dm-list").innerHTML=dms.map(c=>{
+    const otherUid=c.members.find(m=>m!==state.user.uid);
+    const profile=state.userCache[otherUid];
+    const name=profile?.username||profile?.displayName||"Direct Message";
+    const photo=profile?.photoURL||null;
+    if (filterText&&!name.toLowerCase().includes(filterText)) return "";
+    const active=state.activeChatId===c.id?"active":"";
     return `
       <div class="side-row ${active}" data-chat-id="${escapeHtml(c.id)}" data-type="dm">
-        ${avatarMarkup(name, photo, "side-row-avatar", "side-row-fallback")}
+        ${avatarMarkup(name,photo,"side-row-avatar","side-row-fallback")}
         <div class="side-row-name">${escapeHtml(name)}</div>
         <button class="icon-btn side-row-close" title="Close" data-action="close-dm" data-chat-id="${escapeHtml(c.id)}">
           <svg viewBox="0 0 24 24" width="14" height="14"><path fill="currentColor" d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
         </button>
-      </div>
-    `;
+      </div>`;
   }).join("");
 
-  const groupList = $("#group-list");
-  groupList.innerHTML = groups.map(c => {
-    const name = c.name || "Group";
-    if (filterText && !name.toLowerCase().includes(filterText)) return "";
-    const active = state.activeChatId === c.id ? "active" : "";
+  $("#group-list").innerHTML=groups.map(c=>{
+    const name=c.name||"Group";
+    if (filterText&&!name.toLowerCase().includes(filterText)) return "";
+    const active=state.activeChatId===c.id?"active":"";
     return `
       <div class="side-row ${active}" data-chat-id="${escapeHtml(c.id)}" data-type="group">
         <div class="side-row-fallback">${escapeHtml(groupInitials(name))}</div>
         <div class="side-row-name">${escapeHtml(name)}</div>
-      </div>
-    `;
+      </div>`;
   }).join("");
 
-  const rail = $("#rail-groups");
-  rail.innerHTML = groups.map(c => {
-    const active = state.activeChatId === c.id ? "active" : "";
-    return `<div class="rail-group-avatar ${active}" data-chat-id="${escapeHtml(c.id)}" title="${escapeHtml(c.name || "Group")}">${escapeHtml(groupInitials(c.name || "G"))}</div>`;
+  $("#rail-groups").innerHTML=groups.map(c=>{
+    const active=state.activeChatId===c.id?"active":"";
+    return `<div class="rail-group-avatar ${active}" data-chat-id="${escapeHtml(c.id)}" title="${escapeHtml(c.name||"Group")}">${escapeHtml(groupInitials(c.name||"G"))}</div>`;
   }).join("");
 }
 
-$("#dm-list").addEventListener("click", (e) => {
-  const close = e.target.closest("button[data-action='close-dm']");
-  if (close) {
-    e.stopPropagation();
-    if (state.activeChatId === close.dataset.chatId) showFriendsView();
-    return;
-  }
-  const row = e.target.closest(".side-row");
-  if (row) openChat(row.dataset.chatId);
+$("#dm-list").addEventListener("click", e=>{
+  const close=e.target.closest("button[data-action='close-dm']");
+  if (close) { e.stopPropagation(); if(state.activeChatId===close.dataset.chatId) showFriendsView(); return; }
+  const row=e.target.closest(".side-row"); if(row) openChat(row.dataset.chatId);
 });
-
-$("#group-list").addEventListener("click", (e) => {
-  const row = e.target.closest(".side-row");
-  if (row) openChat(row.dataset.chatId);
-});
-
-$("#rail-groups").addEventListener("click", (e) => {
-  const av = e.target.closest(".rail-group-avatar");
-  if (av) openChat(av.dataset.chatId);
-});
-
-$("#sidebar-search").addEventListener("input", (e) => {
-  state.filters.sidebar = e.target.value;
-  renderChatLists();
-});
-
-$("#new-dm-btn").addEventListener("click", () => {
+$("#group-list").addEventListener("click", e=>{ const row=e.target.closest(".side-row"); if(row) openChat(row.dataset.chatId); });
+$("#rail-groups").addEventListener("click", e=>{ const av=e.target.closest(".rail-group-avatar"); if(av) openChat(av.dataset.chatId); });
+$("#sidebar-search").addEventListener("input", e=>{ state.filters.sidebar=e.target.value; renderChatLists(); });
+$("#new-dm-btn").addEventListener("click", ()=>{
   showFriendsView();
-  $$(".tab").forEach(x => x.classList.remove("active"));
-  $(".tab[data-tab='all']").classList.add("active");
-  $$(".tab-panel").forEach(p => p.classList.add("hidden"));
-  $(".tab-panel[data-panel='all']").classList.remove("hidden");
+  $$(".tab").forEach(x=>x.classList.remove("active")); $(".tab[data-tab='all']").classList.add("active");
+  $$(".tab-panel").forEach(p=>p.classList.add("hidden")); $(".tab-panel[data-panel='all']").classList.remove("hidden");
   showToast("Click any friend's message icon to start a DM.");
 });
 
 
 /* =====================================================================
-   16) DM open/create
+   DM open / create
    ===================================================================== */
 async function openOrCreateDm(otherUid) {
-  const me = state.user.uid;
-  const sorted = [me, otherUid].sort();
-  const chatId = `dm_${sorted[0]}_${sorted[1]}`;
-  const ref = doc(db, "chats", chatId);
-  const snap = await getDoc(ref);
+  const me=state.user.uid;
+  const sorted=[me,otherUid].sort();
+  const chatId=`dm_${sorted[0]}_${sorted[1]}`;
+  const ref=doc(db,"chats",chatId);
+  const snap=await getDoc(ref);
   if (!snap.exists()) {
     try {
-      await setDoc(ref, {
-        type: "dm",
-        members: sorted,
-        name: "",
-        createdBy: me,
-        createdAt: serverTimestamp(),
-        lastMessage: "",
-        lastMessageAt: serverTimestamp()
+      await setDoc(ref,{
+        type:"dm", members:sorted, name:"",
+        createdBy:me, createdAt:serverTimestamp(),
+        lastMessage:"", lastMessageAt:serverTimestamp()
       });
-    } catch (err) {
-      showToast("Could not open DM: " + err.message);
-      return;
-    }
+    } catch(err){ showToast("Could not open DM: "+err.message); return; }
   }
   openChat(chatId);
 }
 
 
 /* =====================================================================
-   17) OPEN CHAT — subscribe to messages, render
+   OPEN CHAT
    ===================================================================== */
 async function openChat(chatId) {
-  state.activeChatId = chatId;
-  state.activeChat = state.chats.find(c => c.id === chatId) || null;
+  state.activeChatId=chatId;
+  state.activeChat=state.chats.find(c=>c.id===chatId)||null;
   if (!state.activeChat) {
-    try {
-      const d = await getDoc(doc(db, "chats", chatId));
-      if (d.exists()) state.activeChat = { id: d.id, ...d.data() };
-    } catch (_) {}
+    try { const d=await getDoc(doc(db,"chats",chatId)); if(d.exists()) state.activeChat={id:d.id,...d.data()}; } catch(_){}
   }
   if (!state.activeChat) return;
 
-  showChatView();
-  renderChatHeader();
-  renderChatLists();
+  showChatView(); renderChatHeader(); renderChatLists();
+  if (state.unsubscribers.messages) { state.unsubscribers.messages(); state.unsubscribers.messages=null; }
+  state.messages=[];
+  $("#messages").innerHTML=`<div class="empty" style="margin:24px;">Loading messages…</div>`;
 
-  if (state.unsubscribers.messages) {
-    state.unsubscribers.messages();
-    state.unsubscribers.messages = null;
-  }
-
-  state.messages = [];
-  $("#messages").innerHTML = `<div class="empty" style="margin:24px;">Loading messages…</div>`;
-
-  state.unsubscribers.messages = onSnapshot(
-    query(
-      collection(db, "chats", chatId, "messages"),
-      orderBy("createdAt", "asc"),
-      limit(200)
-    ),
-    (snap) => {
-      const prevLen = state.messages.length;
-      state.messages = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-
-      // Play sound for new messages from others (skip initial load)
-      if (state.chatInitialized.has(chatId) && state.messages.length > prevLen) {
-        const newest = state.messages[state.messages.length - 1];
-        if (newest && newest.senderUid !== state.user.uid) {
-          playSound("message");
-        }
+  state.unsubscribers.messages=onSnapshot(
+    query(collection(db,"chats",chatId,"messages"),orderBy("createdAt","asc"),limit(200)),
+    snap=>{
+      const prevLen=state.messages.length;
+      state.messages=snap.docs.map(d=>({id:d.id,...d.data()}));
+      if (state.chatInitialized.has(chatId)&&state.messages.length>prevLen) {
+        const newest=state.messages[state.messages.length-1];
+        if (newest&&newest.senderUid!==state.user.uid) playSound("message");
       }
       state.chatInitialized.add(chatId);
       renderMessages();
     },
-    (err) => {
-      console.error(err);
-      $("#messages").innerHTML = `<div class="empty" style="margin:24px;color:var(--c-danger)">Could not load messages: ${escapeHtml(err.message)}</div>`;
-    }
+    err=>{ console.error(err); $("#messages").innerHTML=`<div class="empty" style="color:var(--c-danger);margin:24px;">Could not load: ${escapeHtml(err.message)}</div>`; }
   );
 }
 
+
+/* =====================================================================
+   RENDER CHAT HEADER
+   ===================================================================== */
 async function renderChatHeader() {
-  const c = state.activeChat;
-  if (!c) return;
+  const c=state.activeChat; if (!c) return;
+  const avatarWrap=$("#chat-header-avatar-wrap");
+  const addBtn=$("#chat-add-member-btn"), leaveBtn=$("#chat-leave-btn");
+  const codeBadge=$("#chat-join-code-badge");
 
-  const avatarWrap = $("#chat-header-avatar-wrap");
-  const addBtn = $("#chat-add-member-btn");
-  const leaveBtn = $("#chat-leave-btn");
-
-  if (c.type === "dm") {
-    const otherUid = c.members.find(m => m !== state.user.uid);
-    const profile = await fetchUserProfile(otherUid);
-    const name = profile?.username || profile?.displayName || "Direct Message";
-    const tag = profile?.discriminator ? `#${profile.discriminator}` : "";
-    $("#chat-header-name").textContent = name;
-    $("#chat-header-sub").textContent = tag ? `${tag} · Direct Message` : "Direct Message";
-    avatarWrap.innerHTML = avatarMarkup(name, profile?.photoURL, "chat-header-avatar", "chat-header-avatar-fallback");
-    addBtn.hidden = true;
-    leaveBtn.hidden = true;
+  if (c.type==="dm") {
+    const otherUid=c.members.find(m=>m!==state.user.uid);
+    const profile=await fetchUserProfile(otherUid);
+    const name=profile?.username||profile?.displayName||"Direct Message";
+    const tag=profile?.discriminator?`#${profile.discriminator}`:"";
+    const status=profile?.status||"online";
+    $("#chat-header-name").textContent=name;
+    $("#chat-header-sub").textContent=tag?`${tag} · Direct Message`:"Direct Message";
+    avatarWrap.innerHTML=avatarMarkup(name,profile?.photoURL,"chat-header-avatar","chat-header-avatar-fallback");
+    if(addBtn) addBtn.hidden=true; if(leaveBtn) leaveBtn.hidden=true;
+    if(codeBadge) codeBadge.hidden=true;
   } else {
-    $("#chat-header-name").textContent = c.name || "Group";
-    $("#chat-header-sub").textContent = `${c.members.length} member${c.members.length === 1 ? "" : "s"}`;
-    avatarWrap.innerHTML = `<div class="chat-header-avatar-fallback">${escapeHtml(groupInitials(c.name || "G"))}</div>`;
-    addBtn.hidden = false;
-    leaveBtn.hidden = false;
-  }
-}
-
-function renderMessages() {
-  const wrap = $("#messages");
-  if (!state.messages.length) {
-    wrap.innerHTML = `<div class="empty" style="margin:24px;">No messages yet — say hi!</div>`;
-    return;
-  }
-
-  const html = [];
-  let lastSenderUid = null;
-  let lastTime = 0;
-
-  for (const m of state.messages) {
-    const ts = m.createdAt;
-    const tms = ts?.toMillis ? ts.toMillis() : 0;
-    const sameSender = m.senderUid === lastSenderUid;
-    const closeInTime = tms - lastTime < 5 * 60 * 1000;
-
-    if (sameSender && closeInTime && lastSenderUid !== null) {
-      html.push(`
-        <div class="msg-followup">
-          <span class="msg-time-inline">${escapeHtml(shortTime(ts))}</span>
-          <div class="msg-body">${formatMessage(m.text || "")}</div>
-        </div>
-      `);
-    } else {
-      html.push(`
-        <div class="message-group">
-          <div class="msg-avatar-btn" data-profile-uid="${escapeHtml(m.senderUid)}" title="View profile" role="button" tabindex="0">
-            ${avatarMarkup(m.senderName, m.senderPhoto, "msg-avatar", "msg-avatar-fallback")}
-          </div>
-          <div class="msg-content">
-            <div class="msg-head">
-              <span class="msg-author" data-profile-uid="${escapeHtml(m.senderUid)}">${escapeHtml(m.senderName || "User")}</span>
-              <span class="msg-time">${escapeHtml(formatTime(ts))}</span>
-            </div>
-            <div class="msg-body">${formatMessage(m.text || "")}</div>
-          </div>
-        </div>
-      `);
+    const isLeader=Array.isArray(c.leaders)&&c.leaders.includes(state.user.uid);
+    $("#chat-header-name").textContent=c.name||"Group";
+    $("#chat-header-sub").textContent=`${c.members.length} member${c.members.length===1?"":"s"}${isLeader?" · 👑 You're a leader":""}`;
+    avatarWrap.innerHTML=`<div class="chat-header-avatar-fallback">${escapeHtml(groupInitials(c.name||"G"))}</div>`;
+    if(addBtn) addBtn.hidden=false; if(leaveBtn) leaveBtn.hidden=false;
+    if (codeBadge) {
+      if (c.joinCode) { codeBadge.textContent=c.joinCode; codeBadge.hidden=false; codeBadge.title="Click to copy join code"; }
+      else codeBadge.hidden=true;
     }
-
-    lastSenderUid = m.senderUid;
-    lastTime = tms;
   }
-
-  wrap.innerHTML = html.join("");
-  wrap.scrollTop = wrap.scrollHeight;
 }
 
-// Avatar / author name click → profile card
-$("#messages").addEventListener("click", (e) => {
-  const trigger = e.target.closest("[data-profile-uid]");
-  if (trigger) showProfileCard(trigger.dataset.profileUid, e);
+// Copy join code on badge click
+document.addEventListener("click", e=>{
+  if (e.target.closest("#chat-join-code-badge")) {
+    const c=state.activeChat;
+    if (!c?.joinCode) return;
+    navigator.clipboard.writeText(c.joinCode)
+      .then(()=>showToast("Join code copied!"))
+      .catch(()=>showToast("Code: "+c.joinCode));
+  }
 });
 
 
 /* =====================================================================
-   18) SEND MESSAGE
+   RENDER MESSAGES
    ===================================================================== */
-const composer = $("#composer-input");
-composer.addEventListener("input", () => {
-  composer.style.height = "auto";
-  composer.style.height = Math.min(composer.scrollHeight, 200) + "px";
+function renderMessages() {
+  const wrap=$("#messages");
+  if (!state.messages.length) {
+    wrap.innerHTML=`<div class="empty" style="margin:24px;">No messages yet — say hi!</div>`;
+    return;
+  }
+  const html=[];
+  let lastSenderUid=null, lastTime=0;
+  const c=state.activeChat;
+  const leaders=Array.isArray(c?.leaders)?c.leaders:[];
+
+  for (const m of state.messages) {
+    const ts=m.createdAt;
+    const tms=ts?.toMillis?ts.toMillis():0;
+    const sameSender=m.senderUid===lastSenderUid;
+    const closeInTime=tms-lastTime<5*60*1000;
+    const isSelf=m.senderUid===state.user.uid;
+    const isLeader=leaders.includes(m.senderUid);
+
+    const editedLabel=m.edited?`<span class="msg-edited">(edited)</span>`:"";
+    const msgActions=`<div class="msg-actions">
+      ${isSelf
+        ?`<button class="msg-action-btn" data-action="edit-msg" data-msg-id="${escapeHtml(m.id)}" title="Edit">✏️</button>`
+        :`<button class="msg-action-btn" data-action="report-msg" data-msg-id="${escapeHtml(m.id)}" data-uid="${escapeHtml(m.senderUid)}" data-name="${escapeHtml(m.senderName||"User")}" title="Report">🚩</button>`
+      }
+    </div>`;
+
+    if (m.commandResult) {
+      html.push(`
+        <div class="message-group msg-command-result" data-msg-id="${escapeHtml(m.id)}">
+          <div class="msg-content" style="padding-left:0">
+            <div class="msg-head">
+              <span class="msg-author">${escapeHtml(m.senderName||"User")}</span>
+              <span class="msg-time">${escapeHtml(formatTime(ts))}</span>
+            </div>
+            <div class="msg-body">${formatMessage(m.text||"")}</div>
+          </div>
+        </div>`);
+    } else if (sameSender&&closeInTime&&lastSenderUid!==null) {
+      html.push(`
+        <div class="msg-followup" data-msg-id="${escapeHtml(m.id)}">
+          <span class="msg-time-inline">${escapeHtml(shortTime(ts))}</span>
+          <div class="msg-body">${formatMessage(m.text||"")}${editedLabel}</div>
+          ${msgActions}
+        </div>`);
+    } else {
+      html.push(`
+        <div class="message-group" data-msg-id="${escapeHtml(m.id)}">
+          <div class="msg-avatar-btn" data-profile-uid="${escapeHtml(m.senderUid)}" role="button" tabindex="0">
+            ${avatarMarkup(m.senderName,m.senderPhoto,"msg-avatar","msg-avatar-fallback")}
+          </div>
+          <div class="msg-content">
+            <div class="msg-head">
+              <span class="msg-author" data-profile-uid="${escapeHtml(m.senderUid)}">${escapeHtml(m.senderName||"User")}</span>
+              ${isLeader?`<span class="leader-badge">👑</span>`:""}
+              <span class="msg-time">${escapeHtml(formatTime(ts))}</span>
+            </div>
+            <div class="msg-body">${formatMessage(m.text||"")}${editedLabel}</div>
+            ${msgActions}
+          </div>
+        </div>`);
+    }
+    lastSenderUid=m.senderUid; lastTime=tms;
+  }
+  wrap.innerHTML=html.join("");
+  wrap.scrollTop=wrap.scrollHeight;
+}
+
+// Message area delegation
+$("#messages").addEventListener("click", async e=>{
+  const profileTrigger=e.target.closest("[data-profile-uid]");
+  if (profileTrigger&&!e.target.closest(".msg-action-btn")) { showProfileCard(profileTrigger.dataset.profileUid,e); return; }
+
+  const actionBtn=e.target.closest(".msg-action-btn");
+  if (actionBtn) {
+    if (actionBtn.dataset.action==="edit-msg")   startEditMessage(actionBtn.dataset.msgId);
+    if (actionBtn.dataset.action==="report-msg") openReportModal(actionBtn.dataset.uid,actionBtn.dataset.name,actionBtn.dataset.msgId);
+    return;
+  }
+  const saveBtn=e.target.closest(".msg-edit-save");
+  if (saveBtn) {
+    const ta=saveBtn.closest(".msg-edit-area")?.querySelector("textarea");
+    if (ta) await editMessage(saveBtn.dataset.msgId,ta.value.trim());
+    return;
+  }
+  if (e.target.closest(".msg-edit-cancel")) { renderMessages(); return; }
 });
 
-composer.addEventListener("keydown", (e) => {
-  if (e.key === "Enter" && !e.shiftKey) {
-    e.preventDefault();
-    sendCurrentMessage();
-  }
+
+/* =====================================================================
+   SEND MESSAGE
+   ===================================================================== */
+const composer=$("#composer-input");
+
+composer.addEventListener("input",()=>{
+  composer.style.height="auto";
+  composer.style.height=Math.min(composer.scrollHeight,200)+"px";
+  updateSendBtn();
+  updateEmojiAutocomplete();
 });
+
+composer.addEventListener("keydown", e=>{
+  // Emoji autocomplete navigation
+  const ac=$("#emoji-autocomplete");
+  if (ac&&!ac.classList.contains("hidden")&&acItems.length) {
+    if (e.key==="ArrowDown") { e.preventDefault(); state.emojiAcIndex=(state.emojiAcIndex+1)%acItems.length; updateAcHighlight(); return; }
+    if (e.key==="ArrowUp")   { e.preventDefault(); state.emojiAcIndex=(state.emojiAcIndex-1+acItems.length)%acItems.length; updateAcHighlight(); return; }
+    if (e.key==="Enter"||e.key==="Tab") { e.preventDefault(); insertAcItem(state.emojiAcIndex); return; }
+    if (e.key==="Escape") { hideEmojiAc(); return; }
+  }
+  if (e.key==="Enter"&&!e.shiftKey) { e.preventDefault(); sendCurrentMessage(); }
+});
+
+function updateSendBtn() {
+  const btn=$("#send-btn");
+  if (!btn) return;
+  btn.dataset.active = composer.value.trim().length>0 ? "true" : "false";
+}
 
 $("#send-btn").addEventListener("click", sendCurrentMessage);
 
 async function sendCurrentMessage() {
-  const raw = composer.value;
-  const text = filterProfanity(raw).trim();
-  if (!text) return;
-  if (!state.activeChatId) return;
-  if (text.length > 2000) { showToast("Message too long (2000 char max)"); return; }
+  const raw=composer.value;
+  const text=raw.trim();
+  if (!text||!state.activeChatId) return;
+  if (text.length>2000) { showToast("Message too long (2000 char max)"); return; }
 
-  const chatId = state.activeChatId;
-  composer.value = "";
-  composer.style.height = "auto";
+  // Check for /command
+  if (text.startsWith("/")) {
+    const parts=text.slice(1).split(/\s+/);
+    const cmd=parts[0].toLowerCase();
+    const args=parts.slice(1);
+    const result=handleCommand(cmd,args);
+    if (result!==null) {
+      composer.value=""; composer.style.height="auto"; updateSendBtn();
+      const chatId=state.activeChatId;
+      try {
+        await addDoc(collection(db,"chats",chatId,"messages"),{
+          text:result, commandResult:true,
+          senderUid:state.user.uid, senderName:state.user.displayName,
+          senderPhoto:state.user.photoURL||null, createdAt:serverTimestamp()
+        });
+        await updateDoc(doc(db,"chats",chatId),{ lastMessage:result.slice(0,200), lastMessageAt:serverTimestamp() });
+      } catch(err){ showToast("Send failed: "+err.message); composer.value=raw; }
+      return;
+    }
+  }
 
+  composer.value=""; composer.style.height="auto"; updateSendBtn();
+  const chatId=state.activeChatId;
   try {
-    await addDoc(collection(db, "chats", chatId, "messages"), {
+    await addDoc(collection(db,"chats",chatId,"messages"),{
       text,
-      senderUid: state.user.uid,
-      senderName: state.user.displayName,
-      senderPhoto: state.user.photoURL || null,
-      createdAt: serverTimestamp()
+      senderUid:state.user.uid, senderName:state.user.displayName,
+      senderPhoto:state.user.photoURL||null, createdAt:serverTimestamp()
     });
-    await updateDoc(doc(db, "chats", chatId), {
-      lastMessage: text.slice(0, 200),
-      lastMessageAt: serverTimestamp()
-    });
-  } catch (err) {
-    showToast("Send failed: " + err.message);
-    composer.value = raw;
+    await updateDoc(doc(db,"chats",chatId),{ lastMessage:text.slice(0,200), lastMessageAt:serverTimestamp() });
+  } catch(err){ showToast("Send failed: "+err.message); composer.value=raw; updateSendBtn(); }
+}
+
+
+/* =====================================================================
+   FUN COMMANDS HANDLER
+   ===================================================================== */
+function handleCommand(cmd, args) {
+  switch(cmd) {
+    case "8ball": {
+      const q=args.join(" ").trim();
+      return q ? `🎱 *${q}*\n> ${rnd(EIGHT_BALL)}` : `🎱 > ${rnd(EIGHT_BALL)}`;
+    }
+    case "tod":
+      return Math.random()<0.5
+        ? `❓ **Truth:** ${rnd(TRUTHS)}`
+        : `🎯 **Dare:** ${rnd(DARES)}`;
+    case "truth":  return `❓ **Truth:** ${rnd(TRUTHS)}`;
+    case "dare":   return `🎯 **Dare:** ${rnd(DARES)}`;
+    case "joke": {
+      const [setup,punchline]=rnd(JOKES);
+      return `😄 ${setup}\n> ${punchline}`;
+    }
+    case "fortune":  return `🔮 ${rnd(FORTUNES)}`;
+    case "advice":   return `💡 ${rnd(ADVICE)}`;
+    case "coinflip": return `🪙 ${Math.random()<0.5?"**Heads!**":"**Tails!**"}`;
+    case "roll": {
+      const spec=(args[0]||"1d6").toLowerCase();
+      const m=spec.match(/^(\d+)d(\d+)$/);
+      if (!m) return `🎲 Rolled: **${Math.floor(Math.random()*6)+1}** (1d6)`;
+      const [,nd,ns]=[+m[1],+m[1],+m[2]];
+      const dice=+m[1], sides=+m[2];
+      if (dice<1||dice>20||sides<2||sides>100) return `🎲 Try something like /roll 2d6`;
+      const rolls=Array.from({length:dice},()=>Math.floor(Math.random()*sides)+1);
+      const total=rolls.reduce((a,b)=>a+b,0);
+      return `🎲 Rolled **${spec}**: [${rolls.join(", ")}] = **${total}**`;
+    }
+    case "ship": {
+      const name1=args[0]||state.user.displayName;
+      const name2=args[1]||"Unknown";
+      const pct=Math.floor(Math.random()*101);
+      const bar="█".repeat(Math.round(pct/10))+"░".repeat(10-Math.round(pct/10));
+      const label=pct>=80?"💕 Soulmates!":pct>=60?"💖 Great match!":pct>=40?"💛 Friends first.":pct>=20?"🤔 Maybe not…":"💔 Nope.";
+      return `💘 **${escapeHtml(name1)} + ${escapeHtml(name2)}**\n${bar} **${pct}%** — ${label}`;
+    }
+    default: return null; // unknown command — send as plain text
   }
 }
 
 
 /* =====================================================================
-   19) CREATE GROUP CHAT
+   EDIT MESSAGE
    ===================================================================== */
-$("#rail-create-group").addEventListener("click", () => {
+function startEditMessage(msgId) {
+  const msg=state.messages.find(m=>m.id===msgId);
+  if (!msg||msg.senderUid!==state.user.uid) return;
+  const msgEl=document.querySelector(`[data-msg-id="${CSS.escape(msgId)}"]`);
+  if (!msgEl) return;
+  const bodyEl=msgEl.querySelector(".msg-body");
+  if (!bodyEl) return;
+  const original=msg.text||"";
+  bodyEl.outerHTML=`<div class="msg-edit-area">
+    <textarea class="msg-edit-input">${escapeHtml(original)}</textarea>
+    <div class="msg-edit-btns">
+      <button class="btn-primary msg-edit-save" data-msg-id="${escapeHtml(msgId)}">Save</button>
+      <button class="btn-ghost msg-edit-cancel">Cancel</button>
+      <span style="font-size:11px;color:var(--t-muted);margin-left:6px;">esc to cancel · enter to save</span>
+    </div>
+  </div>`;
+  const newMsgEl=document.querySelector(`[data-msg-id="${CSS.escape(msgId)}"]`);
+  const ta=newMsgEl?.querySelector("textarea");
+  if (ta) { ta.focus(); ta.selectionStart=ta.selectionEnd=ta.value.length; }
+
+  // Enter to save, esc to cancel inside textarea
+  ta?.addEventListener("keydown", async e=>{
+    if (e.key==="Enter"&&!e.shiftKey) { e.preventDefault(); await editMessage(msgId,ta.value.trim()); }
+    if (e.key==="Escape") { e.preventDefault(); renderMessages(); }
+  });
+}
+
+async function editMessage(msgId, newText) {
+  if (!newText) { showToast("Message can't be empty"); renderMessages(); return; }
+  const chatId=state.activeChatId; if (!chatId) return;
+  try {
+    await updateDoc(doc(db,"chats",chatId,"messages",msgId),{ text:newText, edited:true });
+  } catch(err){ showToast("Edit failed: "+err.message); renderMessages(); }
+}
+
+
+/* =====================================================================
+   REPORT FEATURE
+   ===================================================================== */
+function openReportModal(reportedUid, reportedName, messageId) {
+  const nameEl=$("#report-target-info");
+  if (nameEl) nameEl.textContent="Reporting: "+(reportedName||reportedUid||"this user");
+  const modal=$("#report-modal");
+  if (!modal) return;
+  modal.dataset.reportedUid=reportedUid||"";
+  modal.dataset.messageId=messageId||"";
+  openModal("report-modal");
+}
+
+document.addEventListener("click", async e=>{
+  if (e.target.id==="report-submit-btn"||e.target.closest("#report-submit-btn")) {
+    const modal=$("#report-modal"); if (!modal) return;
+    const reason=$("#report-reason")?.value||"other";
+    const details=$("#report-details")?.value?.trim()||"";
+    const reportedUid=modal.dataset.reportedUid;
+    const messageId=modal.dataset.messageId;
+    if (!reportedUid) { showToast("Nothing to report"); closeModal("report-modal"); return; }
+    try {
+      await addDoc(collection(db,"reports"),{
+        reportedUid, messageId:messageId||null, reason, details,
+        reportedBy:state.user.uid, reportedByName:state.user.displayName,
+        createdAt:serverTimestamp()
+      });
+      showToast("Report submitted. Thank you.");
+      closeModal("report-modal");
+    } catch(err){ showToast("Failed to submit: "+err.message); }
+  }
+});
+
+
+/* =====================================================================
+   CREATE GROUP CHAT  (with join code + leaders)
+   ===================================================================== */
+$("#rail-create-group").addEventListener("click", ()=>{
   state.groupSelections.clear();
-  $("#group-name-input").value = "";
+  $("#group-name-input").value="";
   renderModalFriendList();
   openModal("create-group-modal");
 });
 
 function renderModalFriendList() {
-  const wrap = $("#modal-friend-list");
-  if (!wrap) return;
-  if (!state.friends.length) {
-    wrap.innerHTML = `<div class="empty" style="padding:12px;">You need friends to invite. Add some first!</div>`;
-    return;
-  }
-  wrap.innerHTML = state.friends.map(f => `
+  const wrap=$("#modal-friend-list"); if (!wrap) return;
+  if (!state.friends.length) { wrap.innerHTML=`<div class="empty" style="padding:12px;">Add some friends first!</div>`; return; }
+  wrap.innerHTML=state.friends.map(f=>`
     <label class="modal-friend-row">
-      <input type="checkbox" data-uid="${escapeHtml(f.uid)}" ${state.groupSelections.has(f.uid) ? "checked" : ""}>
-      ${avatarMarkup(f.displayName, f.photoURL, "side-row-avatar", "side-row-fallback")}
-      <div style="flex:1;">${escapeHtml(f.displayName)}${f.discriminator ? `<span style="color:var(--t-muted);font-size:11px;margin-left:2px;">#${escapeHtml(f.discriminator)}</span>` : ""}</div>
-    </label>
-  `).join("");
-  wrap.querySelectorAll("input[type='checkbox']").forEach(cb => {
-    cb.addEventListener("change", (e) => {
-      const uid = e.target.dataset.uid;
-      if (e.target.checked) state.groupSelections.add(uid);
-      else state.groupSelections.delete(uid);
+      <input type="checkbox" data-uid="${escapeHtml(f.uid)}" ${state.groupSelections.has(f.uid)?"checked":""}>
+      ${avatarMarkup(f.displayName,f.photoURL,"side-row-avatar","side-row-fallback")}
+      <div style="flex:1;">${escapeHtml(f.displayName)}${f.discriminator?`<span style="color:var(--t-muted);font-size:11px;margin-left:2px;">#${escapeHtml(f.discriminator)}</span>`:""}</div>
+    </label>`).join("");
+  wrap.querySelectorAll("input[type='checkbox']").forEach(cb=>{
+    cb.addEventListener("change", e=>{
+      const uid=e.target.dataset.uid;
+      if (e.target.checked) state.groupSelections.add(uid); else state.groupSelections.delete(uid);
     });
   });
 }
 
-$("#create-group-confirm-btn").addEventListener("click", async () => {
-  const name = $("#group-name-input").value.trim();
+$("#create-group-confirm-btn").addEventListener("click", async ()=>{
+  const name=$("#group-name-input").value.trim();
   if (!name) { showToast("Enter a group name"); return; }
-  if (state.groupSelections.size === 0) { showToast("Pick at least one friend"); return; }
-  const members = [state.user.uid, ...state.groupSelections];
+  if (state.groupSelections.size===0) { showToast("Pick at least one friend"); return; }
+  const members=[state.user.uid,...state.groupSelections];
+  const joinCode=genJoinCode();
   try {
-    const ref = await addDoc(collection(db, "chats"), {
-      type: "group",
-      members,
-      name,
-      createdBy: state.user.uid,
-      createdAt: serverTimestamp(),
-      lastMessage: "",
-      lastMessageAt: serverTimestamp()
+    const ref=await addDoc(collection(db,"chats"),{
+      type:"group", members, name,
+      createdBy:state.user.uid, createdAt:serverTimestamp(),
+      lastMessage:"", lastMessageAt:serverTimestamp(),
+      joinCode, leaders:[state.user.uid]
     });
     closeModal("create-group-modal");
-    showToast("Group created!");
-    setTimeout(() => openChat(ref.id), 200);
-  } catch (err) { showToast("Error: " + err.message); }
+    // Show join code modal
+    const codeDisplay=$("#group-code-display");
+    if (codeDisplay) codeDisplay.textContent=joinCode;
+    openModal("group-code-modal");
+    setTimeout(()=>openChat(ref.id),200);
+  } catch(err){ showToast("Error: "+err.message); }
+});
+
+// Click join code display to copy it
+document.addEventListener("click", e=>{
+  if (e.target.id==="group-code-display"||e.target.closest("#group-code-display")) {
+    const code=$("#group-code-display")?.textContent?.trim();
+    if (!code||code==="——————") return;
+    navigator.clipboard.writeText(code)
+      .then(()=>showToast("Join code copied!"))
+      .catch(()=>showToast("Code: "+code));
+  }
+  if (e.target.id==="group-code-ok-btn") closeModal("group-code-modal");
 });
 
 
 /* =====================================================================
-   20) ADD MEMBERS to existing group
+   JOIN BY CODE
    ===================================================================== */
-$("#chat-add-member-btn").addEventListener("click", () => {
-  const c = state.activeChat;
-  if (!c || c.type !== "group") return;
+$("#rail-join-code")?.addEventListener("click", ()=>openModal("join-code-modal"));
+
+document.addEventListener("click", async e=>{
+  if (e.target.id==="join-code-confirm-btn"||e.target.closest("#join-code-confirm-btn")) {
+    const input=$("#join-code-input");
+    const code=(input?.value||"").toUpperCase().trim();
+    if (!code||code.length!==8) { showToast("Enter an 8-character join code"); return; }
+    await joinByCode(code);
+    closeModal("join-code-modal");
+    if (input) input.value="";
+  }
+});
+
+async function joinByCode(code) {
+  try {
+    const q=query(collection(db,"chats"),where("joinCode","==",code));
+    const snap=await getDocs(q);
+    if (snap.empty) { showToast("Invalid join code — no group found"); return; }
+    const chatDoc=snap.docs[0];
+    const chatId=chatDoc.id;
+    const chatData=chatDoc.data();
+    if (chatData.members.includes(state.user.uid)) {
+      showToast("You're already in that group"); openChat(chatId); return;
+    }
+    await updateDoc(doc(db,"chats",chatId),{ members:arrayUnion(state.user.uid) });
+    showToast(`Joined "${chatData.name}"!`);
+    openChat(chatId);
+  } catch(err){ showToast("Error: "+err.message); }
+}
+
+
+/* =====================================================================
+   ADD MEMBERS / LEAVE GROUP
+   ===================================================================== */
+$("#chat-add-member-btn")?.addEventListener("click", ()=>{
+  const c=state.activeChat; if (!c||c.type!=="group") return;
   state.addMemberSelections.clear();
-  const candidates = state.friends.filter(f => !c.members.includes(f.uid));
-  const wrap = $("#add-member-list");
-  if (!candidates.length) {
-    wrap.innerHTML = `<div class="empty" style="padding:12px;">All your friends are already in this group.</div>`;
-  } else {
-    wrap.innerHTML = candidates.map(f => `
+  const candidates=state.friends.filter(f=>!c.members.includes(f.uid));
+  const wrap=$("#add-member-list");
+  if (!candidates.length) { wrap.innerHTML=`<div class="empty" style="padding:12px;">All your friends are already in this group.</div>`; }
+  else {
+    wrap.innerHTML=candidates.map(f=>`
       <label class="modal-friend-row">
         <input type="checkbox" data-uid="${escapeHtml(f.uid)}">
-        ${avatarMarkup(f.displayName, f.photoURL, "side-row-avatar", "side-row-fallback")}
-        <div style="flex:1;">${escapeHtml(f.displayName)}${f.discriminator ? `<span style="color:var(--t-muted);font-size:11px;margin-left:2px;">#${escapeHtml(f.discriminator)}</span>` : ""}</div>
-      </label>
-    `).join("");
-    wrap.querySelectorAll("input[type='checkbox']").forEach(cb => {
-      cb.addEventListener("change", (e) => {
-        const uid = e.target.dataset.uid;
-        if (e.target.checked) state.addMemberSelections.add(uid);
-        else state.addMemberSelections.delete(uid);
-      });
+        ${avatarMarkup(f.displayName,f.photoURL,"side-row-avatar","side-row-fallback")}
+        <div style="flex:1;">${escapeHtml(f.displayName)}</div>
+      </label>`).join("");
+    wrap.querySelectorAll("input[type='checkbox']").forEach(cb=>{
+      cb.addEventListener("change",e=>{ const uid=e.target.dataset.uid; if(e.target.checked) state.addMemberSelections.add(uid); else state.addMemberSelections.delete(uid); });
     });
   }
   openModal("add-member-modal");
 });
 
-$("#add-member-confirm-btn").addEventListener("click", async () => {
-  if (!state.activeChatId || !state.addMemberSelections.size) {
-    closeModal("add-member-modal");
-    return;
-  }
+$("#add-member-confirm-btn")?.addEventListener("click", async ()=>{
+  if (!state.activeChatId||!state.addMemberSelections.size) { closeModal("add-member-modal"); return; }
   try {
-    await updateDoc(doc(db, "chats", state.activeChatId), {
-      members: arrayUnion(...state.addMemberSelections)
-    });
-    closeModal("add-member-modal");
-    showToast("Members added");
-  } catch (err) { showToast("Error: " + err.message); }
+    await updateDoc(doc(db,"chats",state.activeChatId),{ members:arrayUnion(...state.addMemberSelections) });
+    closeModal("add-member-modal"); showToast("Members added");
+  } catch(err){ showToast("Error: "+err.message); }
 });
 
-
-/* =====================================================================
-   21) LEAVE GROUP
-   ===================================================================== */
-$("#chat-leave-btn").addEventListener("click", async () => {
-  const c = state.activeChat;
-  if (!c || c.type !== "group") return;
+$("#chat-leave-btn")?.addEventListener("click", async ()=>{
+  const c=state.activeChat; if (!c||c.type!=="group") return;
   if (!confirm(`Leave "${c.name}"?`)) return;
   try {
-    const newMembers = c.members.filter(m => m !== state.user.uid);
-    await updateDoc(doc(db, "chats", c.id), { members: newMembers });
-    showFriendsView();
-    showToast("Left group");
-  } catch (err) { showToast("Error: " + err.message); }
+    const newMembers=c.members.filter(m=>m!==state.user.uid);
+    await updateDoc(doc(db,"chats",c.id),{members:newMembers});
+    showFriendsView(); showToast("Left group");
+  } catch(err){ showToast("Error: "+err.message); }
 });
 
 
 /* =====================================================================
-   22) MODALS — open/close helpers
+   MODALS
    ===================================================================== */
-function openModal(id) { $("#" + id).classList.remove("hidden"); }
-function closeModal(id) { $("#" + id).classList.add("hidden"); }
-$$("[data-close]").forEach(b => b.addEventListener("click", () => closeModal(b.dataset.close)));
-$$(".modal").forEach(m => m.addEventListener("click", (e) => {
-  if (e.target === m) m.classList.add("hidden");
-}));
+function openModal(id)  { const m=document.getElementById(id); if(m) m.classList.remove("hidden"); }
+function closeModal(id) { const m=document.getElementById(id); if(m) m.classList.add("hidden"); }
+$$("[data-close]").forEach(b=>b.addEventListener("click",()=>closeModal(b.dataset.close)));
+$$(".modal").forEach(m=>m.addEventListener("click",e=>{ if(e.target===m) m.classList.add("hidden"); }));
+
+// Settings modal — revert theme preview on backdrop/X close
+function onSettingsClose() {
+  if (_pendingTheme!==null && _pendingTheme!==state.theme) applyTheme(state.theme);
+}
+document.querySelector("[data-close='settings-modal']")?.addEventListener("click", onSettingsClose);
+$("#settings-modal")?.addEventListener("click", e=>{ if(e.target===$("#settings-modal")) onSettingsClose(); });
+
+
+// Suggestions link is a plain <a target="_blank"> in the HTML — no JS needed.
 
 
 /* =====================================================================
-   23) SETTINGS MODAL
+   SETTINGS MODAL
    ===================================================================== */
+let _pendingTheme=null, _pendingStatus=null, _pendingBannerColor=undefined, _pendingPrivate=null;
+
 $("#settings-btn").addEventListener("click", openSettingsModal);
 
 function openSettingsModal() {
-  const u = state.user;
-  $("#settings-username-input").value = u.username || u.displayName || "";
-  $("#settings-tag-display").textContent = u.discriminator ? `#${u.discriminator}` : "#????";
-  $("#settings-bio-input").value = u.bio || "";
-  $("#settings-photo-input").value = u.photoURL || "";
-  $("#settings-sound-toggle").checked = state.soundEnabled;
-  updateAvatarPreview("settings", u.username || u.displayName, u.photoURL);
+  const u=state.user;
+  _pendingTheme=state.theme;
+  _pendingStatus=state.status;
+  _pendingBannerColor=state.bannerColor;
+  _pendingPrivate=state.isPrivate;
+
+  if($("#settings-username-input")) $("#settings-username-input").value=u.username||u.displayName||"";
+  if($("#settings-tag-display"))    $("#settings-tag-display").textContent=u.discriminator?`#${u.discriminator}`:"#????";
+  if($("#settings-bio-input"))      $("#settings-bio-input").value=u.bio||"";
+  if($("#settings-photo-input"))    $("#settings-photo-input").value=u.photoURL||"";
+  if($("#settings-sound-toggle"))   $("#settings-sound-toggle").checked=state.soundEnabled;
+
+  // Theme swatches
+  $$(".theme-swatch").forEach(sw=>sw.classList.toggle("active",sw.dataset.theme===_pendingTheme));
+  // Status options
+  $$(".status-row-option").forEach(opt=>opt.classList.toggle("active",opt.dataset.status===_pendingStatus));
+  // Banner swatches
+  $$(".banner-swatch").forEach(sw=>sw.classList.toggle("active",(sw.dataset.color||"")===((_pendingBannerColor)||"")));
+  // Privacy
+  const privToggle=$("#settings-privacy-toggle");
+  if (privToggle) privToggle.checked=!!_pendingPrivate;
+  // Member since
+  const sinceEl=$("#settings-created-at");
+  if (sinceEl&&u.createdAt) {
+    const d=u.createdAt.toDate?u.createdAt.toDate():new Date(u.createdAt);
+    sinceEl.textContent=d.toLocaleDateString(undefined,{year:"numeric",month:"long",day:"numeric"});
+  }
+
+  updateAvatarPreview("settings",u.username||u.displayName,u.photoURL);
   openModal("settings-modal");
 }
 
-// Live avatar preview as user types in settings
-$("#settings-photo-input").addEventListener("input", () => {
-  updateAvatarPreview(
-    "settings",
-    $("#settings-username-input").value.trim(),
-    $("#settings-photo-input").value.trim() || null
-  );
+// Settings live preview
+$("#settings-photo-input")?.addEventListener("input",()=>{
+  updateAvatarPreview("settings",$("#settings-username-input")?.value.trim(),$("#settings-photo-input")?.value.trim()||null);
 });
-$("#settings-username-input").addEventListener("input", () => {
-  updateAvatarPreview(
-    "settings",
-    $("#settings-username-input").value.trim(),
-    $("#settings-photo-input").value.trim() || null
-  );
+$("#settings-username-input")?.addEventListener("input",()=>{
+  updateAvatarPreview("settings",$("#settings-username-input")?.value.trim(),$("#settings-photo-input")?.value.trim()||null);
 });
 
-$("#settings-save-btn").addEventListener("click", async () => {
-  const username = $("#settings-username-input").value.trim();
-  const bio = $("#settings-bio-input").value.trim();
-  const photoInput = $("#settings-photo-input").value.trim();
-  const soundOn = $("#settings-sound-toggle").checked;
-
-  if (!username || username.length < 3) {
-    showToast("Username must be at least 3 characters.");
+// Settings modal interactions (theme/status/banner)
+$("#settings-modal")?.addEventListener("click", e=>{
+  const themeSwatch=e.target.closest(".theme-swatch");
+  if (themeSwatch) {
+    _pendingTheme=themeSwatch.dataset.theme;
+    $$(".theme-swatch").forEach(s=>s.classList.toggle("active",s.dataset.theme===_pendingTheme));
+    applyTheme(_pendingTheme); // live preview
     return;
   }
-  if (!/^[a-zA-Z0-9_]+$/.test(username)) {
-    showToast("Username: letters, numbers, underscores only.");
+  const statusOpt=e.target.closest(".status-row-option");
+  if (statusOpt) {
+    _pendingStatus=statusOpt.dataset.status;
+    $$(".status-row-option").forEach(o=>o.classList.toggle("active",o.dataset.status===_pendingStatus));
     return;
   }
+  const bannerSwatch=e.target.closest(".banner-swatch");
+  if (bannerSwatch) {
+    _pendingBannerColor=bannerSwatch.dataset.color||null;
+    $$(".banner-swatch").forEach(s=>s.classList.toggle("active",(s.dataset.color||"")===((_pendingBannerColor)||"")));
+    return;
+  }
+});
 
-  const photoURL = photoInput || null;
-  state.soundEnabled = soundOn;
-  localStorage.setItem("sc_sound", soundOn ? "true" : "false");
+$("#settings-save-btn")?.addEventListener("click", async ()=>{
+  const username=$("#settings-username-input")?.value.trim();
+  const bio=$("#settings-bio-input")?.value.trim();
+  const photoInput=$("#settings-photo-input")?.value.trim();
+  const soundOn=$("#settings-sound-toggle")?.checked??state.soundEnabled;
+  const privOn=$("#settings-privacy-toggle")?.checked??false;
 
-  const btn = $("#settings-save-btn");
-  btn.disabled = true;
-  btn.textContent = "Saving…";
+  if (!username||username.length<3) { showToast("Username must be at least 3 characters."); return; }
+  if (username.length>32)           { showToast("Username must be 32 characters or fewer."); return; }
+  if (!/^[a-zA-Z0-9_]+$/.test(username)) { showToast("Username: letters, numbers, underscores only."); return; }
+  if (isNameBlocked(username)) {
+    const safe=generateSafeName();
+    showToast(`That username isn't allowed. Try "${safe}" instead.`); return;
+  }
 
-  try {
-    await updateDoc(doc(db, "users", state.user.uid), {
-      displayName: username,
-      displayNameLower: username.toLowerCase(),
-      username,
-      bio: bio || "",
-      photoURL: photoURL || null
-    });
-
-    // Pre-apply locally (ownProfile listener will also fire)
-    state.user.username = username;
-    state.user.displayName = username;
-    state.user.bio = bio;
-    state.user.photoURL = photoURL;
-    state.userCache[state.user.uid] = { ...state.user };
+  const photoURL=photoInput||null;
+  state.soundEnabled=soundOn;
+  localStorage.setItem("sc_sound",soundOn?"true":"false");
+  // Apply theme (already previewed)
+  if (_pendingTheme&&_pendingTheme!==state.theme) applyTheme(_pendingTheme);
+  // Apply status
+  if (_pendingStatus&&_pendingStatus!==state.status) {
+    state.status=_pendingStatus;
+    localStorage.setItem("sc_status",_pendingStatus);
     updateUserPanel();
-
-    closeModal("settings-modal");
-    showToast("Settings saved ✓");
-  } catch (err) {
-    showToast("Save failed: " + err.message);
-  } finally {
-    btn.disabled = false;
-    btn.textContent = "Save Changes";
   }
+  state.isPrivate=privOn;
+  state.bannerColor=_pendingBannerColor!==undefined?_pendingBannerColor:state.bannerColor;
+
+  const btn=$("#settings-save-btn");
+  btn.disabled=true; btn.textContent="Saving…";
+  try {
+    await updateDoc(doc(db,"users",state.user.uid),{
+      displayName:username, displayNameLower:username.toLowerCase(),
+      username, bio:bio||"", photoURL:photoURL||null,
+      status:state.status, bannerColor:state.bannerColor||null,
+      isPrivate:privOn
+    });
+    state.user.username=username; state.user.displayName=username;
+    state.user.bio=bio; state.user.photoURL=photoURL;
+    state.userCache[state.user.uid]={...state.user};
+    updateUserPanel();
+    closeModal("settings-modal"); showToast("Settings saved ✓");
+  } catch(err){ showToast("Save failed: "+err.message); }
+  finally { btn.disabled=false; btn.textContent="Save Changes"; }
 });
 
 
 /* =====================================================================
-   24) EMOJI PICKER
+   EMOJI PICKER  (with category tabs)
    ===================================================================== */
-let emojiOpen = false;
-const emojiBtn = $("#emoji-btn");
-const emojiPicker = $("#emoji-picker");
-const emojiGrid = $("#emoji-grid");
-const emojiSearch = $("#emoji-search");
+let emojiOpen=false;
+const emojiBtn=$("#emoji-btn");
+const emojiPicker=$("#emoji-picker");
+const emojiGrid=$("#emoji-grid");
+const emojiSearch=$("#emoji-search");
 
-function buildEmojiGrid(filter = "") {
-  const items = emojiPickerItems();
-  const f = filter.trim().toLowerCase();
-  const filtered = f ? items.filter(it => it.name.toLowerCase().includes(f) || it.keywords.includes(f)) : items;
-  emojiGrid.innerHTML = filtered.map(it => `
-    <button class="emoji-cell" title=":${escapeHtml(it.name)}:" data-insert="${escapeHtml(it.insert)}">
-      ${it.html}
-    </button>
+// Render category tabs
+function buildEmojiCatTabs() {
+  const catsWrap=$("#emoji-picker-cats"); if (!catsWrap) return;
+  catsWrap.innerHTML=EMOJI_CATS.map(c=>`
+    <button class="emoji-cat-btn${state.activeCat===c.id?" active":""}" data-cat="${c.id}" title="${c.id}">${c.label}</button>
   `).join("");
 }
 
-emojiBtn.addEventListener("click", () => {
-  emojiOpen = !emojiOpen;
+function buildEmojiGrid(filter="") {
+  const f=filter.trim().toLowerCase();
+  let items;
+  if (f) {
+    items=EMOJI_DATA.filter(e=>{
+      const nameMatch=e.name.includes(f);
+      const altMatch=e.alt&&e.alt.some(a=>a.toLowerCase().includes(f));
+      return nameMatch||altMatch;
+    });
+  } else {
+    items=state.activeCat==="all" ? EMOJI_DATA : EMOJI_DATA.filter(e=>e.cat===state.activeCat);
+  }
+  if (!emojiGrid) return;
+  emojiGrid.innerHTML=items.map(e=>{
+    if (e.isStatic) return `<button class="emoji-cell" title=":Static:" data-insert=":Static:"><img src="${STATIC_EMOJI_URL}" class="static-emoji-square" alt=":Static:" /></button>`;
+    return `<button class="emoji-cell" title=":${escapeHtml(e.name)}:" data-insert="${escapeHtml(e.char)}">${e.char}</button>`;
+  }).join("");
+}
+
+emojiBtn?.addEventListener("click",()=>{
+  emojiOpen=!emojiOpen;
   if (emojiOpen) {
     emojiPicker.classList.remove("hidden");
-    buildEmojiGrid();
-    emojiSearch.value = "";
-    emojiSearch.focus();
+    buildEmojiCatTabs(); buildEmojiGrid(); emojiSearch.value=""; emojiSearch.focus();
   } else {
     emojiPicker.classList.add("hidden");
   }
 });
 
-emojiSearch.addEventListener("input", () => buildEmojiGrid(emojiSearch.value));
+emojiSearch?.addEventListener("input",()=>buildEmojiGrid(emojiSearch.value));
 
-emojiGrid.addEventListener("click", (e) => {
-  const cell = e.target.closest(".emoji-cell");
+// Category tab clicks
+$("#emoji-picker")?.addEventListener("click", e=>{
+  const tab=e.target.closest(".emoji-cat-btn");
+  if (tab) {
+    state.activeCat=tab.dataset.cat;
+    $$(".emoji-cat-btn").forEach(t=>t.classList.toggle("active",t.dataset.cat===state.activeCat));
+    buildEmojiGrid(emojiSearch?.value||"");
+    return;
+  }
+  const cell=e.target.closest(".emoji-cell");
   if (!cell) return;
-  const insert = cell.dataset.insert;
-  const start = composer.selectionStart;
-  const end = composer.selectionEnd;
-  composer.value = composer.value.slice(0, start) + insert + composer.value.slice(end);
-  composer.focus();
-  composer.selectionStart = composer.selectionEnd = start + insert.length;
+  const insert=cell.dataset.insert;
+  const start=composer.selectionStart, end=composer.selectionEnd;
+  composer.value=composer.value.slice(0,start)+insert+composer.value.slice(end);
+  composer.focus(); composer.selectionStart=composer.selectionEnd=start+insert.length;
+  updateSendBtn();
 });
 
-document.addEventListener("click", (e) => {
+document.addEventListener("click",e=>{
   if (!emojiOpen) return;
-  if (e.target.closest("#emoji-picker") || e.target.closest("#emoji-btn")) return;
-  emojiPicker.classList.add("hidden");
-  emojiOpen = false;
+  if (e.target.closest("#emoji-picker")||e.target.closest("#emoji-btn")) return;
+  emojiPicker?.classList.add("hidden"); emojiOpen=false;
 });
 
 
 /* =====================================================================
-   25) PROFILE CARD
+   EMOJI AUTOCOMPLETE  (inline :word: dropdown)
+   ===================================================================== */
+let acItems=[], acTriggerStart=-1;
+
+function updateEmojiAutocomplete() {
+  const ac=$("#emoji-autocomplete"); if (!ac) return;
+  const val=composer.value;
+  const pos=composer.selectionStart;
+  const before=val.slice(0,pos);
+  const match=before.match(/:([a-zA-Z0-9_+\-]{1,})$/);
+  if (!match) { hideEmojiAc(); return; }
+  const q=match[1].toLowerCase();
+  acTriggerStart=pos-match[0].length;
+
+  acItems=EMOJI_DATA.filter(e=>{
+    if (e.isStatic) return "static".startsWith(q)||q==="sta";
+    return e.name.startsWith(q)||e.name.includes(q)||(e.alt&&e.alt.some(a=>a.toLowerCase().replace(/\s/g,"").includes(q)));
+  }).slice(0,8);
+
+  if (!acItems.length) { hideEmojiAc(); return; }
+  state.emojiAcIndex=0;
+  ac.innerHTML=acItems.map((e,i)=>{
+    const display=e.isStatic?`<img src="${STATIC_EMOJI_URL}" style="width:18px;height:18px;border-radius:3px;" alt=":Static:">`:e.char;
+    return `<div class="emoji-ac-item${i===0?" active":""}" data-index="${i}">
+      <span class="emoji-ac-char">${display}</span>
+      <span class="emoji-ac-name">:${escapeHtml(e.name)}:</span>
+    </div>`;
+  }).join("");
+  ac.classList.remove("hidden");
+}
+
+function hideEmojiAc() {
+  const ac=$("#emoji-autocomplete"); if(ac) ac.classList.add("hidden");
+  acItems=[]; state.emojiAcIndex=-1; acTriggerStart=-1;
+}
+
+function updateAcHighlight() {
+  $$(".emoji-ac-item").forEach((el,i)=>el.classList.toggle("active",i===state.emojiAcIndex));
+  const active=document.querySelector(".emoji-ac-item.active");
+  active?.scrollIntoView({block:"nearest"});
+}
+
+function insertAcItem(index) {
+  if (index<0||index>=acItems.length) return;
+  const item=acItems[index];
+  const insert=item.isStatic?":Static:":item.char;
+  const val=composer.value, pos=composer.selectionStart;
+  composer.value=val.slice(0,acTriggerStart)+insert+val.slice(pos);
+  composer.selectionStart=composer.selectionEnd=acTriggerStart+insert.length;
+  hideEmojiAc(); updateSendBtn(); composer.focus();
+}
+
+// Click on autocomplete item
+document.addEventListener("click",e=>{
+  const item=e.target.closest(".emoji-ac-item");
+  if (!item) return;
+  const idx=+item.dataset.index;
+  insertAcItem(idx);
+});
+
+
+/* =====================================================================
+   PROFILE CARD
    ===================================================================== */
 async function showProfileCard(uid, event) {
-  const profile = await fetchUserProfile(uid);
-  if (!profile) return;
+  const profile=await fetchUserProfile(uid); if (!profile) return;
+  const card=$("#profile-card"); if (!card) return;
 
-  const card = $("#profile-card");
-  const isSelf = uid === state.user.uid;
-  const isFriend = state.friends.some(f => f.uid === uid);
-  const hasPendingOut = state.outgoing.some(r => r.toUid === uid);
+  const isSelf=uid===state.user.uid;
+  const isFriend=state.friends.some(f=>f.uid===uid);
+  const hasPendingOut=state.outgoing.some(r=>r.toUid===uid);
+
+  // Privacy check
+  const isPrivate=profile.isPrivate&&!isFriend&&!isSelf;
+
+  // Banner
+  const bannerEl=$("#profile-card-banner");
+  if (bannerEl) {
+    bannerEl.style.background=profile.bannerColor||"var(--sidebar-bg)";
+    bannerEl.style.display="";
+  }
 
   // Avatar
-  const avatarEl = $("#profile-card-avatar-inner");
-  if (profile.photoURL) {
-    avatarEl.innerHTML = `<img src="${escapeHtml(profile.photoURL)}" alt="" />`;
+  const avatarEl=$("#profile-card-avatar-inner");
+  if (isPrivate) {
+    avatarEl.innerHTML=""; avatarEl.textContent="?";
+  } else if (profile.photoURL) {
+    avatarEl.innerHTML=`<img src="${escapeHtml(profile.photoURL)}" alt="" />`;
   } else {
-    const initial = (profile.username || profile.displayName || "?").charAt(0).toUpperCase();
-    avatarEl.innerHTML = "";
-    avatarEl.textContent = initial;
+    avatarEl.innerHTML="";
+    avatarEl.textContent=(profile.username||profile.displayName||"?").charAt(0).toUpperCase();
   }
 
-  $("#profile-card-name").textContent = profile.username || profile.displayName || "User";
-  $("#profile-card-tag").textContent = profile.discriminator ? `#${profile.discriminator}` : "";
-  $("#profile-card-bio").textContent = profile.bio || "No bio set yet.";
+  // Status dot
+  const statusDot=$("#profile-card-status-dot");
+  if (statusDot) {
+    if (!isSelf&&!isFriend) { statusDot.style.display="none"; }
+    else { statusDot.style.display=""; statusDot.dataset.status=profile.status||"online"; }
+  }
 
-  let actionsHtml = "";
+  // Name / bio
+  $("#profile-card-name").textContent=profile.username||profile.displayName||"User";
+  $("#profile-card-tag").textContent=profile.discriminator?`#${profile.discriminator}`:"";
+  $("#profile-card-bio").textContent=isPrivate?"🔒 This profile is private.":(profile.bio||"No bio set yet.");
+
+  // Member since
+  const sinceEl=$("#profile-card-since");
+  if (sinceEl) {
+    if (profile.createdAt&&!isPrivate) {
+      const d=profile.createdAt.toDate?profile.createdAt.toDate():new Date(profile.createdAt);
+      sinceEl.textContent="Member since "+d.toLocaleDateString(undefined,{year:"numeric",month:"long"});
+      sinceEl.style.display="";
+    } else { sinceEl.style.display="none"; }
+  }
+
+  // Actions
+  let actionsHtml="";
   if (isSelf) {
-    actionsHtml = `<button class="btn-ghost" data-pc-action="edit-profile">Edit Profile</button>`;
+    actionsHtml=`<button class="btn-ghost" data-pc-action="edit-profile">Edit Profile</button>`;
   } else {
-    if (!isFriend && !hasPendingOut) {
-      actionsHtml += `<button class="btn-primary" data-pc-action="add-friend" data-pc-uid="${escapeHtml(uid)}">Add Friend</button>`;
-    } else if (hasPendingOut) {
-      actionsHtml += `<span style="font-size:12px;color:var(--t-muted);">Request sent</span>`;
-    }
-    actionsHtml += `<button class="btn-ghost" data-pc-action="message" data-pc-uid="${escapeHtml(uid)}">Message</button>`;
+    if (!isFriend&&!hasPendingOut)
+      actionsHtml+=`<button class="btn-primary" data-pc-action="add-friend" data-pc-uid="${escapeHtml(uid)}">Add Friend</button>`;
+    else if (hasPendingOut)
+      actionsHtml+=`<span style="font-size:12px;color:var(--t-muted);">Request sent</span>`;
+    actionsHtml+=`<button class="btn-ghost" data-pc-action="message" data-pc-uid="${escapeHtml(uid)}">Message</button>`;
   }
-  $("#profile-card-actions").innerHTML = actionsHtml;
+  $("#profile-card-actions").innerHTML=actionsHtml;
 
-  // Position near cursor, clamped to viewport
-  const W = 290, H = 320;
-  let x = event.clientX + 12;
-  let y = event.clientY - 20;
-  if (x + W > window.innerWidth - 8) x = event.clientX - W - 12;
-  if (y + H > window.innerHeight - 8) y = window.innerHeight - H - 8;
-  if (y < 8) y = 8;
-  if (x < 8) x = 8;
-  card.style.left = x + "px";
-  card.style.top = y + "px";
+  // Position
+  const W=290, H=360;
+  let x=event.clientX+12, y=event.clientY-20;
+  if (x+W>window.innerWidth-8) x=event.clientX-W-12;
+  if (y+H>window.innerHeight-8) y=window.innerHeight-H-8;
+  if (y<8) y=8; if (x<8) x=8;
+  card.style.left=x+"px"; card.style.top=y+"px";
   card.classList.remove("hidden");
 }
 
-$("#profile-card-close").addEventListener("click", () => {
-  $("#profile-card").classList.add("hidden");
-});
+$("#profile-card-close")?.addEventListener("click",()=>$("#profile-card")?.classList.add("hidden"));
 
-$("#profile-card").addEventListener("click", async (e) => {
-  const btn = e.target.closest("[data-pc-action]");
-  if (!btn) return;
-  const action = btn.dataset.pcAction;
-  const uid = btn.dataset.pcUid;
-
-  if (action === "message") {
+$("#profile-card")?.addEventListener("click", async e=>{
+  const btn=e.target.closest("[data-pc-action]"); if (!btn) return;
+  const action=btn.dataset.pcAction, uid=btn.dataset.pcUid;
+  if (action==="message") {
     $("#profile-card").classList.add("hidden");
     await openOrCreateDm(uid);
-  } else if (action === "add-friend") {
-    btn.disabled = true;
-    btn.textContent = "Sending…";
+  } else if (action==="add-friend") {
+    btn.disabled=true; btn.textContent="Sending…";
     try {
-      const p = state.userCache[uid] || {};
-      const reqId = `${state.user.uid}_${uid}`;
-      await setDoc(doc(db, "friendRequests", reqId), {
-        fromUid: state.user.uid,
-        toUid: uid,
-        fromName: state.user.displayName,
-        fromPhoto: state.user.photoURL || null,
-        toName: p.username || p.displayName || "User",
-        toPhoto: p.photoURL || null,
-        createdAt: serverTimestamp()
+      const p=state.userCache[uid]||{};
+      const reqId=`${state.user.uid}_${uid}`;
+      await setDoc(doc(db,"friendRequests",reqId),{
+        fromUid:state.user.uid, toUid:uid,
+        fromName:state.user.displayName, fromPhoto:state.user.photoURL||null,
+        toName:p.username||p.displayName||"User", toPhoto:p.photoURL||null,
+        createdAt:serverTimestamp()
       });
-      btn.textContent = "Sent ✓";
-      showToast("Friend request sent");
-    } catch (err) {
-      btn.disabled = false;
-      btn.textContent = "Add Friend";
-      showToast("Error: " + err.message);
-    }
-  } else if (action === "edit-profile") {
+      btn.textContent="Sent ✓"; showToast("Friend request sent");
+    } catch(err){ btn.disabled=false; btn.textContent="Add Friend"; showToast("Error: "+err.message); }
+  } else if (action==="edit-profile") {
     $("#profile-card").classList.add("hidden");
     openSettingsModal();
   }
 });
 
-// Close profile card on outside click
-document.addEventListener("click", (e) => {
-  const card = $("#profile-card");
-  if (card.classList.contains("hidden")) return;
+document.addEventListener("click",e=>{
+  const card=$("#profile-card");
+  if (!card||card.classList.contains("hidden")) return;
   if (card.contains(e.target)) return;
-  if (e.target.closest("[data-profile-uid]")) return;
+  if (e.target.closest("[data-profile-uid]")||e.target.closest(".friend-row")) return;
   card.classList.add("hidden");
 });
 
 
 /* =====================================================================
-   26) MOBILE / RESPONSIVE — sidebar toggle on small screens
+   MOBILE
    ===================================================================== */
 function maybeToggleSidebar(open) {
-  const appEl = $("#app");
+  const appEl=$("#app");
   if (window.matchMedia("(max-width: 768px)").matches) {
-    if (open) appEl.classList.add("show-sidebar");
-    else appEl.classList.remove("show-sidebar");
+    if (open) appEl.classList.add("show-sidebar"); else appEl.classList.remove("show-sidebar");
   }
 }
-
-["#dm-list", "#group-list", "#rail-groups"].forEach(sel => {
-  $(sel).addEventListener("click", () => maybeToggleSidebar(false));
+["#dm-list","#group-list","#rail-groups"].forEach(sel=>{
+  $(sel)?.addEventListener("click",()=>maybeToggleSidebar(false));
 });
-$("#rail-home").addEventListener("click", () => maybeToggleSidebar(true));
-$("#open-friends-btn").addEventListener("click", () => maybeToggleSidebar(false));
+$("#rail-home")?.addEventListener("click",()=>maybeToggleSidebar(true));
+$("#open-friends-btn")?.addEventListener("click",()=>maybeToggleSidebar(false));
