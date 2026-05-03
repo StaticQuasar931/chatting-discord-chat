@@ -4,54 +4,34 @@
    ---------------------------------------------------------------------
    FIRESTORE STRUCTURE
    ---------------------------------------------------------------------
-   users/{uid}                                 -- user profile
+   users/{uid}
        uid             string   (== document id)
-       displayName     string   (from Google)
+       displayName     string   (== username, kept in sync)
        displayNameLower string  (lowercased, used for prefix search)
-       email           string
+       username        string   (chosen display name, 3-32 chars)
+       discriminator   string   (4-digit zero-padded, e.g. "0042")
+       bio             string   (optional, up to 200 chars)
+       email           string   (private — never shown in UI)
        photoURL        string|null
        createdAt       timestamp
 
-   friendRequests/{requestId}                  -- pending friend requests
-       fromUid        string
-       toUid          string
-       fromName       string   (denormalized for UI)
-       fromPhoto      string|null
-       toName         string   (denormalized for UI)
-       toPhoto        string|null
-       createdAt      timestamp
+   friendRequests/{requestId}     -- pending friend requests
+       fromUid / toUid / fromName / fromPhoto / toName / toPhoto / createdAt
 
-   friendships/{friendshipId}                  -- accepted friendships.
-       (friendshipId is sortedUids.join("_"))
-       users          [uidA, uidB]   (sorted)
-       createdAt      timestamp
+   friendships/{friendshipId}     -- sortedUids.join("_")
+       users [uidA, uidB] / createdAt
 
-   chats/{chatId}                              -- DM or group chat
-       type           "dm" | "group"
-       members        [uid, ...]       (always includes creator)
-       name           string           (group only; DMs leave blank)
-       createdBy      string
-       createdAt      timestamp
-       lastMessage    string
-       lastMessageAt  timestamp
-
+   chats/{chatId}                 -- DM or group chat
+       type / members / name / createdBy / createdAt / lastMessage / lastMessageAt
        messages/{messageId}
-           text         string
-           senderUid    string
-           senderName   string
-           senderPhoto  string|null
-           createdAt    timestamp
+           text / senderUid / senderName / senderPhoto / createdAt
 
-   For DMs we use a deterministic chatId of "dm_<uidA>_<uidB>" (sorted)
-   so opening the same DM again reuses the existing chat.
+   DM chatId: "dm_<uidA>_<uidB>" (sorted)
    ===================================================================== */
 
 
 /* =====================================================================
    1) FIREBASE CONFIG
-   ---------------------------------------------------------------------
-   >>> REPLACE the placeholder values below with your own config from
-       Firebase Console -> Project settings -> Your apps -> Web app.
    ===================================================================== */
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import {
@@ -80,7 +60,6 @@ import {
   onSnapshot,
   serverTimestamp,
   arrayUnion,
-  Timestamp,
   writeBatch
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
@@ -104,25 +83,29 @@ const provider = new GoogleAuthProvider();
    2) STATE
    ===================================================================== */
 const state = {
-  user: null,            // current signed-in user profile {uid, displayName, photoURL, email}
-  friends: [],           // [{uid, displayName, photoURL, friendshipId}]
-  incoming: [],          // [{id, fromUid, fromName, fromPhoto}]
-  outgoing: [],          // [{id, toUid, toName, toPhoto}]
-  chats: [],             // [{id, type, name, members, lastMessage, lastMessageAt}]
+  user: null,            // current user profile
+  friends: [],
+  incoming: [],
+  outgoing: [],
+  chats: [],
   activeChatId: null,
   activeChat: null,
-  messages: [],          // current chat's messages
-  userCache: {},         // uid -> profile (fetched on demand)
-  unsubscribers: {       // listener cleanups
+  messages: [],
+  userCache: {},
+  unsubscribers: {
     friendships: null,
     incoming: null,
     outgoing: null,
     chats: null,
-    messages: null
+    messages: null,
+    ownProfile: null    // live own-profile updates
   },
   filters: { sidebar: "" },
-  groupSelections: new Set(), // selected friend uids in create-group modal
-  addMemberSelections: new Set()
+  groupSelections: new Set(),
+  addMemberSelections: new Set(),
+  soundEnabled: localStorage.getItem("sc_sound") !== "false",
+  chatInitialized: new Set(),   // chatIds whose first snapshot has loaded
+  incomingInitialized: false    // skips sound on first incoming-requests snapshot
 };
 
 
@@ -168,7 +151,7 @@ function formatTime(ts) {
   const d = ts.toDate ? ts.toDate() : new Date(ts);
   const today = new Date();
   const isToday = d.toDateString() === today.toDateString();
-  const yesterday = new Date(today.getTime() - 24*60*60*1000);
+  const yesterday = new Date(today.getTime() - 86400000);
   const isYesterday = d.toDateString() === yesterday.toDateString();
   const time = d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
   if (isToday) return `Today at ${time}`;
@@ -180,6 +163,10 @@ function shortTime(ts) {
   if (!ts) return "";
   const d = ts.toDate ? ts.toDate() : new Date(ts);
   return d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+}
+
+function genDiscriminator() {
+  return String(Math.floor(Math.random() * 10000)).padStart(4, "0");
 }
 
 
@@ -219,48 +206,38 @@ const EMOJI_MAP = {
   worried: "😟", confused: "😕", flushed: "😳", scream: "😱", angry: "😠",
   rage: "😡", sob: "😭", cry: "😢", sleeping: "😴", yawn: "🥱",
   sunglasses: "😎", nerd: "🤓", cool: "🆒", pleading: "🥺", smiley: "😃",
-
-  // gestures / hands
+  // gestures
   thumbsup: "👍", "+1": "👍", thumbsdown: "👎", "-1": "👎",
   ok_hand: "👌", clap: "👏", wave: "👋", muscle: "💪", point_right: "👉",
   point_left: "👈", point_up: "👆", point_down: "👇", pray: "🙏",
   raised_hands: "🙌", handshake: "🤝", fist: "✊", crossed_fingers: "🤞",
-
   // hearts / symbols
   heart: "❤️", broken_heart: "💔", sparkling_heart: "💖", two_hearts: "💕",
   fire: "🔥", "100": "💯", star: "⭐", sparkles: "✨", boom: "💥",
   zzz: "💤", eyes: "👀", brain: "🧠", warning: "⚠️", check: "✅",
   white_check_mark: "✅", x: "❌", question: "❓", exclamation: "❗",
   tada: "🎉", confetti_ball: "🎊", gift: "🎁", trophy: "🏆", medal: "🏅",
-
-  // weather / nature
+  // weather
   sun: "☀️", moon: "🌙", cloud: "☁️", rainbow: "🌈", snowflake: "❄️",
   zap: "⚡", umbrella: "☂️", fog: "🌫️",
-
   // food
   pizza: "🍕", burger: "🍔", fries: "🍟", taco: "🌮", sushi: "🍣",
   ramen: "🍜", coffee: "☕", tea: "🍵", cake: "🎂", cookie: "🍪",
   apple: "🍎", banana: "🍌", strawberry: "🍓", watermelon: "🍉", grapes: "🍇",
   popcorn: "🍿", donut: "🍩",
-
   // animals
   dog: "🐶", cat: "🐱", fox: "🦊", bear: "🐻", panda: "🐼",
   lion: "🦁", tiger: "🐯", pig: "🐷", monkey: "🐵", penguin: "🐧",
   unicorn: "🦄", bee: "🐝", bug: "🐛", butterfly: "🦋",
-
-  // objects / activities
+  // objects
   book: "📚", pencil: "✏️", computer: "💻", phone: "📱", clock: "⏰",
   music: "🎵", headphones: "🎧", soccer: "⚽", basketball: "🏀",
   football: "🏈", baseball: "⚾", videogame: "🎮", art: "🎨",
   camera: "📷", rocket: "🚀", airplane: "✈️", car: "🚗", bike: "🚲",
-
-  // travel / places
   earth: "🌍", school: "🏫", house: "🏠", office: "🏢", park: "🏞️",
 };
 
-// Build a list view for the picker (label + render html)
 function emojiPickerItems() {
-  // Special at top
   const items = [{
     name: "Static",
     html: `<img src="${STATIC_EMOJI_URL}" alt=":Static:" />`,
@@ -268,12 +245,7 @@ function emojiPickerItems() {
     keywords: "static logo special"
   }];
   for (const [name, char] of Object.entries(EMOJI_MAP)) {
-    items.push({
-      name,
-      html: char,
-      insert: char,
-      keywords: name
-    });
+    items.push({ name, html: char, insert: char, keywords: name });
   }
   return items;
 }
@@ -281,6 +253,8 @@ function emojiPickerItems() {
 
 /* =====================================================================
    6) MESSAGE FORMATTER (markdown-lite + emoji)
+   ---------------------------------------------------------------------
+   Order matters — passes build on each other.
    ===================================================================== */
 function formatMessage(raw) {
   if (!raw) return "";
@@ -290,21 +264,21 @@ function formatMessage(raw) {
   const codeBlocks = [];
   text = text.replace(/```([\s\S]*?)```/g, (_m, inner) => {
     codeBlocks.push(inner.replace(/^\n/, ""));
-    return `\u0000CB${codeBlocks.length - 1}\u0000`;
+    return ` CB${codeBlocks.length - 1} `;
   });
 
   // Inline code ` ... `
   const inlineCodes = [];
   text = text.replace(/`([^`\n]+)`/g, (_m, inner) => {
     inlineCodes.push(inner);
-    return `\u0000IC${inlineCodes.length - 1}\u0000`;
+    return ` IC${inlineCodes.length - 1} `;
   });
 
   // Bold ** ... **
   text = text.replace(/\*\*([^*\n][^*\n]*?)\*\*/g, "<strong>$1</strong>");
   // Underline __ ... __
   text = text.replace(/__([^_\n][^_\n]*?)__/g, "<u>$1</u>");
-  // Italic * ... *  (after bold so we don't eat **)
+  // Italic * ... * (after bold so we don't eat **)
   text = text.replace(/(^|[^*])\*([^*\n]+?)\*(?!\*)/g, "$1<em>$2</em>");
 
   // Emoji shortcuts :name:
@@ -316,12 +290,11 @@ function formatMessage(raw) {
     return m;
   });
 
-  // Restore inline code and code blocks
-  text = text.replace(/\u0000IC(\d+)\u0000/g, (_m, i) => `<code class="inline-code">${inlineCodes[+i]}</code>`);
-  text = text.replace(/\u0000CB(\d+)\u0000/g, (_m, i) => `<pre class="code-block"><code>${codeBlocks[+i]}</code></pre>`);
+  // Restore code placeholders
+  text = text.replace(/ IC(\d+) /g, (_m, i) => `<code class="inline-code">${inlineCodes[+i]}</code>`);
+  text = text.replace(/ CB(\d+) /g, (_m, i) => `<pre class="code-block"><code>${codeBlocks[+i]}</code></pre>`);
 
-  // Newlines -> <br> (but not inside code blocks; <pre> preserves \n already)
-  // We replaced newlines outside code blocks — those are fine to <br>.
+  // Newlines -> <br>
   text = text.replace(/\n/g, "<br>");
 
   return text;
@@ -329,7 +302,52 @@ function formatMessage(raw) {
 
 
 /* =====================================================================
-   7) AUTH
+   7) NOTIFICATION SOUNDS (Web Audio API — no file needed)
+   ===================================================================== */
+let _audioCtx = null;
+
+function getAudioCtx() {
+  if (!_audioCtx) {
+    try { _audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (_) {}
+  }
+  return _audioCtx;
+}
+
+function playSound(type = "message") {
+  if (!state.soundEnabled) return;
+  try {
+    const ctx = getAudioCtx();
+    if (!ctx) return;
+
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.type = "sine";
+
+    if (type === "message") {
+      // Quick upward tone
+      osc.frequency.setValueAtTime(700, ctx.currentTime);
+      osc.frequency.exponentialRampToValueAtTime(980, ctx.currentTime + 0.09);
+      gain.gain.setValueAtTime(0.18, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.28);
+      osc.start(ctx.currentTime);
+      osc.stop(ctx.currentTime + 0.28);
+    } else if (type === "ping") {
+      // Two-note ping — friend request
+      osc.frequency.setValueAtTime(1047, ctx.currentTime);
+      osc.frequency.setValueAtTime(1319, ctx.currentTime + 0.12);
+      gain.gain.setValueAtTime(0.14, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.35);
+      osc.start(ctx.currentTime);
+      osc.stop(ctx.currentTime + 0.35);
+    }
+  } catch (_) { /* audio not available */ }
+}
+
+
+/* =====================================================================
+   8) AUTH
    ===================================================================== */
 $("#google-signin-btn").addEventListener("click", async () => {
   try {
@@ -347,27 +365,37 @@ $("#signout-btn").addEventListener("click", async () => {
 
 onAuthStateChanged(auth, async (firebaseUser) => {
   if (firebaseUser) {
+    // Fetch existing Firestore profile
+    let existing = null;
+    try {
+      const snap = await getDoc(doc(db, "users", firebaseUser.uid));
+      if (snap.exists()) existing = snap.data();
+    } catch (e) { console.error("profile fetch:", e); }
+
     state.user = {
       uid: firebaseUser.uid,
-      displayName: firebaseUser.displayName || "User",
-      email: firebaseUser.email,
-      photoURL: firebaseUser.photoURL
+      username: existing?.username || null,
+      discriminator: existing?.discriminator || null,
+      displayName: existing?.username || firebaseUser.displayName || "User",
+      bio: existing?.bio || "",
+      email: firebaseUser.email || "",
+      photoURL: (existing && existing.photoURL !== undefined)
+        ? existing.photoURL
+        : (firebaseUser.photoURL || null),
+      googlePhotoURL: firebaseUser.photoURL || null
     };
 
-    // Upsert profile so they're searchable / friendable
-    await setDoc(doc(db, "users", state.user.uid), {
-      uid: state.user.uid,
-      displayName: state.user.displayName,
-      displayNameLower: state.user.displayName.toLowerCase(),
-      email: state.user.email || "",
-      photoURL: state.user.photoURL || null,
-      createdAt: serverTimestamp()
-    }, { merge: true });
+    state.userCache[state.user.uid] = { ...state.user };
 
-    state.userCache[state.user.uid] = state.user;
-
-    showAppUI();
-    bootSubscriptions();
+    if (!existing?.username) {
+      // First sign-in — show profile setup modal
+      showProfileSetupModal();
+    } else {
+      // Returning user
+      await upsertUserProfile();
+      showAppUI();
+      bootSubscriptions();
+    }
   } else {
     state.user = null;
     cleanupAllSubscriptions();
@@ -375,22 +403,135 @@ onAuthStateChanged(auth, async (firebaseUser) => {
   }
 });
 
+async function upsertUserProfile() {
+  const u = state.user;
+  // merge:true so we don't clobber email set on first creation
+  await setDoc(doc(db, "users", u.uid), {
+    uid: u.uid,
+    displayName: u.username,
+    displayNameLower: u.username.toLowerCase(),
+    username: u.username,
+    discriminator: u.discriminator,
+    bio: u.bio || "",
+    photoURL: u.photoURL || null
+  }, { merge: true });
+}
+
 
 /* =====================================================================
-   8) UI ROUTING (login vs app, friends vs chat)
+   8.5) PROFILE SETUP MODAL — first sign-in only
+   ===================================================================== */
+function showProfileSetupModal() {
+  const u = state.user;
+  const defaultPhoto = u.googlePhotoURL || null;
+  // Pre-fill photo field with Google photo URL
+  $("#setup-photo-input").value = defaultPhoto || "";
+  updateAvatarPreview("setup", "", defaultPhoto);
+  openModal("profile-setup-modal");
+}
+
+// Live avatar preview
+$("#setup-photo-input").addEventListener("input", () => {
+  updateAvatarPreview(
+    "setup",
+    $("#setup-username-input").value.trim(),
+    $("#setup-photo-input").value.trim() || state.user?.googlePhotoURL || null
+  );
+});
+$("#setup-username-input").addEventListener("input", () => {
+  updateAvatarPreview(
+    "setup",
+    $("#setup-username-input").value.trim(),
+    $("#setup-photo-input").value.trim() || state.user?.googlePhotoURL || null
+  );
+});
+
+function updateAvatarPreview(prefix, name, photoURL) {
+  const preview = $(`#${prefix}-avatar-preview`);
+  const initial = $(`#${prefix}-avatar-initial`);
+  if (!preview) return;
+  const oldImg = preview.querySelector("img");
+  if (oldImg) oldImg.remove();
+  if (photoURL) {
+    const img = document.createElement("img");
+    img.src = photoURL;
+    img.onerror = () => { img.remove(); if (initial) initial.style.display = ""; };
+    if (initial) initial.style.display = "none";
+    preview.appendChild(img);
+  } else {
+    if (initial) {
+      initial.style.display = "";
+      initial.textContent = name ? name.charAt(0).toUpperCase() : "?";
+    }
+  }
+}
+
+$("#setup-confirm-btn").addEventListener("click", async () => {
+  const username = $("#setup-username-input").value.trim();
+  const bio = $("#setup-bio-input").value.trim();
+  const photoInput = $("#setup-photo-input").value.trim();
+  const errEl = $("#setup-error");
+  errEl.textContent = "";
+
+  if (!username || username.length < 3) {
+    errEl.textContent = "Username must be at least 3 characters.";
+    return;
+  }
+  if (username.length > 32) {
+    errEl.textContent = "Username must be 32 characters or fewer.";
+    return;
+  }
+  if (!/^[a-zA-Z0-9_]+$/.test(username)) {
+    errEl.textContent = "Username can only contain letters, numbers, and underscores.";
+    return;
+  }
+
+  const discriminator = genDiscriminator();
+  const photoURL = photoInput || state.user.googlePhotoURL || null;
+
+  state.user.username = username;
+  state.user.discriminator = discriminator;
+  state.user.displayName = username;
+  state.user.bio = bio;
+  state.user.photoURL = photoURL;
+
+  const btn = $("#setup-confirm-btn");
+  btn.disabled = true;
+  btn.textContent = "Saving…";
+
+  try {
+    await setDoc(doc(db, "users", state.user.uid), {
+      uid: state.user.uid,
+      displayName: username,
+      displayNameLower: username.toLowerCase(),
+      username,
+      discriminator,
+      bio: bio || "",
+      email: state.user.email || "",
+      photoURL: photoURL || null,
+      createdAt: serverTimestamp()
+    }, { merge: true });
+
+    state.userCache[state.user.uid] = { ...state.user };
+    closeModal("profile-setup-modal");
+    showAppUI();
+    bootSubscriptions();
+  } catch (err) {
+    errEl.textContent = "Failed to save: " + err.message;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "Let's Go →";
+  }
+});
+
+
+/* =====================================================================
+   9) UI ROUTING
    ===================================================================== */
 function showAppUI() {
   $("#login-screen").classList.add("hidden");
   $("#app").classList.remove("hidden");
-  $("#user-panel-name").textContent = state.user.displayName;
-  const av = $("#user-panel-avatar");
-  if (state.user.photoURL) {
-    av.src = state.user.photoURL;
-    av.style.display = "";
-  } else {
-    av.removeAttribute("src");
-    av.style.background = "var(--c-accent)";
-  }
+  updateUserPanel();
   showFriendsView();
 }
 
@@ -399,10 +540,22 @@ function showLoginUI() {
   $("#app").classList.add("hidden");
 }
 
+function updateUserPanel() {
+  const u = state.user;
+  if (!u) return;
+  $("#user-panel-name").textContent = u.username || u.displayName || "User";
+  $("#user-panel-tag").textContent = u.discriminator ? `#${u.discriminator}` : "";
+  $("#user-panel-avatar-wrap").innerHTML = avatarMarkup(
+    u.username || u.displayName,
+    u.photoURL,
+    "user-panel-avatar",
+    "user-panel-avatar-fallback"
+  );
+}
+
 function showFriendsView() {
   state.activeChatId = null;
   state.activeChat = null;
-  // Update rail home active
   $("#rail-home").classList.add("active");
   $$(".rail-group-avatar").forEach(el => el.classList.remove("active"));
   $$(".side-row").forEach(el => el.classList.remove("active"));
@@ -412,7 +565,6 @@ function showFriendsView() {
   $("#chat-view").classList.add("hidden");
   $("#empty-view").classList.add("hidden");
 
-  // Stop messages listener
   if (state.unsubscribers.messages) {
     state.unsubscribers.messages();
     state.unsubscribers.messages = null;
@@ -432,7 +584,7 @@ $("#open-friends-btn").addEventListener("click", showFriendsView);
 
 
 /* =====================================================================
-   9) SUBSCRIPTIONS — friends, requests, chats
+   10) SUBSCRIPTIONS — friends, requests, chats, own profile
    ===================================================================== */
 function cleanupAllSubscriptions() {
   for (const k of Object.keys(state.unsubscribers)) {
@@ -448,10 +600,31 @@ function cleanupAllSubscriptions() {
   state.messages = [];
   state.activeChatId = null;
   state.activeChat = null;
+  state.chatInitialized.clear();
+  state.incomingInitialized = false;
 }
 
 function bootSubscriptions() {
   const uid = state.user.uid;
+
+  // Own profile — live updates so settings changes reflect instantly
+  state.unsubscribers.ownProfile = onSnapshot(
+    doc(db, "users", uid),
+    (snap) => {
+      if (!snap.exists()) return;
+      const data = snap.data();
+      if (data.username) {
+        state.user.username = data.username;
+        state.user.displayName = data.username;
+      }
+      if (data.discriminator) state.user.discriminator = data.discriminator;
+      state.user.bio = data.bio || "";
+      if (data.photoURL !== undefined) state.user.photoURL = data.photoURL;
+      state.userCache[uid] = { ...state.user, ...data };
+      updateUserPanel();
+    },
+    (err) => console.error("ownProfile listener:", err)
+  );
 
   // Friendships
   state.unsubscribers.friendships = onSnapshot(
@@ -466,7 +639,8 @@ function bootSubscriptions() {
         list.push({
           friendshipId: d.id,
           uid: otherUid,
-          displayName: profile?.displayName || "Unknown",
+          displayName: profile?.username || profile?.displayName || "Unknown",
+          discriminator: profile?.discriminator || null,
           photoURL: profile?.photoURL || null
         });
       }
@@ -482,7 +656,12 @@ function bootSubscriptions() {
   state.unsubscribers.incoming = onSnapshot(
     query(collection(db, "friendRequests"), where("toUid", "==", uid)),
     (snap) => {
+      const prevLen = state.incoming.length;
       state.incoming = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      if (state.incomingInitialized && state.incoming.length > prevLen) {
+        playSound("ping");
+      }
+      state.incomingInitialized = true;
       renderPendingLists();
     },
     (err) => console.error("incoming listener:", err)
@@ -503,16 +682,11 @@ function bootSubscriptions() {
     query(collection(db, "chats"), where("members", "array-contains", uid)),
     async (snap) => {
       const arr = [];
-      for (const d of snap.docs) {
-        arr.push({ id: d.id, ...d.data() });
-      }
-      // Pre-fetch member profiles for DMs (so the sidebar shows the other person's name)
+      for (const d of snap.docs) arr.push({ id: d.id, ...d.data() });
       for (const c of arr) {
         if (c.type === "dm") {
           const otherUid = c.members.find(m => m !== uid);
-          if (otherUid && !state.userCache[otherUid]) {
-            await fetchUserProfile(otherUid);
-          }
+          if (otherUid && !state.userCache[otherUid]) await fetchUserProfile(otherUid);
         }
       }
       arr.sort((a, b) => {
@@ -522,7 +696,6 @@ function bootSubscriptions() {
       });
       state.chats = arr;
       renderChatLists();
-      // If active chat got updated (e.g., members added), refresh header
       if (state.activeChatId) {
         const updated = state.chats.find(c => c.id === state.activeChatId);
         if (updated) {
@@ -537,7 +710,7 @@ function bootSubscriptions() {
 
 
 /* =====================================================================
-   10) USER PROFILE FETCH (cached)
+   11) USER PROFILE FETCH (cached)
    ===================================================================== */
 async function fetchUserProfile(uid) {
   if (state.userCache[uid]) return state.userCache[uid];
@@ -547,15 +720,13 @@ async function fetchUserProfile(uid) {
       state.userCache[uid] = d.data();
       return state.userCache[uid];
     }
-  } catch (e) {
-    console.error("fetchUserProfile:", e);
-  }
+  } catch (e) { console.error("fetchUserProfile:", e); }
   return null;
 }
 
 
 /* =====================================================================
-   11) RENDER — Friends list / pending / search
+   12) RENDER — Friends list / pending / search
    ===================================================================== */
 function renderFriendsList() {
   const filterText = ($("#friends-filter")?.value || "").trim().toLowerCase();
@@ -578,7 +749,7 @@ function renderFriendsList() {
       ${avatarMarkup(f.displayName, f.photoURL, "friend-row-avatar", "friend-row-fallback")}
       <div class="friend-row-info">
         <div class="friend-row-name">${escapeHtml(f.displayName)}</div>
-        <div class="friend-row-meta">Friend</div>
+        <div class="friend-row-tag">${f.discriminator ? `#${escapeHtml(f.discriminator)}` : ""}</div>
       </div>
       <div class="friend-row-actions">
         <button class="action-circle" title="Message" data-action="message" data-uid="${escapeHtml(f.uid)}">
@@ -642,10 +813,9 @@ $("#friends-view").addEventListener("click", async (e) => {
   if (action === "message") {
     await openOrCreateDm(btn.dataset.uid);
   } else if (action === "remove") {
-    const fid = btn.dataset.friendshipId;
     if (!confirm("Remove this friend?")) return;
     try {
-      await deleteDoc(doc(db, "friendships", fid));
+      await deleteDoc(doc(db, "friendships", btn.dataset.friendshipId));
       showToast("Friend removed");
     } catch (err) { showToast("Error: " + err.message); }
   } else if (action === "accept") {
@@ -659,7 +829,7 @@ $("#friends-view").addEventListener("click", async (e) => {
 
 
 /* =====================================================================
-   12) FRIENDS PANEL — tabs, search, add-friend search
+   13) FRIENDS PANEL — tabs, search, add-friend search
    ===================================================================== */
 $$(".tab").forEach(t => t.addEventListener("click", () => {
   $$(".tab").forEach(x => x.classList.remove("active"));
@@ -670,36 +840,58 @@ $$(".tab").forEach(t => t.addEventListener("click", () => {
 }));
 
 $("#friends-filter").addEventListener("input", renderFriendsList);
-
 $("#add-friend-search-btn").addEventListener("click", searchUsers);
-$("#add-friend-input").addEventListener("keydown", (e) => {
-  if (e.key === "Enter") searchUsers();
-});
+$("#add-friend-input").addEventListener("keydown", (e) => { if (e.key === "Enter") searchUsers(); });
 
 async function searchUsers() {
-  const term = $("#add-friend-input").value.trim().toLowerCase();
+  const raw = $("#add-friend-input").value.trim();
   const results = $("#search-results");
   results.innerHTML = "";
-  if (!term) {
-    $("#search-hint").textContent = "Enter a name to search.";
+  if (!raw) {
+    $("#search-hint").textContent = "Enter a username to search.";
     return;
   }
   $("#search-hint").textContent = "Searching…";
 
   try {
-    const q = query(
-      collection(db, "users"),
-      orderBy("displayNameLower"),
-      startAt(term),
-      endAt(term + "\uf8ff"),
-      limit(20)
-    );
-    const snap = await getDocs(q);
-    const found = [];
-    snap.forEach(d => {
-      const u = d.data();
-      if (u.uid && u.uid !== state.user.uid) found.push(u);
-    });
+    let found = [];
+
+    // Check for username#1234 exact-match format
+    const hashMatch = raw.match(/^(.+)#(\d{4})$/);
+    if (hashMatch) {
+      const [, uname, disc] = hashMatch;
+      const term = uname.toLowerCase();
+      const q = query(
+        collection(db, "users"),
+        orderBy("displayNameLower"),
+        startAt(term),
+        endAt(term + ""),
+        limit(50)
+      );
+      const snap = await getDocs(q);
+      snap.forEach(d => {
+        const u = d.data();
+        if (u.uid && u.uid !== state.user.uid &&
+            u.displayNameLower === term && u.discriminator === disc) {
+          found.push(u);
+        }
+      });
+    } else {
+      // Prefix search by username
+      const term = raw.toLowerCase();
+      const q = query(
+        collection(db, "users"),
+        orderBy("displayNameLower"),
+        startAt(term),
+        endAt(term + ""),
+        limit(20)
+      );
+      const snap = await getDocs(q);
+      snap.forEach(d => {
+        const u = d.data();
+        if (u.uid && u.uid !== state.user.uid) found.push(u);
+      });
+    }
 
     if (!found.length) {
       $("#search-hint").textContent = "No users found.";
@@ -713,17 +905,18 @@ async function searchUsers() {
     const outgoingToUids = new Set(state.outgoing.map(r => r.toUid));
 
     results.innerHTML = found.map(u => {
-      let actionHtml = `<button class="btn-primary" data-action="send-request" data-uid="${escapeHtml(u.uid)}" data-name="${escapeHtml(u.displayName || "")}" data-photo="${escapeHtml(u.photoURL || "")}">Send Request</button>`;
+      const tag = u.discriminator ? `#${escapeHtml(u.discriminator)}` : "";
+      let actionHtml = `<button class="btn-primary" data-action="send-request" data-uid="${escapeHtml(u.uid)}" data-name="${escapeHtml(u.username || u.displayName || "")}" data-photo="${escapeHtml(u.photoURL || "")}">Add Friend</button>`;
       if (friendUids.has(u.uid)) actionHtml = `<span class="friend-row-meta">Already friends</span>`;
       else if (outgoingToUids.has(u.uid)) actionHtml = `<span class="friend-row-meta">Request sent</span>`;
-      else if (incomingFromUids.has(u.uid)) actionHtml = `<span class="friend-row-meta">They already sent you a request</span>`;
+      else if (incomingFromUids.has(u.uid)) actionHtml = `<span class="friend-row-meta">Accept their request instead</span>`;
 
       return `
         <div class="friend-row">
-          ${avatarMarkup(u.displayName, u.photoURL, "friend-row-avatar", "friend-row-fallback")}
+          ${avatarMarkup(u.username || u.displayName, u.photoURL, "friend-row-avatar", "friend-row-fallback")}
           <div class="friend-row-info">
-            <div class="friend-row-name">${escapeHtml(u.displayName || "Unknown")}</div>
-            <div class="friend-row-meta">${escapeHtml(u.email || "")}</div>
+            <div class="friend-row-name">${escapeHtml(u.username || u.displayName || "Unknown")}</div>
+            <div class="friend-row-tag">${tag}</div>
           </div>
           <div class="friend-row-actions">${actionHtml}</div>
         </div>
@@ -744,14 +937,12 @@ $("#search-results").addEventListener("click", async (e) => {
   btn.disabled = true;
   btn.textContent = "Sending…";
   try {
-    // Block if already friends or already requested either direction
     if (state.friends.find(f => f.uid === toUid)) throw new Error("Already friends");
     if (state.outgoing.find(r => r.toUid === toUid)) throw new Error("Already sent");
     if (state.incoming.find(r => r.fromUid === toUid)) throw new Error("They already sent you one — accept it instead");
 
-    // Deterministic request ID: `${fromUid}_${toUid}`. This prevents
-    // duplicate requests and lets the security rules verify a matching
-    // request exists when a friendship is created.
+    // Deterministic request ID: `${fromUid}_${toUid}`.
+    // Security rules verify a matching request exists when creating a friendship.
     const reqId = `${state.user.uid}_${toUid}`;
     await setDoc(doc(db, "friendRequests", reqId), {
       fromUid: state.user.uid,
@@ -762,18 +953,18 @@ $("#search-results").addEventListener("click", async (e) => {
       toPhoto,
       createdAt: serverTimestamp()
     });
-    btn.textContent = "Request sent";
+    btn.textContent = "Sent ✓";
     showToast("Friend request sent");
   } catch (err) {
     btn.disabled = false;
-    btn.textContent = "Send Request";
+    btn.textContent = "Add Friend";
     showToast("Error: " + err.message);
   }
 });
 
 
 /* =====================================================================
-   13) FRIEND REQUEST ACCEPT
+   14) FRIEND REQUEST ACCEPT
    ===================================================================== */
 async function acceptRequest(requestId) {
   const req = state.incoming.find(r => r.id === requestId);
@@ -791,7 +982,7 @@ async function acceptRequest(requestId) {
     });
     batch.delete(doc(db, "friendRequests", requestId));
     await batch.commit();
-    showToast("Friend added");
+    showToast("Friend added!");
   } catch (err) {
     showToast("Error: " + err.message);
   }
@@ -799,19 +990,18 @@ async function acceptRequest(requestId) {
 
 
 /* =====================================================================
-   14) RENDER — sidebar DMs and groups; rail group avatars
+   15) RENDER — sidebar DMs and groups; rail group avatars
    ===================================================================== */
 function renderChatLists() {
   const filterText = state.filters.sidebar.toLowerCase();
   const dms = state.chats.filter(c => c.type === "dm");
   const groups = state.chats.filter(c => c.type === "group");
 
-  // DMs: show other person's display name
   const dmList = $("#dm-list");
   dmList.innerHTML = dms.map(c => {
     const otherUid = c.members.find(m => m !== state.user.uid);
     const profile = state.userCache[otherUid];
-    const name = profile?.displayName || "Direct Message";
+    const name = profile?.username || profile?.displayName || "Direct Message";
     const photo = profile?.photoURL || null;
     if (filterText && !name.toLowerCase().includes(filterText)) return "";
     const active = state.activeChatId === c.id ? "active" : "";
@@ -826,7 +1016,6 @@ function renderChatLists() {
     `;
   }).join("");
 
-  // Groups
   const groupList = $("#group-list");
   groupList.innerHTML = groups.map(c => {
     const name = c.name || "Group";
@@ -840,20 +1029,17 @@ function renderChatLists() {
     `;
   }).join("");
 
-  // Rail group avatars
   const rail = $("#rail-groups");
   rail.innerHTML = groups.map(c => {
     const active = state.activeChatId === c.id ? "active" : "";
-    return `<div class="rail-group-avatar ${active}" data-chat-id="${escapeHtml(c.id)}" title="${escapeHtml(c.name || 'Group')}">${escapeHtml(groupInitials(c.name || "G"))}</div>`;
+    return `<div class="rail-group-avatar ${active}" data-chat-id="${escapeHtml(c.id)}" title="${escapeHtml(c.name || "Group")}">${escapeHtml(groupInitials(c.name || "G"))}</div>`;
   }).join("");
 }
 
-// Sidebar click delegation
 $("#dm-list").addEventListener("click", (e) => {
   const close = e.target.closest("button[data-action='close-dm']");
   if (close) {
     e.stopPropagation();
-    // We don't delete the chat doc (other user might want it); just unselect if active
     if (state.activeChatId === close.dataset.chatId) showFriendsView();
     return;
   }
@@ -876,7 +1062,6 @@ $("#sidebar-search").addEventListener("input", (e) => {
   renderChatLists();
 });
 
-// "New DM" button — for now just opens friends view's add tab
 $("#new-dm-btn").addEventListener("click", () => {
   showFriendsView();
   $$(".tab").forEach(x => x.classList.remove("active"));
@@ -888,7 +1073,7 @@ $("#new-dm-btn").addEventListener("click", () => {
 
 
 /* =====================================================================
-   15) DM open/create
+   16) DM open/create
    ===================================================================== */
 async function openOrCreateDm(otherUid) {
   const me = state.user.uid;
@@ -917,13 +1102,12 @@ async function openOrCreateDm(otherUid) {
 
 
 /* =====================================================================
-   16) OPEN CHAT — subscribe to messages, render
+   17) OPEN CHAT — subscribe to messages, render
    ===================================================================== */
 async function openChat(chatId) {
   state.activeChatId = chatId;
   state.activeChat = state.chats.find(c => c.id === chatId) || null;
   if (!state.activeChat) {
-    // Possibly just-created chat not yet in snapshot
     try {
       const d = await getDoc(doc(db, "chats", chatId));
       if (d.exists()) state.activeChat = { id: d.id, ...d.data() };
@@ -935,7 +1119,6 @@ async function openChat(chatId) {
   renderChatHeader();
   renderChatLists();
 
-  // Stop any prior messages listener
   if (state.unsubscribers.messages) {
     state.unsubscribers.messages();
     state.unsubscribers.messages = null;
@@ -951,7 +1134,17 @@ async function openChat(chatId) {
       limit(200)
     ),
     (snap) => {
+      const prevLen = state.messages.length;
       state.messages = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+
+      // Play sound for new messages from others (skip initial load)
+      if (state.chatInitialized.has(chatId) && state.messages.length > prevLen) {
+        const newest = state.messages[state.messages.length - 1];
+        if (newest && newest.senderUid !== state.user.uid) {
+          playSound("message");
+        }
+      }
+      state.chatInitialized.add(chatId);
       renderMessages();
     },
     (err) => {
@@ -965,28 +1158,24 @@ async function renderChatHeader() {
   const c = state.activeChat;
   if (!c) return;
 
-  const avatarEl = $("#chat-header-avatar");
+  const avatarWrap = $("#chat-header-avatar-wrap");
   const addBtn = $("#chat-add-member-btn");
   const leaveBtn = $("#chat-leave-btn");
 
   if (c.type === "dm") {
     const otherUid = c.members.find(m => m !== state.user.uid);
     const profile = await fetchUserProfile(otherUid);
-    const name = profile?.displayName || "Direct Message";
+    const name = profile?.username || profile?.displayName || "Direct Message";
+    const tag = profile?.discriminator ? `#${profile.discriminator}` : "";
     $("#chat-header-name").textContent = name;
-    $("#chat-header-sub").textContent = "Direct Message";
-    if (profile?.photoURL) {
-      avatarEl.src = profile.photoURL;
-      avatarEl.style.display = "";
-    } else {
-      avatarEl.removeAttribute("src");
-    }
+    $("#chat-header-sub").textContent = tag ? `${tag} · Direct Message` : "Direct Message";
+    avatarWrap.innerHTML = avatarMarkup(name, profile?.photoURL, "chat-header-avatar", "chat-header-avatar-fallback");
     addBtn.hidden = true;
     leaveBtn.hidden = true;
   } else {
     $("#chat-header-name").textContent = c.name || "Group";
     $("#chat-header-sub").textContent = `${c.members.length} member${c.members.length === 1 ? "" : "s"}`;
-    avatarEl.removeAttribute("src");
+    avatarWrap.innerHTML = `<div class="chat-header-avatar-fallback">${escapeHtml(groupInitials(c.name || "G"))}</div>`;
     addBtn.hidden = false;
     leaveBtn.hidden = false;
   }
@@ -1010,7 +1199,6 @@ function renderMessages() {
     const closeInTime = tms - lastTime < 5 * 60 * 1000;
 
     if (sameSender && closeInTime && lastSenderUid !== null) {
-      // followup
       html.push(`
         <div class="msg-followup">
           <span class="msg-time-inline">${escapeHtml(shortTime(ts))}</span>
@@ -1020,10 +1208,12 @@ function renderMessages() {
     } else {
       html.push(`
         <div class="message-group">
-          ${avatarMarkup(m.senderName, m.senderPhoto, "msg-avatar", "msg-avatar-fallback")}
+          <div class="msg-avatar-btn" data-profile-uid="${escapeHtml(m.senderUid)}" title="View profile" role="button" tabindex="0">
+            ${avatarMarkup(m.senderName, m.senderPhoto, "msg-avatar", "msg-avatar-fallback")}
+          </div>
           <div class="msg-content">
             <div class="msg-head">
-              <span class="msg-author">${escapeHtml(m.senderName || "User")}</span>
+              <span class="msg-author" data-profile-uid="${escapeHtml(m.senderUid)}">${escapeHtml(m.senderName || "User")}</span>
               <span class="msg-time">${escapeHtml(formatTime(ts))}</span>
             </div>
             <div class="msg-body">${formatMessage(m.text || "")}</div>
@@ -1037,13 +1227,18 @@ function renderMessages() {
   }
 
   wrap.innerHTML = html.join("");
-  // scroll to bottom
   wrap.scrollTop = wrap.scrollHeight;
 }
 
+// Avatar / author name click → profile card
+$("#messages").addEventListener("click", (e) => {
+  const trigger = e.target.closest("[data-profile-uid]");
+  if (trigger) showProfileCard(trigger.dataset.profileUid, e);
+});
+
 
 /* =====================================================================
-   17) SEND MESSAGE
+   18) SEND MESSAGE
    ===================================================================== */
 const composer = $("#composer-input");
 composer.addEventListener("input", () => {
@@ -1065,10 +1260,7 @@ async function sendCurrentMessage() {
   const text = filterProfanity(raw).trim();
   if (!text) return;
   if (!state.activeChatId) return;
-  if (text.length > 2000) {
-    showToast("Message too long (2000 char max)");
-    return;
-  }
+  if (text.length > 2000) { showToast("Message too long (2000 char max)"); return; }
 
   const chatId = state.activeChatId;
   composer.value = "";
@@ -1082,7 +1274,6 @@ async function sendCurrentMessage() {
       senderPhoto: state.user.photoURL || null,
       createdAt: serverTimestamp()
     });
-    // Update parent chat preview
     await updateDoc(doc(db, "chats", chatId), {
       lastMessage: text.slice(0, 200),
       lastMessageAt: serverTimestamp()
@@ -1095,7 +1286,7 @@ async function sendCurrentMessage() {
 
 
 /* =====================================================================
-   18) CREATE GROUP CHAT
+   19) CREATE GROUP CHAT
    ===================================================================== */
 $("#rail-create-group").addEventListener("click", () => {
   state.groupSelections.clear();
@@ -1115,7 +1306,7 @@ function renderModalFriendList() {
     <label class="modal-friend-row">
       <input type="checkbox" data-uid="${escapeHtml(f.uid)}" ${state.groupSelections.has(f.uid) ? "checked" : ""}>
       ${avatarMarkup(f.displayName, f.photoURL, "side-row-avatar", "side-row-fallback")}
-      <div style="flex:1;">${escapeHtml(f.displayName)}</div>
+      <div style="flex:1;">${escapeHtml(f.displayName)}${f.discriminator ? `<span style="color:var(--t-muted);font-size:11px;margin-left:2px;">#${escapeHtml(f.discriminator)}</span>` : ""}</div>
     </label>
   `).join("");
   wrap.querySelectorAll("input[type='checkbox']").forEach(cb => {
@@ -1143,16 +1334,14 @@ $("#create-group-confirm-btn").addEventListener("click", async () => {
       lastMessageAt: serverTimestamp()
     });
     closeModal("create-group-modal");
-    showToast("Group created");
+    showToast("Group created!");
     setTimeout(() => openChat(ref.id), 200);
-  } catch (err) {
-    showToast("Error: " + err.message);
-  }
+  } catch (err) { showToast("Error: " + err.message); }
 });
 
 
 /* =====================================================================
-   19) ADD MEMBERS to existing group
+   20) ADD MEMBERS to existing group
    ===================================================================== */
 $("#chat-add-member-btn").addEventListener("click", () => {
   const c = state.activeChat;
@@ -1167,7 +1356,7 @@ $("#chat-add-member-btn").addEventListener("click", () => {
       <label class="modal-friend-row">
         <input type="checkbox" data-uid="${escapeHtml(f.uid)}">
         ${avatarMarkup(f.displayName, f.photoURL, "side-row-avatar", "side-row-fallback")}
-        <div style="flex:1;">${escapeHtml(f.displayName)}</div>
+        <div style="flex:1;">${escapeHtml(f.displayName)}${f.discriminator ? `<span style="color:var(--t-muted);font-size:11px;margin-left:2px;">#${escapeHtml(f.discriminator)}</span>` : ""}</div>
       </label>
     `).join("");
     wrap.querySelectorAll("input[type='checkbox']").forEach(cb => {
@@ -1187,21 +1376,17 @@ $("#add-member-confirm-btn").addEventListener("click", async () => {
     return;
   }
   try {
-    const ref = doc(db, "chats", state.activeChatId);
-    // Use arrayUnion for each selected
-    const updates = {};
-    updates.members = arrayUnion(...state.addMemberSelections);
-    await updateDoc(ref, updates);
+    await updateDoc(doc(db, "chats", state.activeChatId), {
+      members: arrayUnion(...state.addMemberSelections)
+    });
     closeModal("add-member-modal");
     showToast("Members added");
-  } catch (err) {
-    showToast("Error: " + err.message);
-  }
+  } catch (err) { showToast("Error: " + err.message); }
 });
 
 
 /* =====================================================================
-   20) LEAVE GROUP
+   21) LEAVE GROUP
    ===================================================================== */
 $("#chat-leave-btn").addEventListener("click", async () => {
   const c = state.activeChat;
@@ -1209,22 +1394,15 @@ $("#chat-leave-btn").addEventListener("click", async () => {
   if (!confirm(`Leave "${c.name}"?`)) return;
   try {
     const newMembers = c.members.filter(m => m !== state.user.uid);
-    if (newMembers.length === 0) {
-      // Last person leaving — keep chat but you're gone. (We don't delete because rules forbid it.)
-      await updateDoc(doc(db, "chats", c.id), { members: newMembers });
-    } else {
-      await updateDoc(doc(db, "chats", c.id), { members: newMembers });
-    }
+    await updateDoc(doc(db, "chats", c.id), { members: newMembers });
     showFriendsView();
     showToast("Left group");
-  } catch (err) {
-    showToast("Error: " + err.message);
-  }
+  } catch (err) { showToast("Error: " + err.message); }
 });
 
 
 /* =====================================================================
-   21) MODALS
+   22) MODALS — open/close helpers
    ===================================================================== */
 function openModal(id) { $("#" + id).classList.remove("hidden"); }
 function closeModal(id) { $("#" + id).classList.add("hidden"); }
@@ -1235,7 +1413,90 @@ $$(".modal").forEach(m => m.addEventListener("click", (e) => {
 
 
 /* =====================================================================
-   22) EMOJI PICKER
+   23) SETTINGS MODAL
+   ===================================================================== */
+$("#settings-btn").addEventListener("click", openSettingsModal);
+
+function openSettingsModal() {
+  const u = state.user;
+  $("#settings-username-input").value = u.username || u.displayName || "";
+  $("#settings-tag-display").textContent = u.discriminator ? `#${u.discriminator}` : "#????";
+  $("#settings-bio-input").value = u.bio || "";
+  $("#settings-photo-input").value = u.photoURL || "";
+  $("#settings-sound-toggle").checked = state.soundEnabled;
+  updateAvatarPreview("settings", u.username || u.displayName, u.photoURL);
+  openModal("settings-modal");
+}
+
+// Live avatar preview as user types in settings
+$("#settings-photo-input").addEventListener("input", () => {
+  updateAvatarPreview(
+    "settings",
+    $("#settings-username-input").value.trim(),
+    $("#settings-photo-input").value.trim() || null
+  );
+});
+$("#settings-username-input").addEventListener("input", () => {
+  updateAvatarPreview(
+    "settings",
+    $("#settings-username-input").value.trim(),
+    $("#settings-photo-input").value.trim() || null
+  );
+});
+
+$("#settings-save-btn").addEventListener("click", async () => {
+  const username = $("#settings-username-input").value.trim();
+  const bio = $("#settings-bio-input").value.trim();
+  const photoInput = $("#settings-photo-input").value.trim();
+  const soundOn = $("#settings-sound-toggle").checked;
+
+  if (!username || username.length < 3) {
+    showToast("Username must be at least 3 characters.");
+    return;
+  }
+  if (!/^[a-zA-Z0-9_]+$/.test(username)) {
+    showToast("Username: letters, numbers, underscores only.");
+    return;
+  }
+
+  const photoURL = photoInput || null;
+  state.soundEnabled = soundOn;
+  localStorage.setItem("sc_sound", soundOn ? "true" : "false");
+
+  const btn = $("#settings-save-btn");
+  btn.disabled = true;
+  btn.textContent = "Saving…";
+
+  try {
+    await updateDoc(doc(db, "users", state.user.uid), {
+      displayName: username,
+      displayNameLower: username.toLowerCase(),
+      username,
+      bio: bio || "",
+      photoURL: photoURL || null
+    });
+
+    // Pre-apply locally (ownProfile listener will also fire)
+    state.user.username = username;
+    state.user.displayName = username;
+    state.user.bio = bio;
+    state.user.photoURL = photoURL;
+    state.userCache[state.user.uid] = { ...state.user };
+    updateUserPanel();
+
+    closeModal("settings-modal");
+    showToast("Settings saved ✓");
+  } catch (err) {
+    showToast("Save failed: " + err.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "Save Changes";
+  }
+});
+
+
+/* =====================================================================
+   24) EMOJI PICKER
    ===================================================================== */
 let emojiOpen = false;
 const emojiBtn = $("#emoji-btn");
@@ -1274,9 +1535,7 @@ emojiGrid.addEventListener("click", (e) => {
   const insert = cell.dataset.insert;
   const start = composer.selectionStart;
   const end = composer.selectionEnd;
-  const before = composer.value.slice(0, start);
-  const after = composer.value.slice(end);
-  composer.value = before + insert + after;
+  composer.value = composer.value.slice(0, start) + insert + composer.value.slice(end);
   composer.focus();
   composer.selectionStart = composer.selectionEnd = start + insert.length;
 });
@@ -1290,9 +1549,111 @@ document.addEventListener("click", (e) => {
 
 
 /* =====================================================================
-   23) MOBILE / RESPONSIVE — sidebar toggle on small screens
+   25) PROFILE CARD
    ===================================================================== */
-// On small screens, picking a chat closes the sidebar; tapping nav rail opens it
+async function showProfileCard(uid, event) {
+  const profile = await fetchUserProfile(uid);
+  if (!profile) return;
+
+  const card = $("#profile-card");
+  const isSelf = uid === state.user.uid;
+  const isFriend = state.friends.some(f => f.uid === uid);
+  const hasPendingOut = state.outgoing.some(r => r.toUid === uid);
+
+  // Avatar
+  const avatarEl = $("#profile-card-avatar-inner");
+  if (profile.photoURL) {
+    avatarEl.innerHTML = `<img src="${escapeHtml(profile.photoURL)}" alt="" />`;
+  } else {
+    const initial = (profile.username || profile.displayName || "?").charAt(0).toUpperCase();
+    avatarEl.innerHTML = "";
+    avatarEl.textContent = initial;
+  }
+
+  $("#profile-card-name").textContent = profile.username || profile.displayName || "User";
+  $("#profile-card-tag").textContent = profile.discriminator ? `#${profile.discriminator}` : "";
+  $("#profile-card-bio").textContent = profile.bio || "No bio set yet.";
+
+  let actionsHtml = "";
+  if (isSelf) {
+    actionsHtml = `<button class="btn-ghost" data-pc-action="edit-profile">Edit Profile</button>`;
+  } else {
+    if (!isFriend && !hasPendingOut) {
+      actionsHtml += `<button class="btn-primary" data-pc-action="add-friend" data-pc-uid="${escapeHtml(uid)}">Add Friend</button>`;
+    } else if (hasPendingOut) {
+      actionsHtml += `<span style="font-size:12px;color:var(--t-muted);">Request sent</span>`;
+    }
+    actionsHtml += `<button class="btn-ghost" data-pc-action="message" data-pc-uid="${escapeHtml(uid)}">Message</button>`;
+  }
+  $("#profile-card-actions").innerHTML = actionsHtml;
+
+  // Position near cursor, clamped to viewport
+  const W = 290, H = 320;
+  let x = event.clientX + 12;
+  let y = event.clientY - 20;
+  if (x + W > window.innerWidth - 8) x = event.clientX - W - 12;
+  if (y + H > window.innerHeight - 8) y = window.innerHeight - H - 8;
+  if (y < 8) y = 8;
+  if (x < 8) x = 8;
+  card.style.left = x + "px";
+  card.style.top = y + "px";
+  card.classList.remove("hidden");
+}
+
+$("#profile-card-close").addEventListener("click", () => {
+  $("#profile-card").classList.add("hidden");
+});
+
+$("#profile-card").addEventListener("click", async (e) => {
+  const btn = e.target.closest("[data-pc-action]");
+  if (!btn) return;
+  const action = btn.dataset.pcAction;
+  const uid = btn.dataset.pcUid;
+
+  if (action === "message") {
+    $("#profile-card").classList.add("hidden");
+    await openOrCreateDm(uid);
+  } else if (action === "add-friend") {
+    btn.disabled = true;
+    btn.textContent = "Sending…";
+    try {
+      const p = state.userCache[uid] || {};
+      const reqId = `${state.user.uid}_${uid}`;
+      await setDoc(doc(db, "friendRequests", reqId), {
+        fromUid: state.user.uid,
+        toUid: uid,
+        fromName: state.user.displayName,
+        fromPhoto: state.user.photoURL || null,
+        toName: p.username || p.displayName || "User",
+        toPhoto: p.photoURL || null,
+        createdAt: serverTimestamp()
+      });
+      btn.textContent = "Sent ✓";
+      showToast("Friend request sent");
+    } catch (err) {
+      btn.disabled = false;
+      btn.textContent = "Add Friend";
+      showToast("Error: " + err.message);
+    }
+  } else if (action === "edit-profile") {
+    $("#profile-card").classList.add("hidden");
+    openSettingsModal();
+  }
+});
+
+// Close profile card on outside click
+document.addEventListener("click", (e) => {
+  const card = $("#profile-card");
+  if (card.classList.contains("hidden")) return;
+  if (card.contains(e.target)) return;
+  if (e.target.closest("[data-profile-uid]")) return;
+  card.classList.add("hidden");
+});
+
+
+/* =====================================================================
+   26) MOBILE / RESPONSIVE — sidebar toggle on small screens
+   ===================================================================== */
 function maybeToggleSidebar(open) {
   const appEl = $("#app");
   if (window.matchMedia("(max-width: 768px)").matches) {

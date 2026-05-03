@@ -63,28 +63,31 @@
         <div class="side-section-label">
           <span>Direct Messages</span>
           <button class="icon-btn" id="new-dm-btn" title="Start new DM">
-            <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path fill="currentColor" d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6z"/></svg>
+            <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true">
+              <path fill="currentColor" d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6z"/>
+            </svg>
           </button>
         </div>
-        <div class="side-list" id="dm-list">
-          <!-- DMs injected here -->
-        </div>
+        <div class="side-list" id="dm-list"></div>
 
         <div class="side-section-label">
           <span>Group Chats</span>
         </div>
-        <div class="side-list" id="group-list">
-          <!-- groups injected here -->
-        </div>
+        <div class="side-list" id="group-list"></div>
       </div>
 
       <!-- User panel at bottom -->
       <div class="user-panel" id="user-panel">
-        <img class="user-panel-avatar" id="user-panel-avatar" src="" alt="" />
+        <div class="user-panel-avatar-wrap" id="user-panel-avatar-wrap"></div>
         <div class="user-panel-info">
           <div class="user-panel-name" id="user-panel-name">…</div>
-          <div class="user-panel-status">Online</div>
+          <div class="user-panel-tag" id="user-panel-tag"></div>
         </div>
+        <button class="icon-btn" id="settings-btn" title="User Settings">
+          <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+            <path fill="currentColor" d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/>
+          </svg>
+        </button>
         <button class="icon-btn" id="signout-btn" title="Sign out">
           <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
             <path fill="currentColor" d="M17 7l-1.41 1.41L18.17 11H8v2h10.17l-2.58 2.58L17 17l5-5-5-5zM4 5h8V3H4c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h8v-2H4V5z"/>
@@ -119,9 +122,7 @@
               <input type="text" id="friends-filter" placeholder="Search friends" />
             </div>
             <h3 class="panel-title" id="all-count">All Friends</h3>
-            <div class="friends-list" id="friends-list">
-              <!-- friends rows -->
-            </div>
+            <div class="friends-list" id="friends-list"></div>
             <p class="empty" id="friends-empty" hidden>You don't have any friends yet. Try the Add Friend tab.</p>
           </div>
 
@@ -139,13 +140,13 @@
           <!-- ADD FRIEND TAB -->
           <div class="tab-panel hidden" data-panel="add">
             <h3 class="panel-title">Add Friend</h3>
-            <p class="panel-sub">Search for someone by their display name to send them a friend request.</p>
+            <p class="panel-sub">Search by username, or type <strong>username#1234</strong> for an exact match.</p>
             <div class="add-friend-row">
-              <input type="text" id="add-friend-input" placeholder="Type a name…" />
+              <input type="text" id="add-friend-input" placeholder="username or username#1234" autocomplete="off" />
               <button class="btn-primary" id="add-friend-search-btn">Search</button>
             </div>
             <div class="search-results" id="search-results"></div>
-            <p class="hint" id="search-hint">Names are matched starting from the beginning. Try the first few letters.</p>
+            <p class="hint" id="search-hint">Search by the first few letters, or use username#1234 for an exact match.</p>
           </div>
         </div>
       </section>
@@ -154,7 +155,7 @@
       <section id="chat-view" class="view hidden">
         <header class="main-header chat-header">
           <div class="chat-header-info">
-            <img class="chat-header-avatar" id="chat-header-avatar" src="" alt="" />
+            <div class="chat-header-avatar-wrap" id="chat-header-avatar-wrap"></div>
             <div>
               <div class="chat-header-name" id="chat-header-name">—</div>
               <div class="chat-header-sub" id="chat-header-sub"></div>
@@ -193,7 +194,7 @@
             </button>
           </div>
           <div class="composer-hint">
-            Format with **bold**, *italic*, __underline__, `code`, ```code block```. Try emoji like :rofl: or :Static:
+            Format with **bold**, *italic*, __underline__, `code`, ```code block```. Try :rofl: or :Static:
           </div>
         </div>
 
@@ -217,17 +218,118 @@
 
   <!-- ====== MODALS ====== -->
 
+  <!-- Profile Setup Modal — shown on first sign-in only -->
+  <div class="modal hidden" id="profile-setup-modal">
+    <div class="modal-card">
+      <div class="modal-head">
+        <h2>✨ Set Up Your Profile</h2>
+      </div>
+      <div class="modal-body">
+        <div class="setup-avatar-section">
+          <div class="setup-avatar-preview" id="setup-avatar-preview">
+            <span id="setup-avatar-initial">?</span>
+          </div>
+          <div class="setup-avatar-meta">
+            <label class="modal-label">Profile Photo URL <span class="label-optional">optional</span></label>
+            <input type="text" id="setup-photo-input" placeholder="https://…" autocomplete="off" />
+            <p class="hint" style="margin:5px 0 0;">Leave blank to use your Google photo.</p>
+          </div>
+        </div>
+
+        <label class="modal-label" style="margin-top:18px;">
+          Username
+          <span class="label-optional">letters, numbers, underscores · 3–32 chars</span>
+        </label>
+        <input type="text" id="setup-username-input" placeholder="cooluser" maxlength="32" autocomplete="off" spellcheck="false" />
+
+        <label class="modal-label" style="margin-top:14px;">
+          Bio <span class="label-optional">optional · up to 200 chars</span>
+        </label>
+        <textarea id="setup-bio-input" class="modal-textarea" placeholder="Tell people a little about yourself…" maxlength="200" rows="3"></textarea>
+
+        <p class="field-error" id="setup-error"></p>
+      </div>
+      <div class="modal-foot">
+        <button class="btn-primary" id="setup-confirm-btn">Let's Go →</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Settings Modal -->
+  <div class="modal hidden" id="settings-modal">
+    <div class="modal-card modal-card-wide">
+      <div class="modal-head">
+        <h2>User Settings</h2>
+        <button class="icon-btn modal-close" data-close="settings-modal">
+          <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+            <path fill="currentColor" d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/>
+          </svg>
+        </button>
+      </div>
+      <div class="modal-body">
+
+        <div class="settings-section">
+          <div class="settings-section-title">My Account</div>
+
+          <div class="setup-avatar-section">
+            <div class="setup-avatar-preview" id="settings-avatar-preview">
+              <span id="settings-avatar-initial">?</span>
+            </div>
+            <div class="setup-avatar-meta">
+              <label class="modal-label">Profile Photo URL</label>
+              <input type="text" id="settings-photo-input" placeholder="https://…" autocomplete="off" />
+              <p class="hint" style="margin:5px 0 0;">Paste a direct image URL, or clear to use your Google photo.</p>
+            </div>
+          </div>
+
+          <div style="margin-top:16px;">
+            <label class="modal-label">Username</label>
+            <input type="text" id="settings-username-input" maxlength="32" spellcheck="false" />
+            <p class="hint" style="margin:5px 0 0;">Your full tag: <strong id="settings-tag-display">#0000</strong> · Tags are randomly assigned and permanent.</p>
+          </div>
+
+          <div style="margin-top:14px;">
+            <label class="modal-label">Bio <span class="label-optional">up to 200 chars</span></label>
+            <textarea id="settings-bio-input" class="modal-textarea" maxlength="200" rows="3"></textarea>
+          </div>
+        </div>
+
+        <div class="settings-section" style="margin-top:24px;">
+          <div class="settings-section-title">Notifications &amp; Sounds</div>
+          <label class="settings-toggle-row">
+            <div class="settings-toggle-info">
+              <div class="settings-toggle-label">Message sounds</div>
+              <div class="settings-toggle-sub">Play a sound when new messages arrive</div>
+            </div>
+            <span class="toggle-switch">
+              <input type="checkbox" id="settings-sound-toggle" />
+              <span class="toggle-track"></span>
+            </span>
+          </label>
+        </div>
+
+      </div>
+      <div class="modal-foot">
+        <button class="btn-secondary" data-close="settings-modal">Cancel</button>
+        <button class="btn-primary" id="settings-save-btn">Save Changes</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Create Group Modal -->
   <div class="modal hidden" id="create-group-modal">
     <div class="modal-card">
       <div class="modal-head">
         <h2>Create Group Chat</h2>
-        <button class="icon-btn modal-close" data-close="create-group-modal">✕</button>
+        <button class="icon-btn modal-close" data-close="create-group-modal">
+          <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+            <path fill="currentColor" d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/>
+          </svg>
+        </button>
       </div>
       <div class="modal-body">
         <label class="modal-label">Group name</label>
         <input type="text" id="group-name-input" placeholder="My study squad" maxlength="50" />
-
         <label class="modal-label" style="margin-top:14px;">Add friends</label>
         <div class="modal-friend-list" id="modal-friend-list"></div>
       </div>
@@ -243,7 +345,11 @@
     <div class="modal-card">
       <div class="modal-head">
         <h2>Add Friends to Group</h2>
-        <button class="icon-btn modal-close" data-close="add-member-modal">✕</button>
+        <button class="icon-btn modal-close" data-close="add-member-modal">
+          <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+            <path fill="currentColor" d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/>
+          </svg>
+        </button>
       </div>
       <div class="modal-body">
         <label class="modal-label">Friends not in this group</label>
@@ -253,6 +359,27 @@
         <button class="btn-secondary" data-close="add-member-modal">Cancel</button>
         <button class="btn-primary" id="add-member-confirm-btn">Add</button>
       </div>
+    </div>
+  </div>
+
+  <!-- Profile Card Popup -->
+  <div id="profile-card" class="profile-card hidden" role="dialog">
+    <button class="profile-card-close" id="profile-card-close" aria-label="Close">
+      <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true">
+        <path fill="currentColor" d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/>
+      </svg>
+    </button>
+    <div class="profile-card-banner"></div>
+    <div class="profile-card-body">
+      <div class="profile-card-avatar-wrap">
+        <div class="profile-card-avatar" id="profile-card-avatar-inner"></div>
+      </div>
+      <div class="profile-card-name" id="profile-card-name"></div>
+      <div class="profile-card-tag" id="profile-card-tag"></div>
+      <div class="profile-card-divider"></div>
+      <div class="profile-card-bio-label">About Me</div>
+      <div class="profile-card-bio" id="profile-card-bio"></div>
+      <div class="profile-card-actions" id="profile-card-actions"></div>
     </div>
   </div>
 
