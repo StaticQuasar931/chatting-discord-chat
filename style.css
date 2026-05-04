@@ -186,37 +186,95 @@ input, textarea { font-family: inherit; font-size: inherit; color: var(--t-prima
 /* =================================================
    LOGIN SCREEN
    ================================================= */
+/* =================================================
+   LOGIN SCREEN — revamped
+   ================================================= */
+@keyframes logoFloat {
+  0%,100% { transform: translateY(0) scale(1); }
+  50%      { transform: translateY(-6px) scale(1.03); }
+}
+@keyframes logoGlow {
+  0%,100% { box-shadow: 0 0 18px rgba(79,124,255,.45), 0 4px 20px rgba(0,0,0,.5); }
+  50%      { box-shadow: 0 0 36px rgba(79,124,255,.75), 0 8px 32px rgba(0,0,0,.5); }
+}
+@keyframes fadeSlideUp {
+  from { opacity: 0; transform: translateY(18px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
 .login-screen {
   position: fixed; inset: 0;
   display: grid; place-items: center;
   background:
-    radial-gradient(1200px 800px at 80% -10%, rgba(79,124,255,0.25), transparent 60%),
-    radial-gradient(900px 700px at -10% 120%, rgba(35,165,90,0.15), transparent 60%),
-    var(--c-overlay);
-  padding: 24px; z-index: 100;
+    radial-gradient(ellipse 140% 80% at 60% -20%, rgba(79,124,255,0.30), transparent 60%),
+    radial-gradient(ellipse 90% 90% at -10% 110%, rgba(122,66,255,0.20), transparent 55%),
+    radial-gradient(ellipse 60% 60% at 100% 80%, rgba(35,165,90,0.12), transparent 50%),
+    #0d0d10;
+  padding: 24px; z-index: 100; overflow: hidden;
+}
+.login-screen::before {
+  content:""; position:absolute; inset:0; pointer-events:none;
+  background:
+    repeating-linear-gradient(0deg,transparent,transparent 39px,rgba(255,255,255,.018) 40px),
+    repeating-linear-gradient(90deg,transparent,transparent 39px,rgba(255,255,255,.018) 40px);
 }
 .login-card {
-  width: 100%; max-width: 420px;
-  background: var(--c-sidebar);
-  border: 1px solid var(--c-border);
-  border-radius: var(--radius-lg);
-  padding: 40px 32px; text-align: center;
-  box-shadow: var(--shadow-2);
+  position: relative; z-index: 1;
+  width: 100%; max-width: 440px;
+  background: rgba(30,32,36,0.92);
+  border: 1px solid rgba(79,124,255,0.22);
+  border-radius: 20px;
+  padding: 44px 36px 32px;
+  text-align: center;
+  box-shadow: 0 0 0 1px rgba(255,255,255,.04) inset, 0 16px 48px rgba(0,0,0,.6);
+  backdrop-filter: blur(12px);
+  animation: fadeSlideUp .5s cubic-bezier(.22,.68,0,1.2) both;
 }
-.login-logo { width: 72px; height: 72px; border-radius: 18px; background: var(--c-input-2); padding: 8px; margin-bottom: 14px; object-fit: contain; }
-.login-card h1 { margin: 0 0 6px; font-size: 22px; }
-.login-sub { margin: 0 0 28px; color: var(--t-secondary); font-size: 14px; }
+.login-logo-wrap {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 84px; height: 84px;
+  background: linear-gradient(135deg,#2a2f3e,#1a1d24);
+  border-radius: 22px; margin-bottom: 20px;
+  animation: logoFloat 3.5s ease-in-out infinite, logoGlow 3.5s ease-in-out infinite;
+}
+.login-logo { width: 56px; height: 56px; object-fit: contain; border-radius: 12px; }
+.login-title {
+  margin: 0 0 4px;
+  font-size: 26px; font-weight: 800; letter-spacing: -0.5px;
+  background: linear-gradient(135deg, #fff 20%, #a0b4ff 80%);
+  -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+.login-sub { margin: 0 0 8px; color: var(--t-secondary); font-size: 14px; }
+.login-features {
+  display: flex; gap: 6px; justify-content: center; flex-wrap: wrap;
+  margin: 16px 0 28px; padding: 0; list-style: none;
+}
+.login-features li {
+  font-size: 12px; color: var(--t-muted);
+  background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.07);
+  border-radius: var(--radius-pill); padding: 4px 10px;
+}
 .btn-google {
   display: inline-flex; align-items: center; gap: 10px;
-  background: linear-gradient(135deg, var(--c-accent) 0%, #6a5aff 100%);
-  color: #fff; padding: 11px 24px; border-radius: var(--radius-pill);
-  font-weight: 600; font-size: 15px;
-  transition: opacity .15s ease, transform .08s ease, box-shadow .15s ease;
-  box-shadow: var(--shadow-accent);
+  background: linear-gradient(135deg, #4f7cff 0%, #7c3aed 100%);
+  color: #fff; padding: 13px 28px; border-radius: var(--radius-pill);
+  font-weight: 700; font-size: 15px; width: 100%; justify-content: center;
+  transition: opacity .15s ease, transform .1s ease, box-shadow .15s ease;
+  box-shadow: 0 4px 20px rgba(79,124,255,0.45);
 }
-.btn-google:hover { opacity: 0.92; box-shadow: 0 6px 20px rgba(79,124,255,0.45); }
+.btn-google:hover { opacity: 0.9; transform: translateY(-1px); box-shadow: 0 8px 28px rgba(79,124,255,0.55); }
 .btn-google:active { transform: translateY(1px); }
-.login-footer { margin-top: 22px; font-size: 12px; color: var(--t-muted); }
+.btn-google.loading { opacity: 0.6; pointer-events: none; }
+.login-divider { margin: 20px 0 14px; border: none; border-top: 1px solid var(--c-border-2); }
+.login-game-plug {
+  font-size: 12px; color: var(--t-muted); line-height: 1.5;
+}
+.login-game-plug a {
+  color: var(--c-accent); text-decoration: none; font-weight: 600;
+  transition: color .12s;
+}
+.login-game-plug a:hover { color: #7c9fff; text-decoration: underline; }
+.login-footer { margin-top: 18px; font-size: 11px; color: rgba(128,132,142,0.7); }
 
 /* =================================================
    APP LAYOUT
@@ -509,12 +567,16 @@ input, textarea { font-family: inherit; font-size: inherit; color: var(--t-prima
 
 /* Edit mode */
 .msg-edit-wrap { margin-top: 4px; }
-.msg-edit-area {
+.msg-edit-area { width: 100%; }
+.msg-edit-input {
   width: 100%; background: var(--c-input); border: 1px solid var(--c-accent);
-  border-radius: var(--radius-sm); padding: 8px 10px; color: var(--t-primary);
+  border-radius: var(--radius-sm); padding: 8px 10px;
+  color: var(--t-primary); caret-color: var(--t-primary);
   font-family: inherit; font-size: 14px; resize: none; outline: none;
-  line-height: 1.4;
+  line-height: 1.4; box-sizing: border-box;
 }
+.msg-edit-input:focus { border-color: #7c9fff; box-shadow: 0 0 0 2px rgba(79,124,255,.25); }
+.msg-edit-btns { display: flex; gap: 8px; margin-top: 6px; }
 .msg-edit-hint { font-size: 12px; color: var(--t-muted); margin-top: 4px; }
 .msg-edit-hint kbd { background: var(--c-input-2); border-radius: 3px; padding: 1px 4px; font-size: 11px; }
 
@@ -1080,15 +1142,41 @@ body[data-theme="daylight"] .msg-followup:hover { background: rgba(0,0,50,.05); 
    STATIC EMOJI — square crop, no tooltip artefacts
    ================================================= */
 .msg-emoji-static {
-  width: 22px; height: 22px;
-  border-radius: 4px; object-fit: cover;
-  vertical-align: -5px; display: inline-block;
+  width: 18px; height: 18px;
+  border-radius: 3px; object-fit: cover;
+  vertical-align: -4px; display: inline-block;
+  overflow: hidden;
 }
 
 /* =================================================
    MSG BODY — prevent command output from overflowing
    ================================================= */
 .msg-body { overflow-wrap: break-word; word-break: break-word; max-width: 100%; }
+
+/* =================================================
+   COMPOSER HINT DISMISS
+   ================================================= */
+.composer-hint {
+  position: relative;
+}
+.hint-dismiss-btn {
+  position: absolute; right: 0; top: 50%; transform: translateY(-50%);
+  width: 18px !important; height: 18px !important; min-width: 0;
+  font-size: 14px; line-height: 1; color: var(--t-muted);
+  opacity: 0.6; padding: 0;
+}
+.hint-dismiss-btn:hover { opacity: 1; color: var(--t-primary); }
+
+/* =================================================
+   SIDEBAR UNREAD BADGE
+   ================================================= */
+.side-item-unread {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 18px; height: 18px; padding: 0 5px;
+  background: var(--c-danger); border-radius: var(--radius-pill);
+  font-size: 11px; font-weight: 700; color: #fff;
+  margin-left: auto; flex-shrink: 0;
+}
 
 /* =================================================
    UNREAD DIVIDER
@@ -1098,7 +1186,9 @@ body[data-theme="daylight"] .msg-followup:hover { background: rgba(0,0,50,.05); 
   margin: 10px 16px 6px;
   font-size: 11px; font-weight: 700; letter-spacing: 0.06em;
   color: var(--c-danger); text-transform: uppercase; user-select: none;
+  cursor: pointer;
 }
+.unread-divider:hover span { text-decoration: line-through; opacity: 0.7; }
 .unread-divider::before,
 .unread-divider::after {
   content: ""; flex: 1;

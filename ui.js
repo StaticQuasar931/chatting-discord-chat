@@ -12,16 +12,31 @@ export function buildUI() {
   <!-- ====== LOGIN SCREEN ====== -->
   <div id="login-screen" class="login-screen">
     <div class="login-card">
-      <img class="login-logo" src="${LOGO}" alt="logo" />
-      <h1>Welcome to Static Chat</h1>
-      <p class="login-sub">A school-safe chat for messaging your friends.</p>
+      <div class="login-logo-wrap">
+        <img class="login-logo" src="${LOGO}" alt="Static Chat logo" />
+      </div>
+      <h1 class="login-title">Static Chat</h1>
+      <p class="login-sub">Your school-safe space to chat with friends.</p>
+      <ul class="login-features">
+        <li>💬 Direct Messages</li>
+        <li>👥 Group Chats</li>
+        <li>🎭 GIFs &amp; Emojis</li>
+        <li>🔒 School-safe</li>
+      </ul>
       <button id="google-signin-btn" class="btn-google">
         <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
           <path fill="#fff" d="M21.35 11.1H12v2.9h5.35c-.23 1.5-1.7 4.4-5.35 4.4-3.22 0-5.85-2.66-5.85-5.95S8.78 6.5 12 6.5c1.83 0 3.06.78 3.76 1.45l2.56-2.47C16.78 3.97 14.6 3 12 3 6.95 3 2.85 7.06 2.85 12.45S6.95 21.9 12 21.9c6.93 0 9.5-4.86 9.5-7.4 0-.5-.05-.95-.15-1.4z"/>
         </svg>
-        Sign in with Google
+        Continue with Google
       </button>
-      <p class="login-footer">By signing in you agree to use this chat respectfully.</p>
+      <hr class="login-divider" />
+      <p class="login-game-plug">
+        From the same creator —
+        <a href="https://sites.google.com/view/staticquasar931/static-gmes/wheres-epstein"
+           target="_blank" rel="noopener noreferrer">🕵️ Where's Epstein?</a>
+        — a fun hidden-object game!
+      </p>
+      <p class="login-footer">By continuing you agree to use this chat respectfully.</p>
     </div>
   </div>
 
@@ -217,8 +232,9 @@ export function buildUI() {
               </svg>
             </button>
           </div>
-          <div class="composer-hint">
-            **bold** *italic* \`code\` :smile: :Static: &nbsp;·&nbsp; /8ball /joke /tod /coinflip /roll /ship /help
+          <div class="composer-hint" id="composer-hint">
+            <span>**bold** *italic* \`code\` :smile: :Static: &nbsp;·&nbsp; /8ball /joke /tod /coinflip /roll /ship /help</span>
+            <button class="icon-btn hint-dismiss-btn" id="hint-dismiss-btn" title="Hide tips">✕</button>
           </div>
         </div>
 
@@ -378,6 +394,16 @@ export function buildUI() {
             </div>
             <span class="toggle-switch">
               <input type="checkbox" id="settings-sound-toggle" />
+              <span class="toggle-track"></span>
+            </span>
+          </label>
+          <label class="settings-toggle-row" style="margin-top:10px;">
+            <div class="settings-toggle-info">
+              <div class="settings-toggle-label">Show formatting tips</div>
+              <div class="settings-toggle-sub">Show the hint bar below the message box</div>
+            </div>
+            <span class="toggle-switch">
+              <input type="checkbox" id="settings-hints-toggle" checked />
               <span class="toggle-track"></span>
             </span>
           </label>

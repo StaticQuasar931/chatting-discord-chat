@@ -874,6 +874,8 @@ function bootSubscriptions() {
     snap=>{ state.outgoing=snap.docs.map(d=>({id:d.id,...d.data()})); renderPendingLists(); },
     err=>console.error("outgoing:",err));
 
+  let _prevChatTimes = {};   // chatId → lastMessageAt ms (for background notifications)
+
   state.unsubscribers.chats = onSnapshot(
     query(collection(db,"chats"),where("members","array-contains",uid)),
     async snap=>{
@@ -885,6 +887,21 @@ function bootSubscriptions() {
           if (o&&!state.userCache[o]) await fetchUserProfile(o);
         }
       }
+
+      // Background notification: play sound if any non-active chat got a new message
+      if (Object.keys(_prevChatTimes).length > 0) {
+        for (const c of arr) {
+          const prev=_prevChatTimes[c.id]||0;
+          const cur=c.lastMessageAt?.toMillis?.()||0;
+          if (cur>prev && c.id!==state.activeChatId) {
+            playSound("message"); break;
+          }
+        }
+      }
+      // Update baseline
+      _prevChatTimes={};
+      for (const c of arr) _prevChatTimes[c.id]=c.lastMessageAt?.toMillis?.()||0;
+
       arr.sort((a,b)=>{
         const at=a.lastMessageAt?.toMillis?a.lastMessageAt.toMillis():0;
         const bt=b.lastMessageAt?.toMillis?b.lastMessageAt.toMillis():0;
@@ -1114,6 +1131,13 @@ async function acceptRequest(requestId) {
 /* =====================================================================
    RENDER — Sidebar lists + rail
    ===================================================================== */
+function chatHasUnread(c) {
+  if (!c||state.activeChatId===c.id) return false;
+  const readAt=parseInt(localStorage.getItem(`sc_read_${c.id}`)||"0",10);
+  const lastMsg=c.lastMessageAt?.toMillis?.()||0;
+  return lastMsg>readAt && readAt>0;
+}
+
 function renderChatLists() {
   const filterText=state.filters.sidebar.toLowerCase();
   const dms=state.chats.filter(c=>c.type==="dm");
@@ -1126,10 +1150,12 @@ function renderChatLists() {
     const photo=profile?.photoURL||null;
     if (filterText&&!name.toLowerCase().includes(filterText)) return "";
     const active=state.activeChatId===c.id?"active":"";
+    const unread=chatHasUnread(c)?`<span class="side-item-unread" title="New messages">●</span>`:"";
     return `
       <div class="side-row ${active}" data-chat-id="${escapeHtml(c.id)}" data-type="dm">
         ${avatarMarkup(name,photo,"side-row-avatar","side-row-fallback")}
         <div class="side-row-name">${escapeHtml(name)}</div>
+        ${unread}
         <button class="icon-btn side-row-close" title="Close" data-action="close-dm" data-chat-id="${escapeHtml(c.id)}">
           <svg viewBox="0 0 24 24" width="14" height="14"><path fill="currentColor" d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
         </button>
@@ -1140,10 +1166,12 @@ function renderChatLists() {
     const name=c.name||"Group";
     if (filterText&&!name.toLowerCase().includes(filterText)) return "";
     const active=state.activeChatId===c.id?"active":"";
+    const unread=chatHasUnread(c)?`<span class="side-item-unread" title="New messages">●</span>`:"";
     return `
       <div class="side-row ${active}" data-chat-id="${escapeHtml(c.id)}" data-type="group">
         <div class="side-row-fallback">${escapeHtml(groupInitials(name))}</div>
         <div class="side-row-name">${escapeHtml(name)}</div>
+        ${unread}
       </div>`;
   }).join("");
 
@@ -1360,6 +1388,10 @@ function renderMessages() {
   const leaders=Array.isArray(c?.leaders)?c.leaders:[];
   const lastRead=state.lastReadMarker[state.activeChatId]||0;
   let unreadDividerInserted=false;
+  // Pre-count unread messages for the divider label
+  const unreadCount=lastRead>0
+    ? state.messages.filter(m=>!state.blockedUsers.has(m.senderUid)&&(m.createdAt?.toMillis?.()??0)>lastRead).length
+    : 0;
 
   for (const m of state.messages) {
     // Hide messages from blocked users (except own)
@@ -1370,7 +1402,8 @@ function renderMessages() {
 
     // Insert unread divider before first new message (only if there's at least one message above it)
     if (!unreadDividerInserted && lastRead>0 && tms>lastRead && html.length>0) {
-      html.push(`<div class="unread-divider" role="separator"><span>New Messages</span></div>`);
+      const label=unreadCount===1?"1 New Message":`${unreadCount} New Messages`;
+      html.push(`<div class="unread-divider" role="separator" id="unread-divider-bar" title="Click to dismiss"><span>${label}</span></div>`);
       unreadDividerInserted=true;
     }
     const sameSender=m.senderUid===lastSenderUid;
@@ -1453,6 +1486,18 @@ function renderMessages() {
   }
   updateJumpBtn();
 }
+
+// Unread divider dismiss — click to clear the marker and hide the bar
+$("#messages").addEventListener("click", e=>{
+  if (e.target.closest("#unread-divider-bar")) {
+    const cid=state.activeChatId;
+    if (cid) {
+      delete state.lastReadMarker[cid];
+      state.chatScrolledInitial.delete(cid);  // allow re-scroll next time
+    }
+    e.target.closest("#unread-divider-bar").remove();
+  }
+});
 
 // Message area delegation
 $("#messages").addEventListener("click", async e=>{
@@ -1873,6 +1918,7 @@ function openSettingsModal() {
   if($("#settings-bio-input"))      $("#settings-bio-input").value=u.bio||"";
   if($("#settings-photo-input"))    $("#settings-photo-input").value=u.photoURL||"";
   if($("#settings-sound-toggle"))   $("#settings-sound-toggle").checked=state.soundEnabled;
+  if($("#settings-hints-toggle"))   $("#settings-hints-toggle").checked=localStorage.getItem("sc_hints")!=="false";
 
   // Theme swatches
   $$(".theme-swatch").forEach(sw=>sw.classList.toggle("active",sw.dataset.theme===_pendingTheme));
@@ -1930,6 +1976,7 @@ $("#settings-save-btn")?.addEventListener("click", async ()=>{
   const bio=$("#settings-bio-input")?.value.trim();
   const photoInput=$("#settings-photo-input")?.value.trim();
   const soundOn=$("#settings-sound-toggle")?.checked??state.soundEnabled;
+  const hintsOn=$("#settings-hints-toggle")?.checked??true;
   const privOn=$("#settings-privacy-toggle")?.checked??false;
 
   if (!username||username.length<3) { showToast("Username must be at least 3 characters."); return; }
@@ -1943,6 +1990,10 @@ $("#settings-save-btn")?.addEventListener("click", async ()=>{
   const photoURL=photoInput||null;
   state.soundEnabled=soundOn;
   localStorage.setItem("sc_sound",soundOn?"true":"false");
+  // Hints toggle
+  localStorage.setItem("sc_hints",hintsOn?"true":"false");
+  const hintBar=$("#composer-hint");
+  if (hintBar) hintBar.classList.toggle("hidden",!hintsOn);
   // Apply theme (already previewed)
   if (_pendingTheme&&_pendingTheme!==state.theme) applyTheme(_pendingTheme);
   // Apply status
@@ -1965,7 +2016,14 @@ $("#settings-save-btn")?.addEventListener("click", async ()=>{
     });
     state.user.username=username; state.user.displayName=username;
     state.user.bio=bio; state.user.photoURL=photoURL;
-    state.userCache[state.user.uid]={...state.user};
+    // Include all profile fields so profile card shows updated banner color immediately
+    state.userCache[state.user.uid]={
+      ...state.user,
+      bannerColor:state.bannerColor||null,
+      status:state.status,
+      isPrivate:privOn,
+      badges:state.userCache[state.user.uid]?.badges||[]
+    };
     updateUserPanel();
     closeModal("settings-modal"); showToast("Settings saved ✓");
   } catch(err){ showToast("Save failed: "+err.message); }
@@ -2658,5 +2716,35 @@ window.addEventListener("beforeunload", ()=>{
   if (chatId) {
     const draftVal=$("#composer-input")?.value||"";
     localStorage.setItem(`sc_draft_${chatId}`, draftVal);
+  }
+});
+
+
+/* =====================================================================
+   COMPOSER HINTS BAR — init + dismiss
+   ===================================================================== */
+(function initHintsBar() {
+  const bar=$("#composer-hint");
+  if (!bar) return;
+  // Apply saved preference
+  if (localStorage.getItem("sc_hints")==="false") bar.classList.add("hidden");
+  // Dismiss button
+  $("#hint-dismiss-btn")?.addEventListener("click", ()=>{
+    bar.classList.add("hidden");
+    localStorage.setItem("sc_hints","false");
+  });
+})();
+
+
+/* =====================================================================
+   LOGIN BUTTON — loading state
+   ===================================================================== */
+$("#google-signin-btn")?.addEventListener("mousedown", function() {
+  this.classList.add("loading");
+}, {once:false});
+// Reset if sign-in fails (handled in auth listener — just add class removal on any click that resolves)
+document.addEventListener("click", e=>{
+  if (!e.target.closest("#google-signin-btn")) {
+    $("#google-signin-btn")?.classList.remove("loading");
   }
 });
