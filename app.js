@@ -376,6 +376,36 @@ function applyTheme(t) {
 const $ = s => document.querySelector(s);
 const $$ = s => document.querySelectorAll(s);
 
+/* =====================================================================
+   CUSTOM CONFIRM DIALOG  (replaces all browser confirm() calls)
+   ===================================================================== */
+function showConfirm(message, onYes, opts={}) {
+  // Remove any existing dialog
+  document.getElementById("custom-confirm")?.remove();
+
+  const { yesLabel="Confirm", noLabel="Cancel", danger=false } = opts;
+
+  const overlay = document.createElement("div");
+  overlay.id = "custom-confirm";
+  overlay.className = "confirm-dialog";
+  overlay.innerHTML = `
+    <div class="confirm-dialog-card" role="dialog" aria-modal="true">
+      ${opts.title?`<div class="confirm-dialog-title">${escapeHtml(opts.title)}</div>`:""}
+      <div class="confirm-dialog-msg">${escapeHtml(message)}</div>
+      <div class="confirm-dialog-btns">
+        <button class="confirm-no">${escapeHtml(noLabel)}</button>
+        <button class="confirm-yes${danger?" danger":""}">${escapeHtml(yesLabel)}</button>
+      </div>
+    </div>`;
+
+  overlay.querySelector(".confirm-yes").addEventListener("click", ()=>{ overlay.remove(); onYes(); });
+  overlay.querySelector(".confirm-no").addEventListener("click",  ()=>overlay.remove());
+  overlay.addEventListener("click", e=>{ if (e.target===overlay) overlay.remove(); });
+  document.body.appendChild(overlay);
+  // Focus the Yes button for keyboard accessibility
+  setTimeout(()=>overlay.querySelector(".confirm-yes")?.focus(), 0);
+}
+
 function showToast(msg, ms = 2400) {
   const t = $("#toast");
   t.textContent = msg;
@@ -1030,9 +1060,10 @@ $("#friends-view").addEventListener("click", async e=>{
   if      (action==="message")      await openOrCreateDm(btn.dataset.uid);
   else if (action==="view-profile") showProfileCard(btn.dataset.uid, e);
   else if (action==="remove") {
-    if (!confirm("Remove this friend?")) return;
-    try { await deleteDoc(doc(db,"friendships",btn.dataset.friendshipId)); showToast("Friend removed"); }
-    catch(err){ showToast("Error: "+err.message); }
+    showConfirm("Remove this friend?", async ()=>{
+      try { await deleteDoc(doc(db,"friendships",btn.dataset.friendshipId)); showToast("Friend removed"); }
+      catch(err){ showToast("Error: "+err.message); }
+    }, { title:"Remove Friend", yesLabel:"Remove", danger:true });
   }
   else if (action==="accept")     await acceptRequest(btn.dataset.id);
   else if (action==="decline"||action==="cancel-out") {
@@ -1490,20 +1521,25 @@ function renderMessages() {
       }
     </div>`;
 
-    if (m.commandResult||m.type==="command") {
+    // Pin system message
+    if (m.type==="pin") {
+      const pinnerName=escapeHtml(m.senderName||"Someone");
+      const pinnedMsgId=m.pinnedMsgId||"";
+      html.push(`<div class="msg-system" data-msg-id="${escapeHtml(m.id)}">
+        <svg viewBox="0 0 24 24" width="14" height="14" style="flex-shrink:0;vertical-align:-2px"><path fill="currentColor" d="M16 12V4h1V2H7v2h1v8l-2 2v2h5.2v6h1.6v-6H18v-2l-2-2z"/></svg>
+        <span><strong>${pinnerName}</strong> pinned a message.
+        ${pinnedMsgId?`<a class="msg-system-link" data-pin-jump="${escapeHtml(pinnedMsgId)}" href="#">View it.</a>`:""}</span>
+      </div>`);
+      // system messages don't affect sender grouping
+      continue;
+    }
+
+    const isCommand=!!(m.commandResult||m.type==="command");
+    const extraClass=isCommand?" msg-command-result":"";
+
+    if (sameSender&&closeInTime&&lastSenderUid!==null) {
       html.push(`
-        <div class="message-group msg-command-result" data-msg-id="${escapeHtml(m.id)}">
-          <div class="msg-content" style="padding-left:0">
-            <div class="msg-head">
-              <span class="msg-author">${escapeHtml(m.senderName||"User")}</span>
-              <span class="msg-time">${escapeHtml(formatTime(ts))}</span>
-            </div>
-            <div class="msg-body">${formatMessage(m.text||"")}</div>
-          </div>
-        </div>`);
-    } else if (sameSender&&closeInTime&&lastSenderUid!==null) {
-      html.push(`
-        <div class="msg-followup" data-msg-id="${escapeHtml(m.id)}" title="${tsTitle}">
+        <div class="msg-followup${extraClass}" data-msg-id="${escapeHtml(m.id)}" title="${tsTitle}">
           <span class="msg-time-inline">${escapeHtml(shortTime(ts))}</span>
           ${replyHtml}
           <div class="msg-body">${formatMessage(m.text||"")}${editedLabel}</div>
@@ -1511,10 +1547,16 @@ function renderMessages() {
           ${msgActions}
         </div>`);
     } else {
+      const senderStatus=resolveStatus(state.userCache[m.senderUid]);
+      const avatarWithDot=isSelf?avatarMarkup(m.senderName,m.senderPhoto,"msg-avatar","msg-avatar-fallback"):`
+        <div class="msg-avatar-status-wrap">
+          ${avatarMarkup(m.senderName,m.senderPhoto,"msg-avatar","msg-avatar-fallback")}
+          <span class="msg-status-dot" data-status="${escapeHtml(senderStatus)}"></span>
+        </div>`;
       html.push(`
-        <div class="message-group" data-msg-id="${escapeHtml(m.id)}" title="${tsTitle}">
+        <div class="message-group${extraClass}" data-msg-id="${escapeHtml(m.id)}" title="${tsTitle}">
           <div class="msg-avatar-btn" data-profile-uid="${escapeHtml(m.senderUid)}" role="button" tabindex="0">
-            ${avatarMarkup(m.senderName,m.senderPhoto,"msg-avatar","msg-avatar-fallback")}
+            ${avatarWithDot}
           </div>
           <div class="msg-content">
             <div class="msg-head">
@@ -1960,14 +2002,15 @@ $("#add-member-confirm-btn")?.addEventListener("click", async ()=>{
   } catch(err){ showToast("Error: "+err.message); }
 });
 
-$("#chat-leave-btn")?.addEventListener("click", async ()=>{
+$("#chat-leave-btn")?.addEventListener("click", ()=>{
   const c=state.activeChat; if (!c||c.type!=="group") return;
-  if (!confirm(`Leave "${c.name}"?`)) return;
-  try {
-    const newMembers=c.members.filter(m=>m!==state.user.uid);
-    await updateDoc(doc(db,"chats",c.id),{members:newMembers});
-    showFriendsView(); showToast("Left group");
-  } catch(err){ showToast("Error: "+err.message); }
+  showConfirm(`Leave "${c.name}"?`, async ()=>{
+    try {
+      const newMembers=c.members.filter(m=>m!==state.user.uid);
+      await updateDoc(doc(db,"chats",c.id),{members:newMembers});
+      showFriendsView(); showToast("Left group");
+    } catch(err){ showToast("Error: "+err.message); }
+  }, { title:"Leave Group", yesLabel:"Leave", danger:true });
 });
 
 
@@ -2457,6 +2500,15 @@ function onComposerTyping() {
   }
   clearTimeout(_typingTimer);
   _typingTimer=setTimeout(clearTypingIndicator, 3000);
+  // Auto-dismiss the unread divider when the user starts typing
+  const divider=$("#messages")?.querySelector("#unread-divider-bar");
+  if (divider) {
+    const cid=state.activeChatId;
+    if (cid) delete state.lastReadMarker[cid];
+    divider.remove();
+    state._unreadDisplayCount=0;
+    updateJumpBtn();
+  }
 }
 
 function clearTypingIndicator() {
@@ -2753,29 +2805,31 @@ document.addEventListener("click", async e=>{
 /* =====================================================================
    DELETE MESSAGE
    ===================================================================== */
-async function deleteMessage(msgId) {
+function deleteMessage(msgId) {
   const msg=state.messages.find(m=>m.id===msgId);
   if (!msg||msg.senderUid!==state.user?.uid) return;
-  if (!confirm("Delete this message?")) return;
-  try {
-    await deleteDoc(doc(db,"chats",state.activeChatId,"messages",msgId));
-    showToast("Message deleted.");
-  } catch(err){ showToast("Delete failed: "+err.message); }
+  showConfirm("Delete this message?", async ()=>{
+    try {
+      await deleteDoc(doc(db,"chats",state.activeChatId,"messages",msgId));
+      showToast("Message deleted.");
+    } catch(err){ showToast("Delete failed: "+err.message); }
+  }, { title:"Delete Message", yesLabel:"Delete", danger:true });
 }
 
 
 /* =====================================================================
    BLOCKING
    ===================================================================== */
-async function blockUser(uid) {
+function blockUser(uid) {
   if (!uid||uid===state.user?.uid) return;
-  if (!confirm("Block this user? Their messages will be hidden from you.")) return;
-  try {
-    await updateDoc(doc(db,"users",state.user.uid),{ blockedUsers:arrayUnion(uid) });
-    state.blockedUsers.add(uid);
-    renderMessages();
-    showToast("User blocked.");
-  } catch(err){ showToast("Block failed: "+err.message); }
+  showConfirm("Block this user? Their messages will be hidden from you.", async ()=>{
+    try {
+      await updateDoc(doc(db,"users",state.user.uid),{ blockedUsers:arrayUnion(uid) });
+      state.blockedUsers.add(uid);
+      renderMessages();
+      showToast("User blocked.");
+    } catch(err){ showToast("Block failed: "+err.message); }
+  }, { title:"Block User", yesLabel:"Block", danger:true });
 }
 
 // Load blocked list on sign-in (wired in bootSubscriptions ownProfile listener)
@@ -2880,6 +2934,16 @@ async function pinMessage(msgId) {
   });
   try {
     await updateDoc(doc(db,"chats",chatId),{pinnedMessages:pins});
+    // Send a system message like Discord — "X pinned a message."
+    await addDoc(collection(db,"chats",chatId,"messages"),{
+      type:"pin",
+      pinnedMsgId:msgId,
+      text:"pinned a message.",
+      senderUid:state.user.uid,
+      senderName:state.user.displayName||state.user.username||"Someone",
+      senderPhoto:state.user.photoURL||null,
+      createdAt:serverTimestamp()
+    });
     showToast("📌 Message pinned");
   } catch(err){ showToast("Pin failed: "+err.message); }
 }
@@ -2938,6 +3002,7 @@ $("#pins-panel-close")?.addEventListener("click", hidePinsPanel);
 document.addEventListener("click", e=>{
   const jumpBtn=e.target.closest("[data-pin-jump]");
   if (jumpBtn) {
+    e.preventDefault();
     const msgId=jumpBtn.dataset.pinJump;
     const msgEl=$("#messages")?.querySelector(`[data-msg-id="${CSS.escape(msgId)}"]`);
     if (msgEl) {
@@ -2971,7 +3036,16 @@ function updateJumpBtn() {
   if (!wrap||!btn) return;
   const atBottom=wrap.scrollHeight-wrap.scrollTop-wrap.clientHeight<80;
   btn.classList.toggle("hidden", atBottom);
-  if (!atBottom) {
+  if (atBottom) {
+    // Auto-dismiss the unread divider when the user has scrolled to the bottom
+    const divider=wrap.querySelector("#unread-divider-bar");
+    if (divider) {
+      const cid=state.activeChatId;
+      if (cid) delete state.lastReadMarker[cid];
+      divider.remove();
+      state._unreadDisplayCount=0;
+    }
+  } else {
     const n=state._unreadDisplayCount||0;
     btn.textContent=n>0?`↓  +${n} new messages`:"↓  Jump to Latest";
   }

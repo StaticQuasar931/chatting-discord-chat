@@ -626,5 +626,7 @@ export function buildUI() {
 
   <!-- Toast -->
   <div id="toast" class="toast hidden"></div>
+
+  <!-- Custom Confirm Dialog (dynamically injected by showConfirm(), placeholder here for CSS) -->
   `);
 }
