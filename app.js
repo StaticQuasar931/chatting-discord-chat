@@ -4,6 +4,7 @@
 
 import { isNameBlocked, generateSafeName } from "./name-blocklist.js";
 import { buildUI } from "./ui.js";
+import { getRandomTip } from "./tips.js";
 import { auth, db, provider } from "./firebase.js";
 import {
   signInWithPopup, signOut, onAuthStateChanged
@@ -16,6 +17,15 @@ import {
 
 // Inject all HTML before any DOM queries
 buildUI();
+
+// Populate loading-screen tip
+(function() {
+  const tipEl = document.getElementById("loading-tip");
+  const bottomEl = document.getElementById("loading-tip-bottom");
+  const tip = getRandomTip();
+  if (tipEl) tipEl.textContent = tip;
+  if (bottomEl) bottomEl.textContent = "Static Chat · BETA";
+})();
 
 
 /* =====================================================================
@@ -71,10 +81,22 @@ const EMOJI_DATA = [
   { name:"cowboy",        char:"🤠", alt:["yeehaw","hat"],           cat:"smileys" },
   { name:"clown",         char:"🤡", alt:[],                         cat:"smileys" },
   { name:"robot",         char:"🤖", alt:["bot","machine"],          cat:"smileys" },
-  { name:"skull",         char:"💀", alt:["dead","bones"],           cat:"smileys" },
-  { name:"ghost",         char:"👻", alt:["boo","spooky"],           cat:"smileys" },
-  { name:"alien",         char:"👽", alt:["ufo"],                    cat:"smileys" },
-  { name:"poop",          char:"💩", alt:["poo"],                    cat:"smileys" },
+  { name:"skull",           char:"💀", alt:["dead","bones","rip"],       cat:"smileys" },
+  { name:"skull_crossbones",char:"☠️", alt:["danger","pirate","dead"],  cat:"smileys" },
+  { name:"ghost",           char:"👻", alt:["boo","spooky"],             cat:"smileys" },
+  { name:"alien",           char:"👽", alt:["ufo"],                      cat:"smileys" },
+  { name:"poop",            char:"💩", alt:["poo"],                      cat:"smileys" },
+  { name:"imp",             char:"😈", alt:["evil","devil","mischief"],   cat:"smileys" },
+  { name:"angel",           char:"😇", alt:["innocent","halo"],           cat:"smileys" },
+  { name:"partying",        char:"🥳", alt:["party","birthday","hype"],   cat:"smileys" },
+  { name:"monocle",         char:"🧐", alt:["fancy","examine","sus"],      cat:"smileys" },
+  { name:"hot_face",        char:"🥵", alt:["hot","sweating"],             cat:"smileys" },
+  { name:"cold_face",       char:"🥶", alt:["cold","freezing"],            cat:"smileys" },
+  { name:"woozy",           char:"🥴", alt:["drunk","dizzy"],              cat:"smileys" },
+  { name:"exploding_head",  char:"🤯", alt:["mind blown","mindblown"],     cat:"smileys" },
+  { name:"zipper_mouth",    char:"🤐", alt:["shh","quiet","secret"],       cat:"smileys" },
+  { name:"lying",           char:"🤥", alt:["lie","pinocchio"],            cat:"smileys" },
+  { name:"money_mouth",     char:"🤑", alt:["rich","money","cash"],        cat:"smileys" },
   // gestures
   { name:"thumbsup",       char:"👍", alt:["+1","like","agree","yes"], cat:"gestures" },
   { name:"thumbsdown",     char:"👎", alt:["-1","dislike","no"],       cat:"gestures" },
@@ -93,8 +115,16 @@ const EMOJI_DATA = [
   { name:"crossed_fingers",char:"🤞", alt:["luck","hope"],             cat:"gestures" },
   { name:"metal",          char:"🤘", alt:["rock","rock on"],          cat:"gestures" },
   { name:"call_me",        char:"🤙", alt:["hang loose","shaka"],      cat:"gestures" },
-  { name:"shrug",          char:"🤷", alt:["idk","whatever","dunno"],  cat:"gestures" },
-  { name:"facepalm",       char:"🤦", alt:["smh","ugh","duh"],         cat:"gestures" },
+  { name:"shrug",           char:"🤷", alt:["idk","whatever","dunno"],   cat:"gestures" },
+  { name:"facepalm",        char:"🤦", alt:["smh","ugh","duh"],          cat:"gestures" },
+  { name:"raising_hand",    char:"🙋", alt:["volunteer","me","yes"],     cat:"gestures" },
+  { name:"bow",             char:"🙇", alt:["sorry","respect","worship"],cat:"gestures" },
+  { name:"no_good",         char:"🙅", alt:["no","stop","nope"],         cat:"gestures" },
+  { name:"ok_person",       char:"🙆", alt:["ok","yes","fine"],          cat:"gestures" },
+  { name:"pinched_fingers", char:"🤌", alt:["italian","chef"],           cat:"gestures" },
+  { name:"index_finger",    char:"☝️", alt:["one","point","up"],        cat:"gestures" },
+  { name:"peace",           char:"✌️", alt:["victory","peace","two"],   cat:"gestures" },
+  { name:"writing_hand",    char:"✍️", alt:["write","sign"],            cat:"gestures" },
   // hearts / symbols
   { name:"heart",           char:"❤️", alt:["love","red heart"],      cat:"hearts" },
   { name:"orange_heart",    char:"🧡", alt:["love"],                   cat:"hearts" },
@@ -209,7 +239,21 @@ const EMOJI_DATA = [
   { name:"x",          char:"❌", alt:["no","wrong","cancel"],     cat:"objects" },
   { name:"warning",    char:"⚠️", alt:["caution","alert"],         cat:"objects" },
   { name:"question",   char:"❓", alt:["huh","what","ask"],        cat:"objects" },
-  { name:"exclamation",char:"❗", alt:["important","alert"],       cat:"objects" },
+  { name:"exclamation", char:"❗", alt:["important","alert"],        cat:"objects" },
+  { name:"speech",      char:"💬", alt:["chat","message","talk"],     cat:"objects" },
+  { name:"bulb",        char:"💡", alt:["idea","light"],              cat:"objects" },
+  { name:"hammer",      char:"🔨", alt:["tool","build"],              cat:"objects" },
+  { name:"fire_extinguisher",char:"🧯", alt:["fire","stop"],          cat:"objects" },
+  { name:"ticket",      char:"🎟️", alt:["event","concert"],          cat:"objects" },
+  { name:"clipboard",   char:"📋", alt:["copy","list","notes"],       cat:"objects" },
+  { name:"calendar",    char:"📅", alt:["date","schedule"],           cat:"objects" },
+  { name:"chart",       char:"📈", alt:["up","growth","stats"],       cat:"objects" },
+  { name:"chart_down",  char:"📉", alt:["down","loss","stats"],       cat:"objects" },
+  { name:"flag",        char:"🚩", alt:["red flag","warning"],        cat:"objects" },
+  { name:"pin",         char:"📌", alt:["pinned","location"],         cat:"objects" },
+  { name:"link",        char:"🔗", alt:["url","chain"],               cat:"objects" },
+  { name:"recycle",     char:"♻️", alt:["green","environment"],       cat:"objects" },
+  { name:"magnify",     char:"🔍", alt:["search","zoom","find"],      cat:"objects" },
   // special
   { name:"Static", char:null, alt:["logo","app","static"], cat:"special", isStatic:true },
 ];
@@ -584,6 +628,7 @@ function getAudioCtx() {
 }
 function playSound(type="message") {
   if (!state.soundEnabled) return;
+  if (state.status === "dnd") return; // Do Not Disturb suppresses sounds
   try {
     const ctx = getAudioCtx(); if (!ctx) return;
     const osc=ctx.createOscillator(), gain=ctx.createGain();
@@ -733,6 +778,7 @@ async function bootBlocklistCheck() {
    PROFILE SETUP MODAL
    ===================================================================== */
 function showProfileSetupModal() {
+  _hideLoadingScreen();
   const u = state.user;
   $("#setup-photo-input").value = u.googlePhotoURL||"";
   updateAvatarPreview("setup","",u.googlePhotoURL||null);
@@ -823,13 +869,25 @@ $("#setup-confirm-btn").addEventListener("click", async ()=>{
 /* =====================================================================
    UI ROUTING
    ===================================================================== */
+function _hideLoadingScreen() {
+  const el = $("#loading-screen");
+  if (!el || el.classList.contains("hidden")) return;
+  el.classList.add("fade-out");
+  setTimeout(() => el.classList.add("hidden"), 320);
+}
+
 function showAppUI() {
+  _hideLoadingScreen();
   $("#login-screen").classList.add("hidden");
   $("#app").classList.remove("hidden");
   updateUserPanel();
   showFriendsView();
 }
 function showLoginUI() {
+  // Populate tip before revealing
+  const tipEl = document.getElementById("login-tip-text");
+  if (tipEl) tipEl.textContent = getRandomTip();
+  _hideLoadingScreen();
   $("#login-screen").classList.remove("hidden");
   $("#app").classList.add("hidden");
 }
@@ -1045,7 +1103,7 @@ function bootSubscriptions() {
           const prev=_prevChatTimes[c.id]||0;
           const cur=c.lastMessageAt?.toMillis?.()||0;
           const sentByMe=c.lastSenderUid===uid;
-          if (cur>prev && c.id!==state.activeChatId && !sentByMe) {
+          if (cur>prev && c.id!==state.activeChatId && !sentByMe && !isChatMuted(c.id)) {
             playSound("message"); break;
           }
         }
@@ -1477,7 +1535,7 @@ async function openChat(chatId) {
       state.messages=snap.docs.map(d=>({id:d.id,...d.data()}));
       if (state.chatInitialized.has(chatId)&&state.messages.length>prevLen) {
         const newest=state.messages[state.messages.length-1];
-        if (newest&&newest.senderUid!==state.user.uid) playSound("message");
+        if (newest&&newest.senderUid!==state.user.uid&&!isChatMuted(chatId)) playSound("message");
       }
       state.chatInitialized.add(chatId);
       renderMessages();
@@ -1529,6 +1587,7 @@ async function renderChatHeader() {
       else codeBadge.hidden=true;
     }
   }
+  updateChatMuteBtn();
 }
 
 // Chat header avatar/name click → open profile (DMs only)
@@ -1588,7 +1647,13 @@ function buildReplyPreview(m) {
   const name=m.replyToSenderName||(ref?.senderName)||"Unknown";
   const rawPreview=m.replyToTextPreview||(ref?.text||"")||"";
   // Truncate and strip any markdown/emoji syntax for the preview snippet
-  const preview=rawPreview.replace(/:[A-Za-z0-9_+\-]+:/g,"🔷").replace(/\*\*|__|~~|\*/g,"").slice(0,80);
+  // Resolve :name: to actual emoji chars (fall back to the char itself if unknown, not 🔷)
+  const preview=rawPreview
+    .replace(/:[A-Za-z0-9_+\-]+:/g, m => {
+      const key = m.slice(1,-1);
+      return EMOJI_MAP[key] || m; // keep :name: as-is if not found rather than 🔷
+    })
+    .replace(/\*\*|__|~~|\*/g,"").slice(0,80);
   const photo=ref?state.userCache[ref.senderUid]?.photoURL:null;
   const initial=name.charAt(0).toUpperCase();
   const avatarHtml=photo
@@ -2265,6 +2330,18 @@ function _updateSettingsPreview() {
 // Settings live preview
 $("#settings-photo-input")?.addEventListener("input",_updateSettingsPreview);
 $("#settings-username-input")?.addEventListener("input",_updateSettingsPreview);
+
+// Instant-apply: sound and hints toggles take effect immediately
+$("#settings-sound-toggle")?.addEventListener("change", e => {
+  state.soundEnabled = e.target.checked;
+  localStorage.setItem("sc_sound", e.target.checked ? "true" : "false");
+});
+$("#settings-hints-toggle")?.addEventListener("change", e => {
+  const on = e.target.checked;
+  localStorage.setItem("sc_hints", on ? "true" : "false");
+  const hintBar = $("#composer-hint");
+  if (hintBar) hintBar.classList.toggle("hidden", !on);
+});
 
 // Settings modal interactions (theme/status/banner)
 $("#settings-modal")?.addEventListener("click", e=>{
@@ -3239,6 +3316,89 @@ document.addEventListener("click", e=>{
   }
   const removeBtn=e.target.closest("[data-pin-remove]");
   if (removeBtn) { unpinMessage(removeBtn.dataset.pinRemove); return; }
+});
+
+
+/* =====================================================================
+   CHAT MUTE
+   ===================================================================== */
+function _getMutes() {
+  try { return JSON.parse(localStorage.getItem("sc_mutes")||"{}"); } catch(_){ return {}; }
+}
+function _saveMutes(obj) {
+  localStorage.setItem("sc_mutes", JSON.stringify(obj));
+}
+function isChatMuted(chatId) {
+  if (!chatId) return false;
+  const mutes = _getMutes();
+  const exp = mutes[chatId];
+  if (exp === undefined) return false;
+  if (exp === -1) return true; // indefinite
+  if (Date.now() < exp) return true;
+  // Expired — clean up
+  delete mutes[chatId]; _saveMutes(mutes);
+  return false;
+}
+function muteChat(chatId, durationMs) {
+  const mutes = _getMutes();
+  mutes[chatId] = durationMs === -1 ? -1 : Date.now() + durationMs;
+  _saveMutes(mutes);
+}
+function unmuteChat(chatId) {
+  const mutes = _getMutes();
+  delete mutes[chatId];
+  _saveMutes(mutes);
+}
+function updateChatMuteBtn() {
+  const btn = $("#chat-mute-btn"); if (!btn) return;
+  const muted = isChatMuted(state.activeChatId);
+  btn.classList.toggle("muted", muted);
+  btn.title = muted ? "Unmute notifications" : "Mute notifications";
+}
+
+// Mute button opens a dropdown
+document.addEventListener("click", e => {
+  const btn = e.target.closest("#chat-mute-btn"); if (!btn) return;
+  document.getElementById("mute-menu")?.remove();
+  // If already muted, one-click unmute
+  if (isChatMuted(state.activeChatId)) {
+    unmuteChat(state.activeChatId);
+    updateChatMuteBtn();
+    showToast("🔔 Notifications unmuted");
+    return;
+  }
+  // Build dropdown
+  const rect = btn.getBoundingClientRect();
+  const menu = document.createElement("div");
+  menu.id = "mute-menu";
+  menu.className = "mute-menu";
+  menu.innerHTML = `
+    <div class="mute-menu-title">Mute Notifications</div>
+    <button class="mute-option" data-ms="900000">🕐 15 minutes</button>
+    <button class="mute-option" data-ms="3600000">🕐 1 hour</button>
+    <button class="mute-option" data-ms="28800000">🕗 8 hours</button>
+    <button class="mute-option" data-ms="86400000">🌙 24 hours</button>
+    <button class="mute-option" data-ms="-1">🔕 Until I turn it back on</button>
+  `;
+  // Position below button
+  menu.style.top  = (rect.bottom + 6) + "px";
+  menu.style.right = (window.innerWidth - rect.right) + "px";
+  document.body.appendChild(menu);
+  menu.addEventListener("click", e2 => {
+    const opt = e2.target.closest(".mute-option"); if (!opt) return;
+    const ms = parseInt(opt.dataset.ms, 10);
+    muteChat(state.activeChatId, ms);
+    updateChatMuteBtn();
+    const label = opt.textContent.trim();
+    showToast(`🔕 Muted: ${label}`);
+    menu.remove();
+  });
+});
+// Close mute menu on outside click
+document.addEventListener("click", e => {
+  if (!document.getElementById("mute-menu")) return;
+  if (e.target.closest("#mute-menu") || e.target.closest("#chat-mute-btn")) return;
+  document.getElementById("mute-menu")?.remove();
 });
 
 

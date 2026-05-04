@@ -4,49 +4,83 @@
    Call this ONCE at the very top of app.js before any DOM queries.
    ===================================================================== */
 
-const LOGO = "https://cdn.jsdelivr.net/gh/StaticQuasar931/Images@main/icon.png";
+const LOGO = "./staticcord.png";
+const LOGO_FALLBACK = "https://cdn.jsdelivr.net/gh/StaticQuasar931/Images@main/icon.png";
 
 export function buildUI() {
   document.body.insertAdjacentHTML("beforeend", /* html */`
 
+  <!-- ====== LOADING SCREEN — shown until Firebase auth resolves ====== -->
+  <div id="loading-screen" class="loading-screen">
+    <div class="loading-content">
+      <img class="loading-logo" src="${LOGO}" alt="Static Chat"
+           onerror="this.src='${LOGO_FALLBACK}'" />
+      <div class="loading-brand">
+        <span class="loading-title">Static Chat</span>
+        <span class="loading-beta">BETA</span>
+      </div>
+      <div class="loading-spinner">
+        <div class="ls-arc"></div>
+      </div>
+      <p class="loading-tip" id="loading-tip">Loading…</p>
+    </div>
+    <div class="loading-footer-bar">
+      <span id="loading-tip-bottom"></span>
+    </div>
+  </div>
+
   <!-- ====== LOGIN SCREEN ====== -->
-  <div id="login-screen" class="login-screen">
+  <div id="login-screen" class="login-screen hidden">
+
+    <!-- Background decorations -->
+    <div class="login-bg-orb login-bg-orb-1"></div>
+    <div class="login-bg-orb login-bg-orb-2"></div>
+    <div class="login-bg-orb login-bg-orb-3"></div>
+
+    <!-- Centered card -->
     <div class="login-card">
-      <!-- Banner strip — logo + app name -->
-      <div class="login-banner">
-        <img class="login-banner-logo" src="${LOGO}" alt="Static Chat"
-             onerror="this.style.display='none';this.nextElementSibling.style.display='flex'" />
-        <div class="login-banner-fallback">S</div>
-        <div class="login-banner-text">
-          <h1 class="login-title">Static Chat</h1>
-          <p class="login-sub">Your school-safe space to chat.</p>
-        </div>
+      <!-- Logo -->
+      <div class="login-logo-area">
+        <img class="login-logo-img" src="${LOGO}" alt="Static Chat"
+             onerror="this.src='${LOGO_FALLBACK}'" />
       </div>
 
-      <!-- Card body -->
-      <div class="login-body">
-        <ul class="login-features">
-          <li>💬 Direct Messages</li>
-          <li>👥 Group Chats</li>
-          <li>🎭 GIFs &amp; Emojis</li>
-          <li>🔒 School-safe</li>
-        </ul>
-        <button id="google-signin-btn" class="btn-google">
-          <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
-            <path fill="#fff" d="M21.35 11.1H12v2.9h5.35c-.23 1.5-1.7 4.4-5.35 4.4-3.22 0-5.85-2.66-5.85-5.95S8.78 6.5 12 6.5c1.83 0 3.06.78 3.76 1.45l2.56-2.47C16.78 3.97 14.6 3 12 3 6.95 3 2.85 7.06 2.85 12.45S6.95 21.9 12 21.9c6.93 0 9.5-4.86 9.5-7.4 0-.5-.05-.95-.15-1.4z"/>
-          </svg>
-          Continue with Google
-        </button>
-        <p class="login-error hidden" id="login-error"></p>
-        <hr class="login-divider" />
-        <p class="login-game-plug">
-          From the same creator —
-          <a href="https://sites.google.com/view/staticquasar931/static-gmes/wheres-epstein"
-             target="_blank" rel="noopener noreferrer">🕵️ Where's Epstein?</a>
-          — a fun hidden-object game!
-        </p>
-        <p class="login-footer">By continuing you agree to use this chat respectfully.</p>
+      <!-- Brand -->
+      <div class="login-brand-row">
+        <h1 class="login-title">Static Chat</h1>
+        <span class="login-beta-badge">BETA</span>
       </div>
+      <p class="login-sub">A school-safe space to chat with friends</p>
+
+      <!-- Feature chips -->
+      <ul class="login-chips">
+        <li>💬 DMs</li>
+        <li>👥 Groups</li>
+        <li>🎭 GIFs</li>
+        <li>🔒 Safe</li>
+      </ul>
+
+      <!-- Sign-in -->
+      <button id="google-signin-btn" class="btn-google">
+        <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+          <path fill="#fff" d="M21.35 11.1H12v2.9h5.35c-.23 1.5-1.7 4.4-5.35 4.4-3.22 0-5.85-2.66-5.85-5.95S8.78 6.5 12 6.5c1.83 0 3.06.78 3.76 1.45l2.56-2.47C16.78 3.97 14.6 3 12 3 6.95 3 2.85 7.06 2.85 12.45S6.95 21.9 12 21.9c6.93 0 9.5-4.86 9.5-7.4 0-.5-.05-.95-.15-1.4z"/>
+        </svg>
+        Continue with Google
+      </button>
+      <p class="login-error hidden" id="login-error"></p>
+
+      <p class="login-footer">By signing in you agree to use this platform respectfully.</p>
+    </div>
+
+    <!-- Bottom bar — tip + plug -->
+    <div class="login-bottom-bar">
+      <span class="login-tip-line">
+        <svg viewBox="0 0 24 24" width="12" height="12" style="flex-shrink:0;opacity:.5"><path fill="currentColor" d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg>
+        <span id="login-tip-text">Tip: Right-click any message for quick actions.</span>
+      </span>
+      <a class="login-plug-link"
+         href="https://sites.google.com/view/staticquasar931/static-gmes/wheres-epstein"
+         target="_blank" rel="noopener noreferrer">🕵️ Where's Epstein?</a>
     </div>
   </div>
 
@@ -200,6 +234,16 @@ export function buildUI() {
                 <path fill="currentColor" d="M16 12V4h1V2H7v2h1v8l-2 2v2h5.2v6h1.6v-6H18v-2l-2-2z"/>
               </svg>
             </button>
+            <button class="icon-btn" id="chat-mute-btn" title="Mute notifications">
+              <!-- Bell icon -->
+              <svg class="mute-bell-icon" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+                <path fill="currentColor" d="M12 22c1.1 0 2-.9 2-2h-4c0 1.1.9 2 2 2zm6-6v-5c0-3.07-1.64-5.64-4.5-6.32V4c0-.83-.67-1.5-1.5-1.5s-1.5.67-1.5 1.5v.68C7.63 5.36 6 7.92 6 11v5l-2 2v1h16v-1l-2-2z"/>
+              </svg>
+              <!-- Bell-slash overlay (shown when muted) -->
+              <svg class="mute-slash-icon hidden" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+                <path fill="currentColor" d="M20 18.69L7.84 6.14 6.43 4.73 5.02 3.32 3.61 4.73l2.39 2.39C5.37 8.23 5 9.58 5 11v5l-2 2v1h14.73l2 2 1.41-1.41L20 18.69zm-8 3.31c1.1 0 2-.9 2-2h-4c0 1.1.9 2 2 2zm7-7.62V11c0-3.07-1.63-5.64-4.5-6.32V4c0-.83-.67-1.5-1.5-1.5s-1.5.67-1.5 1.5v.68c-.99.23-1.87.68-2.62 1.27L19 19.08V14.38z"/>
+              </svg>
+            </button>
             <button class="icon-btn" id="chat-add-member-btn" title="Add members" hidden>
               <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
                 <path fill="currentColor" d="M15 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm-9-2V7H4v3H1v2h3v3h2v-3h3v-2H6zm9 4c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/>
@@ -275,30 +319,27 @@ export function buildUI() {
             <div class="composer-input-wrap">
               <textarea id="composer-input" placeholder="Message… or /help for commands" rows="1"></textarea>
             </div>
+            <!-- Silent typing toggle — LEFTMOST, before emoji -->
+            <button class="icon-btn composer-silent-btn" id="silent-typing-btn"
+                    title="Silent typing — others won't see you typing" aria-pressed="false">
+              <svg viewBox="0 0 24 24" width="20" height="20" fill="none" aria-hidden="true">
+                <path fill="currentColor" opacity="0.85" d="M20 2H4C2.9 2 2 2.9 2 4v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 14H6l-2 2V4h16v12z"/>
+                <circle fill="currentColor" cx="8" cy="11" r="1.2"/>
+                <circle fill="currentColor" cx="12" cy="11" r="1.2"/>
+                <circle fill="currentColor" cx="16" cy="11" r="1.2"/>
+                <line class="silent-slash" x1="3" y1="21" x2="21" y2="3" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/>
+              </svg>
+            </button>
             <button class="icon-btn composer-emoji-btn" id="emoji-btn" title="Emoji">
-              <!-- Modern Discord emoji icon -->
               <svg viewBox="0 0 24 24" width="20" height="20" fill="none" aria-hidden="true">
                 <path fill="currentColor" fill-rule="evenodd" clip-rule="evenodd" d="M12 2C6.477 2 2 6.477 2 12s4.477 10 10 10 10-4.477 10-10S17.523 2 12 2ZM8.5 9a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3Zm7 0a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3ZM8.003 15.484A.502.502 0 0 1 8.5 15h7a.5.5 0 0 1 .392.81C14.972 17.345 13.572 18 12 18c-1.572 0-2.972-.655-3.892-1.69a.5.5 0 0 1-.105-.826Z"/>
               </svg>
             </button>
-            <!-- Silent typing toggle — hides YOUR typing indicator from others -->
-            <button class="icon-btn composer-silent-btn" id="silent-typing-btn"
-                    title="Silent typing — others won't see you typing" aria-pressed="false">
-              <svg viewBox="0 0 24 24" width="20" height="20" fill="none" aria-hidden="true">
-                <!-- chat bubble outline -->
-                <path fill="currentColor" opacity="0.85" d="M20 2H4C2.9 2 2 2.9 2 4v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 14H6l-2 2V4h16v12z"/>
-                <!-- typing dots -->
-                <circle fill="currentColor" cx="8" cy="11" r="1.3"/>
-                <circle fill="currentColor" cx="12" cy="11" r="1.3"/>
-                <circle fill="currentColor" cx="16" cy="11" r="1.3"/>
-                <!-- slash (only visible when .active) -->
-                <line class="silent-slash" x1="3" y1="21" x2="21" y2="3" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/>
-              </svg>
-            </button>
             <button class="icon-btn composer-gif-btn" id="gif-btn" title="Send a GIF">
-              <!-- Modern Discord GIF icon -->
+              <!-- GIF icon: rounded rect with letters punched out via evenodd -->
               <svg viewBox="0 0 24 24" width="20" height="20" fill="none" aria-hidden="true">
-                <path fill="currentColor" d="M2 5a3 3 0 0 1 3-3h14a3 3 0 0 1 3 3v14a3 3 0 0 1-3 3H5a3 3 0 0 1-3-3V5Zm6.5 4.5h-3A2.5 2.5 0 0 0 3 12v.5a2.5 2.5 0 0 0 2.5 2.5h1a.5.5 0 0 0 .5-.5v-2a.5.5 0 0 0-.5-.5H6a.5.5 0 0 0 0 1h.5v1H5.5A1.5 1.5 0 0 1 4 12.5V12a1.5 1.5 0 0 1 1.5-1.5h3a.5.5 0 0 0 0-1ZM10 9.5a.5.5 0 0 0-1 0v6a.5.5 0 0 0 1 0v-6Zm1.5 0a.5.5 0 0 1 .5-.5h3a.5.5 0 0 1 0 1H12.5v1.5H14a.5.5 0 0 1 0 1h-1.5V15.5a.5.5 0 0 1-1 0v-6Z"/>
+                <path fill="currentColor" fill-rule="evenodd" clip-rule="evenodd"
+                  d="M2 5a3 3 0 0 1 3-3h14a3 3 0 0 1 3 3v14a3 3 0 0 1-3 3H5a3 3 0 0 1-3-3V5Zm6.5 4.5h-3A2.5 2.5 0 0 0 3 12v.5a2.5 2.5 0 0 0 2.5 2.5h1a.5.5 0 0 0 .5-.5v-2a.5.5 0 0 0-.5-.5H6a.5.5 0 0 0 0 1h.5v1H5.5A1.5 1.5 0 0 1 4 12.5V12a1.5 1.5 0 0 1 1.5-1.5h3a.5.5 0 0 0 0-1ZM10 9.5a.5.5 0 0 0-1 0v6a.5.5 0 0 0 1 0v-6Zm1.5 0a.5.5 0 0 1 .5-.5h3a.5.5 0 0 1 0 1H12.5v1.5H14a.5.5 0 0 1 0 1h-1.5V15.5a.5.5 0 0 1-1 0v-6Z"/>
               </svg>
             </button>
             <button class="icon-btn composer-send-btn" id="send-btn" title="Send" data-active="false">
@@ -554,10 +595,7 @@ export function buildUI() {
             </label>
           </div>
 
-          <div class="settings-pane-foot">
-            <button class="btn-secondary" data-close="settings-modal">Cancel</button>
-            <button class="btn-primary" id="settings-save-btn-2">Save Changes</button>
-          </div>
+          <p class="hint" style="margin-top:20px;text-align:center;">All appearance &amp; preference changes apply instantly.</p>
         </div>
 
       </div><!-- /.settings-discord-body -->
