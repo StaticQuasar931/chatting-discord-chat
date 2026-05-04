@@ -890,3 +890,234 @@ input, textarea { font-family: inherit; font-size: inherit; color: var(--t-prima
   .message-group { padding: 4px 10px; }
   .msg-followup { padding-left: 64px; padding-right: 10px; }
 }
+
+/* =================================================
+   DAYLIGHT THEME
+   ================================================= */
+body[data-theme="daylight"] {
+  --c-rail:     #bcc8e0;
+  --c-sidebar:  #ccd6ed;
+  --c-main:     #dce6f5;
+  --c-input:    #ccd6ed;
+  --c-input-2:  #bcc8e0;
+  --c-overlay:  #eaf0fa;
+  --c-border:   #aab4cc;
+  --c-border-2: #bcc8e0;
+  --t-primary:  #12172a;
+  --t-secondary:#2e3a58;
+  --t-muted:    #5a6888;
+  --t-link:     #1a50c8;
+  --c-accent:      #3a6af5;
+  --c-accent-hover:#2655e0;
+  --c-accent-soft: rgba(58,106,245,.15);
+  --shadow-accent: 0 4px 16px rgba(58,106,245,.3);
+}
+body[data-theme="daylight"] .msg-body { color: #12172a; }
+body[data-theme="daylight"] .message-group:hover,
+body[data-theme="daylight"] .msg-followup:hover { background: rgba(0,0,50,.05); }
+
+/* =================================================
+   MSG-ACTIONS — fixed hover so buttons are clickable
+   ================================================= */
+/* Switch from display:none to opacity so cursor doesn't
+   leave the message group when moving to the action bar  */
+.msg-actions {
+  display: flex !important;
+  opacity: 0;
+  pointer-events: none;
+  gap: 4px; align-items: center;
+  position: absolute; right: 8px; top: 4px;
+  background: var(--c-sidebar); border: 1px solid var(--c-border-2);
+  border-radius: var(--radius-md); padding: 3px 4px;
+  box-shadow: var(--shadow-1); z-index: 10;
+  transition: opacity .1s;
+}
+.message-group:hover .msg-actions,
+.msg-followup:hover  .msg-actions,
+.msg-actions:hover   { opacity: 1; pointer-events: auto; }
+
+/* =================================================
+   REPLY BAR
+   ================================================= */
+.reply-bar {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 12px; background: var(--c-input-2);
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+  border: 1px solid var(--c-border-2); border-bottom: none;
+  font-size: 13px; color: var(--t-secondary);
+  margin: 0 0 -2px;
+}
+.reply-bar-label { flex-shrink: 0; }
+.reply-bar-label strong { color: var(--c-accent); }
+.reply-bar-preview {
+  flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  color: var(--t-muted); font-size: 12px;
+}
+.reply-bar-cancel { width: 22px; height: 22px; flex-shrink: 0; }
+
+/* =================================================
+   REPLY PREVIEW IN MESSAGES
+   ================================================= */
+.reply-preview {
+  display: flex; align-items: center; gap: 6px;
+  padding: 3px 8px; margin-bottom: 3px;
+  background: var(--c-input-2); border-left: 3px solid var(--c-accent);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  font-size: 12px; color: var(--t-muted); max-width: 480px;
+  cursor: pointer; white-space: nowrap; overflow: hidden;
+}
+.reply-preview-name { font-weight: 600; color: var(--c-accent); flex-shrink: 0; }
+.reply-preview-text { overflow: hidden; text-overflow: ellipsis; }
+
+/* =================================================
+   TYPING INDICATOR
+   ================================================= */
+.typing-indicator {
+  padding: 2px 16px 6px;
+  font-size: 12px; color: var(--t-muted); font-style: italic;
+  min-height: 22px;
+}
+
+/* =================================================
+   MESSAGE REACTIONS
+   ================================================= */
+.reactions-row {
+  display: flex; flex-wrap: wrap; gap: 4px;
+  margin-top: 4px;
+}
+.reaction-pill {
+  display: inline-flex; align-items: center; gap: 4px;
+  background: var(--c-input-2); border: 1px solid var(--c-border-2);
+  border-radius: var(--radius-pill); padding: 2px 8px;
+  font-size: 14px; cursor: pointer; color: var(--t-secondary);
+  transition: background .1s, border-color .1s, color .1s;
+}
+.reaction-pill:hover { background: var(--c-input); color: var(--t-primary); }
+.reaction-pill.active {
+  background: var(--c-accent-soft); border-color: var(--c-accent);
+  color: var(--c-accent);
+}
+.reaction-pill span { font-size: 12px; font-weight: 600; }
+
+/* =================================================
+   BADGE CHIPS (messages + profile card)
+   ================================================= */
+.badge-chip {
+  display: inline-block; font-size: 10px; font-weight: 700;
+  padding: 1px 5px; border-radius: 3px; margin-left: 4px;
+  vertical-align: middle; letter-spacing: 0.02em;
+}
+.profile-card-badges { display: flex; flex-wrap: wrap; gap: 4px; margin: 4px 0 2px; }
+.profile-card-badges .badge-chip { font-size: 11px; padding: 2px 7px; }
+
+/* =================================================
+   CONTEXT MENU
+   ================================================= */
+.ctx-menu {
+  position: fixed; z-index: 800;
+  background: var(--c-overlay); border: 1px solid var(--c-border);
+  border-radius: var(--radius-md); box-shadow: var(--shadow-2);
+  min-width: 190px; overflow: hidden; padding: 4px 0;
+  animation: card-pop .08s ease;
+}
+.ctx-item {
+  display: flex; align-items: center; gap: 8px; width: 100%;
+  padding: 8px 14px; font-size: 13px; font-weight: 500; text-align: left;
+  color: var(--t-secondary); transition: background .1s, color .1s;
+}
+.ctx-item:hover { background: rgba(255,255,255,.06); color: var(--t-primary); }
+.ctx-item.danger { color: var(--c-danger); }
+.ctx-item.danger:hover { background: rgba(242,63,67,.1); color: var(--c-danger); }
+.ctx-divider { height: 1px; background: var(--c-border-2); margin: 4px 0; }
+
+/* =================================================
+   GIF PICKER
+   ================================================= */
+.gif-picker {
+  position: absolute; bottom: 88px; right: 16px;
+  width: 360px; max-width: calc(100% - 32px); max-height: 420px;
+  background: var(--c-sidebar); border: 1px solid var(--c-border);
+  border-radius: var(--radius-lg); box-shadow: var(--shadow-2);
+  z-index: 20; display: flex; flex-direction: column; overflow: hidden;
+}
+.gif-picker-header {
+  display: flex; gap: 6px; padding: 8px 8px 0;
+}
+.gif-picker-header input {
+  flex: 1; background: var(--c-input-2); outline: none; border: 1px solid transparent;
+  padding: 7px 10px; border-radius: var(--radius-sm); font-size: 13px;
+  color: var(--t-primary); transition: border-color .12s;
+}
+.gif-picker-header input:focus { border-color: var(--c-accent); }
+.gif-footer {
+  padding: 4px 8px; border-top: 1px solid var(--c-border-2); text-align: right;
+}
+.gif-grid {
+  flex: 1; overflow-y: auto; display: grid;
+  grid-template-columns: repeat(3, 1fr); gap: 3px; padding: 6px;
+}
+.gif-cell {
+  background: var(--c-input-2); border-radius: var(--radius-sm);
+  overflow: hidden; aspect-ratio: 16/9; cursor: pointer;
+  transition: opacity .1s; border: none; padding: 0;
+}
+.gif-cell:hover { opacity: 0.85; }
+.gif-cell img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.gif-hint { text-align: center; color: var(--t-muted); font-size: 13px; padding: 24px; grid-column: 1/-1; }
+
+/* =================================================
+   GIF BUTTON IN COMPOSER
+   ================================================= */
+.composer-gif-btn {
+  width: auto !important; padding: 0 7px;
+  font-size: 11px; font-weight: 700; letter-spacing: 0.04em;
+  color: var(--t-muted); border-radius: var(--radius-sm);
+  transition: background .12s, color .12s;
+}
+.composer-gif-btn:hover { background: rgba(255,255,255,.08); color: var(--t-primary); }
+
+/* =================================================
+   STATIC EMOJI — square crop, no tooltip artefacts
+   ================================================= */
+.msg-emoji-static {
+  width: 22px; height: 22px;
+  border-radius: 4px; object-fit: cover;
+  vertical-align: -5px; display: inline-block;
+}
+
+/* =================================================
+   MSG BODY — prevent command output from overflowing
+   ================================================= */
+.msg-body { overflow-wrap: break-word; word-break: break-word; max-width: 100%; }
+
+/* =================================================
+   UNREAD DIVIDER
+   ================================================= */
+.unread-divider {
+  display: flex; align-items: center; gap: 10px;
+  margin: 10px 16px 6px;
+  font-size: 11px; font-weight: 700; letter-spacing: 0.06em;
+  color: var(--c-danger); text-transform: uppercase; user-select: none;
+}
+.unread-divider::before,
+.unread-divider::after {
+  content: ""; flex: 1;
+  height: 1px; background: var(--c-danger); opacity: 0.4;
+}
+
+/* =================================================
+   JUMP TO LATEST BUTTON
+   ================================================= */
+.jump-latest {
+  position: absolute;
+  bottom: 130px; left: 50%; transform: translateX(-50%);
+  background: var(--c-accent); color: #fff;
+  border: none; border-radius: var(--radius-pill);
+  padding: 7px 18px; font-size: 13px; font-weight: 600;
+  cursor: pointer; box-shadow: var(--shadow-1);
+  transition: opacity .15s, transform .15s;
+  z-index: 20; pointer-events: auto;
+  white-space: nowrap;
+}
+.jump-latest:hover { background: var(--c-accent-hover); transform: translateX(-50%) translateY(-2px); }
+.jump-latest.hidden { opacity: 0; pointer-events: none; }

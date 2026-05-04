@@ -1,30 +1,21 @@
 /* =====================================================================
-   Static Chat — app.js  (full rewrite with all features)
+   Static Chat — app.js
    ===================================================================== */
 
 import { isNameBlocked, generateSafeName } from "./name-blocklist.js";
-import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+import { buildUI } from "./ui.js";
+import { auth, db, provider } from "./firebase.js";
 import {
-  getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged
+  signInWithPopup, signOut, onAuthStateChanged
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import {
-  getFirestore, doc, collection, setDoc, getDoc, getDocs, addDoc,
+  doc, collection, setDoc, getDoc, getDocs, addDoc,
   updateDoc, deleteDoc, query, where, orderBy, limit, startAt, endAt,
   onSnapshot, serverTimestamp, arrayUnion, writeBatch
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
-const firebaseConfig = {
-  apiKey: "AIzaSyC_LRlGIPn6pXEeoh89mocrXe7aiyAlvE8",
-  authDomain: "claude-static-chat.firebaseapp.com",
-  projectId: "claude-static-chat",
-  storageBucket: "claude-static-chat.firebasestorage.app",
-  messagingSenderId: "217707625831",
-  appId: "1:217707625831:web:25d5bbbc72e7965a9f83c2"
-};
-const app   = initializeApp(firebaseConfig);
-const auth  = getAuth(app);
-const db    = getFirestore(app);
-const provider = new GoogleAuthProvider();
+// Inject all HTML before any DOM queries
+buildUI();
 
 
 /* =====================================================================
@@ -345,7 +336,7 @@ const state = {
   userCache: {},
   unsubscribers: {
     friendships: null, incoming: null, outgoing: null,
-    chats: null, messages: null, ownProfile: null
+    chats: null, messages: null, ownProfile: null, typing: null
   },
   filters: { sidebar: "" },
   groupSelections: new Set(),
@@ -353,14 +344,18 @@ const state = {
   soundEnabled: localStorage.getItem("sc_sound") !== "false",
   chatInitialized: new Set(),
   incomingInitialized: false,
-  // new
   theme:       localStorage.getItem("sc_theme")  || "dark",
   status:      localStorage.getItem("sc_status") || "online",
   bannerColor: null,
   isPrivate:   false,
   emojiAcIndex: -1,
   emojiAcTriggerPos: -1,
-  activeCat: "all"
+  activeCat: "all",
+  replyTo: null,         // { id, senderName, textPreview }
+  blockedUsers: new Set(),
+  typingNames: [],
+  lastReadMarker: {},    // chatId → timestamp ms (from localStorage on open)
+  chatScrolledInitial: new Set(), // chatIds that have had their initial scroll done
 };
 
 // Apply theme before anything renders
@@ -441,13 +436,20 @@ function genJoinCode() {
    MESSAGE FORMATTER  (markdown-lite + emoji + URLs)
    ===================================================================== */
 const IMAGE_URL_RE = /\.(jpg|jpeg|png|gif|webp|svg)(\?[^\s]*)?$/i;
-const GIPHY_RE     = /giphy\.com|tenor\.com/i;
+const GIF_CDN_RE   = /giphy\.com|media\.tenor\.com|c\.tenor\.com|tenor\.com\/view/i;
+
+function safeUrl(url) {
+  try {
+    const u = new URL(url);
+    return (u.protocol === "https:" || u.protocol === "http:") ? url : "";
+  } catch { return ""; }
+}
 
 function formatMessage(raw) {
   if (!raw) return "";
   let text = escapeHtml(raw);
 
-  // Code blocks
+  // Code blocks (protect from further processing)
   const codeBlocks = [];
   text = text.replace(/```([\s\S]*?)```/g, (_,inner) => {
     codeBlocks.push(inner.replace(/^\n/,""));
@@ -464,10 +466,10 @@ function formatMessage(raw) {
   text = text.replace(/__([^_\n][^_\n]*?)__/g,"<u>$1</u>");
   text = text.replace(/(^|[^*])\*([^*\n]+?)\*(?!\*)/g,"$1<em>$2</em>");
 
-  // Emoji :name:
+  // Emoji :name:  — :Static: gets no alt/title to avoid text display
   text = text.replace(/:([A-Za-z0-9_+\-]+):/g,(m,name)=>{
     if (name==="Static")
-      return `<img class="msg-emoji" src="${STATIC_EMOJI_URL}" alt=":Static:" title=":Static:" />`;
+      return `<img class="msg-emoji msg-emoji-static" src="${STATIC_EMOJI_URL}" alt="" />`;
     if (EMOJI_MAP[name]) return EMOJI_MAP[name];
     return m;
   });
@@ -476,10 +478,13 @@ function formatMessage(raw) {
   text = text.replace(/ IC(\d+) /g,(_,i)=>`<code class="inline-code">${inlineCodes[+i]}</code>`);
   text = text.replace(/ CB(\d+) /g,(_,i)=>`<pre class="code-block"><code>${codeBlocks[+i]}</code></pre>`);
 
-  // URLs → embeds or links (after other formatting)
-  text = text.replace(/https?:\/\/[^\s<>"]+/g, url => {
-    if (IMAGE_URL_RE.test(url) || GIPHY_RE.test(url)) {
-      return `<a href="${url}" target="_blank" rel="noopener"><img class="msg-embed-img" src="${url}" alt="image" onerror="this.style.display='none'" /></a>`;
+  // URLs → embeds or plain links.  Run safeUrl() so malformed strings never
+  // produce broken href= attributes that GitHub Pages misroutes.
+  text = text.replace(/https?:\/\/[^\s<>"]+/g, rawUrl => {
+    const url = safeUrl(rawUrl);
+    if (!url) return escapeHtml(rawUrl);
+    if (IMAGE_URL_RE.test(url) || GIF_CDN_RE.test(url)) {
+      return `<a href="${url}" target="_blank" rel="noopener"><img class="msg-embed-img" src="${url}" alt="" loading="lazy" onerror="this.style.display='none'" /></a>`;
     }
     return `<a class="msg-link" href="${url}" target="_blank" rel="noopener noreferrer">${url}</a>`;
   });
@@ -829,8 +834,12 @@ function bootSubscriptions() {
     if (data.isPrivate!==undefined) state.isPrivate=!!data.isPrivate;
     if (data.createdAt) state.user.createdAt=data.createdAt;
     state.userCache[uid] = { ...state.user, ...data };
+    applyBlockedFromProfile(data);
     updateUserPanel();
   }, err=>console.error("ownProfile:",err));
+
+  // Start presence heartbeat
+  startPresenceHeartbeat();
 
   state.unsubscribers.friendships = onSnapshot(
     query(collection(db,"friendships"),where("users","array-contains",uid)),
@@ -1167,16 +1176,22 @@ async function openOrCreateDm(otherUid) {
   const me=state.user.uid;
   const sorted=[me,otherUid].sort();
   const chatId=`dm_${sorted[0]}_${sorted[1]}`;
-  const ref=doc(db,"chats",chatId);
-  const snap=await getDoc(ref);
-  if (!snap.exists()) {
+  // Don't use getDoc — Firestore rules reject reads on non-existent docs when
+  // resource is null.  Just setDoc (idempotent) and let it fail only on real
+  // permission errors.
+  if (!state.chats.find(c=>c.id===chatId)) {
     try {
-      await setDoc(ref,{
+      await setDoc(doc(db,"chats",chatId),{
         type:"dm", members:sorted, name:"",
         createdBy:me, createdAt:serverTimestamp(),
         lastMessage:"", lastMessageAt:serverTimestamp()
       });
-    } catch(err){ showToast("Could not open DM: "+err.message); return; }
+    } catch(err){
+      if (err.code==="permission-denied") {
+        showToast("Could not create DM — check Firestore rules."); return;
+      }
+      // Any other error (e.g. already-exists) is fine — just open the chat
+    }
   }
   openChat(chatId);
 }
@@ -1186,6 +1201,15 @@ async function openOrCreateDm(otherUid) {
    OPEN CHAT
    ===================================================================== */
 async function openChat(chatId) {
+  // Save draft for the chat we're leaving
+  const prevId=state.activeChatId;
+  if (prevId && prevId!==chatId) {
+    const draftVal=$("#composer-input")?.value||"";
+    localStorage.setItem(`sc_draft_${prevId}`, draftVal);
+    // Mark previous chat as fully read
+    localStorage.setItem(`sc_read_${prevId}`, String(Date.now()));
+  }
+
   state.activeChatId=chatId;
   state.activeChat=state.chats.find(c=>c.id===chatId)||null;
   if (!state.activeChat) {
@@ -1193,7 +1217,28 @@ async function openChat(chatId) {
   }
   if (!state.activeChat) return;
 
+  // Load last-read marker for this chat (so unread divider shows correctly)
+  const savedRead=parseInt(localStorage.getItem(`sc_read_${chatId}`)||"0",10);
+  state.lastReadMarker[chatId]=savedRead;
+  // Reset initial-scroll flag so divider scroll fires once on open
+  state.chatScrolledInitial.delete(chatId);
+  // Mark this chat as read from this moment forward
+  localStorage.setItem(`sc_read_${chatId}`, String(Date.now()));
+
   showChatView(); renderChatHeader(); renderChatLists();
+  clearReplyTo();
+  renderTypingIndicator([]);
+
+  // Restore draft for this chat
+  const draftEl=$("#composer-input");
+  if (draftEl) {
+    draftEl.value=localStorage.getItem(`sc_draft_${chatId}`)||"";
+    draftEl.style.height="auto";
+    updateSendBtn();
+  }
+
+  // Start typing listener for this chat
+  startTypingListener(chatId);
   if (state.unsubscribers.messages) { state.unsubscribers.messages(); state.unsubscribers.messages=null; }
   state.messages=[];
   $("#messages").innerHTML=`<div class="empty" style="margin:24px;">Loading messages…</div>`;
@@ -1263,6 +1308,46 @@ document.addEventListener("click", e=>{
 /* =====================================================================
    RENDER MESSAGES
    ===================================================================== */
+/* SVG icon strings reused in message actions */
+const SVG_EDIT   = `<svg viewBox="0 0 24 24" width="15" height="15"><path fill="currentColor" d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34a1 1 0 0 0-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg>`;
+const SVG_REPORT = `<svg viewBox="0 0 24 24" width="15" height="15"><path fill="currentColor" d="M14.4 6L14 4H5v17h2v-7h5.6l.4 2h7V6h-5.6z"/></svg>`;
+const SVG_REPLY  = `<svg viewBox="0 0 24 24" width="15" height="15"><path fill="currentColor" d="M10 9V5l-7 7 7 7v-4.1c5 0 8.5 1.6 11 5.1-1-5-4-10-11-11z"/></svg>`;
+
+const BADGE_DEFS = {
+  og:           { label:"OG",           color:"#ffd700", bg:"rgba(255,215,0,.15)",  title:"Original member" },
+  helper:       { label:"Helper",       color:"#23a55a", bg:"rgba(35,165,90,.15)",  title:"Community helper" },
+  bug_reporter: { label:"Bug Reporter", color:"#eb459e", bg:"rgba(235,69,158,.15)", title:"Reported a bug" },
+  early_tester: { label:"Early Tester", color:"#58a6ff", bg:"rgba(88,166,255,.15)", title:"Early tester" },
+};
+
+function renderBadges(badges=[]) {
+  return badges.map(b=>{
+    const d=BADGE_DEFS[b]; if(!d) return "";
+    return `<span class="badge-chip" title="${escapeHtml(d.title)}" style="color:${d.color};background:${d.bg};">${escapeHtml(d.label)}</span>`;
+  }).join("");
+}
+
+function buildReplyPreview(m) {
+  if (!m.replyToMessageId) return "";
+  const ref=state.messages.find(x=>x.id===m.replyToMessageId);
+  const name=m.replyToSenderName||(ref?.senderName)||"Unknown";
+  const preview=m.replyToTextPreview||(ref?.text||"").slice(0,80)||"";
+  return `<div class="reply-preview">
+    <span class="reply-preview-name">${escapeHtml(name)}</span>
+    <span class="reply-preview-text">${escapeHtml(preview)}</span>
+  </div>`;
+}
+
+function buildReactionBar(reactions={}, msgId) {
+  const entries=Object.entries(reactions).filter(([,uids])=>uids.length>0);
+  if (!entries.length) return "";
+  const pills=entries.map(([emoji,uids])=>{
+    const mine=uids.includes(state.user?.uid);
+    return `<button class="reaction-pill${mine?" active":""}" data-react-emoji="${escapeHtml(emoji)}" data-react-msg="${escapeHtml(msgId)}">${emoji} <span>${uids.length}</span></button>`;
+  }).join("");
+  return `<div class="reactions-row">${pills}</div>`;
+}
+
 function renderMessages() {
   const wrap=$("#messages");
   if (!state.messages.length) {
@@ -1273,24 +1358,41 @@ function renderMessages() {
   let lastSenderUid=null, lastTime=0;
   const c=state.activeChat;
   const leaders=Array.isArray(c?.leaders)?c.leaders:[];
+  const lastRead=state.lastReadMarker[state.activeChatId]||0;
+  let unreadDividerInserted=false;
 
   for (const m of state.messages) {
+    // Hide messages from blocked users (except own)
+    if (state.blockedUsers.has(m.senderUid)&&m.senderUid!==state.user?.uid) continue;
+
     const ts=m.createdAt;
     const tms=ts?.toMillis?ts.toMillis():0;
+
+    // Insert unread divider before first new message (only if there's at least one message above it)
+    if (!unreadDividerInserted && lastRead>0 && tms>lastRead && html.length>0) {
+      html.push(`<div class="unread-divider" role="separator"><span>New Messages</span></div>`);
+      unreadDividerInserted=true;
+    }
     const sameSender=m.senderUid===lastSenderUid;
     const closeInTime=tms-lastTime<5*60*1000;
-    const isSelf=m.senderUid===state.user.uid;
+    const isSelf=m.senderUid===state.user?.uid;
     const isLeader=leaders.includes(m.senderUid);
+    const profile=state.userCache[m.senderUid]||{};
+    const badges=profile.badges||[];
 
     const editedLabel=m.edited?`<span class="msg-edited">(edited)</span>`:"";
+    const replyHtml=buildReplyPreview(m);
+    const reactionsHtml=buildReactionBar(m.reactions||{}, m.id);
+
     const msgActions=`<div class="msg-actions">
+      <button class="msg-action-btn" data-action="reply-msg" data-msg-id="${escapeHtml(m.id)}" title="Reply">${SVG_REPLY}</button>
       ${isSelf
-        ?`<button class="msg-action-btn" data-action="edit-msg" data-msg-id="${escapeHtml(m.id)}" title="Edit">✏️</button>`
-        :`<button class="msg-action-btn" data-action="report-msg" data-msg-id="${escapeHtml(m.id)}" data-uid="${escapeHtml(m.senderUid)}" data-name="${escapeHtml(m.senderName||"User")}" title="Report">🚩</button>`
+        ?`<button class="msg-action-btn" data-action="edit-msg" data-msg-id="${escapeHtml(m.id)}" title="Edit">${SVG_EDIT}</button>`
+        :`<button class="msg-action-btn danger" data-action="report-msg" data-msg-id="${escapeHtml(m.id)}" data-uid="${escapeHtml(m.senderUid)}" data-name="${escapeHtml(m.senderName||"User")}" title="Report">${SVG_REPORT}</button>`
       }
     </div>`;
 
-    if (m.commandResult) {
+    if (m.commandResult||m.type==="command") {
       html.push(`
         <div class="message-group msg-command-result" data-msg-id="${escapeHtml(m.id)}">
           <div class="msg-content" style="padding-left:0">
@@ -1305,7 +1407,9 @@ function renderMessages() {
       html.push(`
         <div class="msg-followup" data-msg-id="${escapeHtml(m.id)}">
           <span class="msg-time-inline">${escapeHtml(shortTime(ts))}</span>
+          ${replyHtml}
           <div class="msg-body">${formatMessage(m.text||"")}${editedLabel}</div>
+          ${reactionsHtml}
           ${msgActions}
         </div>`);
     } else {
@@ -1318,9 +1422,12 @@ function renderMessages() {
             <div class="msg-head">
               <span class="msg-author" data-profile-uid="${escapeHtml(m.senderUid)}">${escapeHtml(m.senderName||"User")}</span>
               ${isLeader?`<span class="leader-badge">👑</span>`:""}
+              ${renderBadges(badges)}
               <span class="msg-time">${escapeHtml(formatTime(ts))}</span>
             </div>
+            ${replyHtml}
             <div class="msg-body">${formatMessage(m.text||"")}${editedLabel}</div>
+            ${reactionsHtml}
             ${msgActions}
           </div>
         </div>`);
@@ -1328,7 +1435,23 @@ function renderMessages() {
     lastSenderUid=m.senderUid; lastTime=tms;
   }
   wrap.innerHTML=html.join("");
-  wrap.scrollTop=wrap.scrollHeight;
+  const cid=state.activeChatId;
+  const alreadyScrolled=state.chatScrolledInitial.has(cid);
+  if (!alreadyScrolled) {
+    state.chatScrolledInitial.add(cid);
+    // First render: scroll to unread divider if present, otherwise scroll to bottom
+    if (unreadDividerInserted) {
+      const divider=wrap.querySelector(".unread-divider");
+      if (divider) { divider.scrollIntoView({block:"start"}); wrap.scrollTop-=12; }
+    } else {
+      wrap.scrollTop=wrap.scrollHeight;
+    }
+  } else {
+    // Subsequent renders (live updates): only auto-scroll if user was near the bottom
+    const atBottom=wrap.scrollHeight-wrap.scrollTop-wrap.clientHeight<120;
+    if (atBottom) wrap.scrollTop=wrap.scrollHeight;
+  }
+  updateJumpBtn();
 }
 
 // Message area delegation
@@ -1338,10 +1461,19 @@ $("#messages").addEventListener("click", async e=>{
 
   const actionBtn=e.target.closest(".msg-action-btn");
   if (actionBtn) {
-    if (actionBtn.dataset.action==="edit-msg")   startEditMessage(actionBtn.dataset.msgId);
-    if (actionBtn.dataset.action==="report-msg") openReportModal(actionBtn.dataset.uid,actionBtn.dataset.name,actionBtn.dataset.msgId);
+    const { action, msgId, uid, name } = actionBtn.dataset;
+    if (action==="edit-msg")   startEditMessage(msgId);
+    if (action==="report-msg") openReportModal(uid, name, msgId);
+    if (action==="reply-msg") {
+      const msg=state.messages.find(m=>m.id===msgId);
+      if (msg) setReplyTo(msg);
+    }
     return;
   }
+  // Reaction pills
+  const reactPill=e.target.closest(".reaction-pill");
+  if (reactPill) { await toggleReaction(reactPill.dataset.reactMsg, reactPill.dataset.reactEmoji); return; }
+
   const saveBtn=e.target.closest(".msg-edit-save");
   if (saveBtn) {
     const ta=saveBtn.closest(".msg-edit-area")?.querySelector("textarea");
@@ -1384,26 +1516,48 @@ function updateSendBtn() {
 
 $("#send-btn").addEventListener("click", sendCurrentMessage);
 
+/* Command aliases (resolved before handleCommand) */
+const CMD_ALIASES = {
+  "cf":"coinflip","flip":"coinflip","c":"coinflip",
+  "8":"8ball","ball":"8ball","q":"8ball",
+  "r":"roll","dice":"roll",
+  "f":"fortune","a":"advice","j":"joke",
+  "t":"truth","d":"dare","s":"ship",
+  "tod":"tod","truth":"truth","dare":"dare",
+  "h":"help","?":"help"
+};
+
 async function sendCurrentMessage() {
   const raw=composer.value;
   const text=raw.trim();
   if (!text||!state.activeChatId) return;
   if (text.length>2000) { showToast("Message too long (2000 char max)"); return; }
 
+  const baseMsg = {
+    senderUid:state.user.uid, senderName:state.user.displayName,
+    senderPhoto:state.user.photoURL||null, createdAt:serverTimestamp(),
+    type:"text", edited:false, editedAt:null, reactions:{},
+    replyToMessageId:state.replyTo?.id||null,
+    replyToSenderName:state.replyTo?.senderName||null,
+    replyToTextPreview:state.replyTo?.textPreview||null,
+    // Future-proof scoring fields
+    xpValue:1, activityType:"message", rewardFlags:[]
+  };
+
   // Check for /command
   if (text.startsWith("/")) {
     const parts=text.slice(1).split(/\s+/);
-    const cmd=parts[0].toLowerCase();
+    const rawCmd=parts[0].toLowerCase();
+    const cmd=CMD_ALIASES[rawCmd]||rawCmd;
     const args=parts.slice(1);
     const result=handleCommand(cmd,args);
     if (result!==null) {
-      composer.value=""; composer.style.height="auto"; updateSendBtn();
+      composer.value=""; composer.style.height="auto"; updateSendBtn(); clearReplyTo();
       const chatId=state.activeChatId;
+      localStorage.removeItem(`sc_draft_${chatId}`);
       try {
         await addDoc(collection(db,"chats",chatId,"messages"),{
-          text:result, commandResult:true,
-          senderUid:state.user.uid, senderName:state.user.displayName,
-          senderPhoto:state.user.photoURL||null, createdAt:serverTimestamp()
+          ...baseMsg, text:result, type:"command", commandResult:true, xpValue:0
         });
         await updateDoc(doc(db,"chats",chatId),{ lastMessage:result.slice(0,200), lastMessageAt:serverTimestamp() });
       } catch(err){ showToast("Send failed: "+err.message); composer.value=raw; }
@@ -1411,14 +1565,12 @@ async function sendCurrentMessage() {
     }
   }
 
-  composer.value=""; composer.style.height="auto"; updateSendBtn();
+  composer.value=""; composer.style.height="auto"; updateSendBtn(); clearReplyTo();
+  clearTypingIndicator();
   const chatId=state.activeChatId;
+  localStorage.removeItem(`sc_draft_${chatId}`);
   try {
-    await addDoc(collection(db,"chats",chatId,"messages"),{
-      text,
-      senderUid:state.user.uid, senderName:state.user.displayName,
-      senderPhoto:state.user.photoURL||null, createdAt:serverTimestamp()
-    });
+    await addDoc(collection(db,"chats",chatId,"messages"),{ ...baseMsg, text });
     await updateDoc(doc(db,"chats",chatId),{ lastMessage:text.slice(0,200), lastMessageAt:serverTimestamp() });
   } catch(err){ showToast("Send failed: "+err.message); composer.value=raw; updateSendBtn(); }
 }
@@ -1465,6 +1617,8 @@ function handleCommand(cmd, args) {
       const label=pct>=80?"💕 Soulmates!":pct>=60?"💖 Great match!":pct>=40?"💛 Friends first.":pct>=20?"🤔 Maybe not…":"💔 Nope.";
       return `💘 **${escapeHtml(name1)} + ${escapeHtml(name2)}**\n${bar} **${pct}%** — ${label}`;
     }
+    case "help":
+      return `📋 **Commands**\n/8ball [q] · /tod · /truth · /dare · /joke · /fortune · /advice · /coinflip · /roll [NdN] · /ship [a] [b]\n**Aliases:** /cf /flip (coinflip) · /r /dice (roll) · /t (truth) · /d (dare) · /j (joke) · /f (fortune) · /a (advice) · /s (ship)`;
     default: return null; // unknown command — send as plain text
   }
 }
@@ -1986,12 +2140,19 @@ async function showProfileCard(uid, event) {
     avatarEl.textContent=(profile.username||profile.displayName||"?").charAt(0).toUpperCase();
   }
 
-  // Status dot
+  // Status dot — use resolveStatus so invisible shows as offline
   const statusDot=$("#profile-card-status-dot");
   if (statusDot) {
     if (!isSelf&&!isFriend) { statusDot.style.display="none"; }
-    else { statusDot.style.display=""; statusDot.dataset.status=profile.status||"online"; }
+    else {
+      statusDot.style.display="";
+      statusDot.dataset.status = resolveStatus(profile);
+    }
   }
+
+  // Badges
+  const badgesEl=$("#profile-card-badges");
+  if (badgesEl) badgesEl.innerHTML=renderBadges(profile.badges||[]);
 
   // Name / bio
   $("#profile-card-name").textContent=profile.username||profile.displayName||"User";
@@ -2081,3 +2242,421 @@ function maybeToggleSidebar(open) {
 });
 $("#rail-home")?.addEventListener("click",()=>maybeToggleSidebar(true));
 $("#open-friends-btn")?.addEventListener("click",()=>maybeToggleSidebar(false));
+
+
+/* =====================================================================
+   REPLY SYSTEM
+   ===================================================================== */
+function setReplyTo(msg) {
+  state.replyTo = { id:msg.id, senderName:msg.senderName||"User", textPreview:(msg.text||"").slice(0,80) };
+  const bar=$("#reply-bar");
+  if (!bar) return;
+  bar.classList.remove("hidden");
+  const nameEl=bar.querySelector("#reply-bar-name");
+  const prevEl=bar.querySelector("#reply-bar-preview");
+  if (nameEl) nameEl.textContent=state.replyTo.senderName;
+  if (prevEl) prevEl.textContent=state.replyTo.textPreview;
+  $("#composer-input")?.focus();
+}
+
+function clearReplyTo() {
+  state.replyTo=null;
+  $("#reply-bar")?.classList.add("hidden");
+}
+
+$("#reply-bar-cancel")?.addEventListener("click", clearReplyTo);
+
+
+/* =====================================================================
+   MESSAGE REACTIONS
+   ===================================================================== */
+async function toggleReaction(msgId, emoji) {
+  const chatId=state.activeChatId;
+  if (!chatId||!state.user) return;
+  const msg=state.messages.find(m=>m.id===msgId);
+  if (!msg) return;
+  const reactions={...(msg.reactions||{})};
+  const uids=reactions[emoji]?[...reactions[emoji]]:[];
+  const idx=uids.indexOf(state.user.uid);
+  if (idx>=0) { uids.splice(idx,1); if (!uids.length) delete reactions[emoji]; else reactions[emoji]=uids; }
+  else { uids.push(state.user.uid); reactions[emoji]=uids; }
+  try { await updateDoc(doc(db,"chats",chatId,"messages",msgId),{reactions}); }
+  catch(err){ showToast("Reaction failed: "+err.message); }
+}
+
+
+/* =====================================================================
+   TYPING INDICATORS
+   ===================================================================== */
+let _typingTimer=null, _typingWritten=false;
+
+function onComposerTyping() {
+  if (!state.activeChatId||!state.user) return;
+  if (!_typingWritten) {
+    _typingWritten=true;
+    setDoc(doc(db,"chats",state.activeChatId,"typing",state.user.uid),
+      {name:state.user.displayName, uid:state.user.uid, ts:serverTimestamp()}).catch(()=>{});
+  }
+  clearTimeout(_typingTimer);
+  _typingTimer=setTimeout(clearTypingIndicator, 3000);
+}
+
+function clearTypingIndicator() {
+  _typingWritten=false;
+  clearTimeout(_typingTimer);
+  if (!state.activeChatId||!state.user) return;
+  deleteDoc(doc(db,"chats",state.activeChatId,"typing",state.user.uid)).catch(()=>{});
+}
+
+function renderTypingIndicator(names=[]) {
+  const el=$("#typing-indicator"); if (!el) return;
+  if (!names.length) { el.classList.add("hidden"); el.textContent=""; return; }
+  const text=names.length===1?`${names[0]} is typing…`
+    :names.length===2?`${names[0]} and ${names[1]} are typing…`
+    :"Several people are typing…";
+  el.textContent=text;
+  el.classList.remove("hidden");
+}
+
+// Wire up typing listener when a chat is opened (called from openChat)
+function startTypingListener(chatId) {
+  if (state.unsubscribers.typing) { state.unsubscribers.typing(); state.unsubscribers.typing=null; }
+  state.unsubscribers.typing = onSnapshot(
+    collection(db,"chats",chatId,"typing"),
+    snap=>{
+      const names=snap.docs.filter(d=>d.id!==state.user?.uid).map(d=>d.data().name||"Someone");
+      renderTypingIndicator(names);
+    }
+  );
+}
+
+// Hook composer input to send typing events
+const _composerEl=$("#composer-input");
+if (_composerEl) {
+  const origInput=_composerEl.oninput;
+  _composerEl.addEventListener("input", ()=>{ onComposerTyping(); });
+}
+
+
+/* =====================================================================
+   PRESENCE TRACKING
+   ===================================================================== */
+let _presenceTimer=null;
+
+function resolveStatus(profile) {
+  if (!profile) return "offline";
+  const manual=profile.status||"online";
+  if (manual==="invisible") return "offline";
+  if (profile.isOnline) {
+    const last=profile.lastSeen?.toDate?profile.lastSeen.toDate():null;
+    if (!last||(Date.now()-last.getTime())<5*60*1000) return manual;
+  }
+  return "offline";
+}
+
+async function updatePresence() {
+  if (!state.user) return;
+  try {
+    await updateDoc(doc(db,"users",state.user.uid),{
+      isOnline:true, lastSeen:serverTimestamp(), status:state.status
+    });
+  } catch(_){}
+}
+
+function startPresenceHeartbeat() {
+  updatePresence();
+  clearInterval(_presenceTimer);
+  _presenceTimer=setInterval(updatePresence, 90000);
+}
+
+async function setOfflinePresence() {
+  if (!state.user) return;
+  try { await updateDoc(doc(db,"users",state.user.uid),{isOnline:false, lastSeen:serverTimestamp()}); } catch(_){}
+}
+
+window.addEventListener("beforeunload", ()=>{ setOfflinePresence(); });
+document.addEventListener("visibilitychange", ()=>{ if (!document.hidden) updatePresence(); });
+
+
+/* =====================================================================
+   GIF SEARCH  (Tenor API v1)
+   ===================================================================== */
+const TENOR_KEY = "LIVDSRZULELA";
+
+async function searchGifs(query) {
+  try {
+    const url=`https://api.tenor.com/v1/search?q=${encodeURIComponent(query)}&key=${TENOR_KEY}&limit=20&contentfilter=high&media_filter=minimal`;
+    const r=await fetch(url);
+    const d=await r.json();
+    return d.results||[];
+  } catch(e){ console.error("GIF search:",e); return []; }
+}
+
+async function loadTrendingGifs() {
+  try {
+    const url=`https://api.tenor.com/v1/trending?key=${TENOR_KEY}&limit=20&contentfilter=high&media_filter=minimal`;
+    const r=await fetch(url);
+    const d=await r.json();
+    return d.results||[];
+  } catch(e){ return []; }
+}
+
+function renderGifGrid(results) {
+  const grid=$("#gif-grid"); if (!grid) return;
+  if (!results.length) {
+    grid.innerHTML=`<p class="gif-hint">No GIFs found.</p>`; return;
+  }
+  grid.innerHTML=results.map(r=>{
+    const media=r.media?.[0];
+    const url=media?.tinygif?.url||media?.gif?.url||"";
+    if (!url) return "";
+    return `<button class="gif-cell" data-gif-url="${escapeHtml(url)}" title="${escapeHtml(r.title||"")}">
+      <img src="${escapeHtml(url)}" alt="" loading="lazy" />
+    </button>`;
+  }).filter(Boolean).join("");
+}
+
+// GIF picker toggle
+let gifOpen=false;
+$("#gif-btn")?.addEventListener("click", async ()=>{
+  const picker=$("#gif-picker");
+  if (!picker) return;
+  gifOpen=!gifOpen;
+  if (gifOpen) {
+    picker.classList.remove("hidden");
+    // Close emoji picker
+    $("#emoji-picker")?.classList.add("hidden"); emojiOpen=false;
+    const grid=$("#gif-grid");
+    if (grid&&grid.innerHTML.includes("gif-hint")) {
+      grid.innerHTML=`<p class="gif-hint">Loading trending GIFs…</p>`;
+      const results=await loadTrendingGifs();
+      renderGifGrid(results);
+    }
+    $("#gif-search-input")?.focus();
+  } else {
+    picker.classList.add("hidden");
+  }
+});
+
+// GIF search button
+$("#gif-search-btn")?.addEventListener("click", async ()=>{
+  const q=$("#gif-search-input")?.value.trim();
+  if (!q) return;
+  const grid=$("#gif-grid");
+  if (grid) grid.innerHTML=`<p class="gif-hint">Searching…</p>`;
+  const results=await searchGifs(q);
+  renderGifGrid(results);
+});
+
+// GIF search on Enter
+$("#gif-search-input")?.addEventListener("keydown", async e=>{
+  if (e.key!=="Enter") return;
+  const q=e.target.value.trim(); if (!q) return;
+  const grid=$("#gif-grid");
+  if (grid) grid.innerHTML=`<p class="gif-hint">Searching…</p>`;
+  const results=await searchGifs(q);
+  renderGifGrid(results);
+});
+
+// Click a GIF cell → insert URL into composer
+document.addEventListener("click", e=>{
+  const cell=e.target.closest(".gif-cell");
+  if (!cell) return;
+  const url=cell.dataset.gifUrl; if (!url) return;
+  const c=$("#composer-input"); if (!c) return;
+  const start=c.selectionStart, end=c.selectionEnd;
+  const sep=(c.value.trim()&&!c.value.endsWith(" "))?" ":"";
+  c.value=c.value.slice(0,start)+sep+url+c.value.slice(end);
+  c.focus(); updateSendBtn();
+  $("#gif-picker")?.classList.add("hidden"); gifOpen=false;
+});
+
+// Close GIF picker on outside click
+document.addEventListener("click", e=>{
+  if (!gifOpen) return;
+  if (e.target.closest("#gif-picker")||e.target.closest("#gif-btn")) return;
+  $("#gif-picker")?.classList.add("hidden"); gifOpen=false;
+});
+
+
+/* =====================================================================
+   RIGHT-CLICK CONTEXT MENUS
+   ===================================================================== */
+function showCtxMenu(x, y, items) {
+  document.getElementById("ctx-menu")?.remove();
+  const menu=document.createElement("div");
+  menu.id="ctx-menu";
+  menu.className="ctx-menu";
+  menu.innerHTML=items.map(item=>{
+    if (item==="divider") return `<div class="ctx-divider"></div>`;
+    const dataAttrs=Object.entries(item.data||{}).map(([k,v])=>`data-${k}="${escapeHtml(String(v))}"`).join(" ");
+    return `<button class="ctx-item${item.danger?" danger":""}" data-ctx="${item.action}" ${dataAttrs}>${item.icon||""} ${item.label}</button>`;
+  }).join("");
+  menu.style.left=Math.min(x,window.innerWidth-210)+"px";
+  menu.style.top =Math.min(y,window.innerHeight-200)+"px";
+  document.body.appendChild(menu);
+  setTimeout(()=>document.addEventListener("click",removeCtxMenu,{once:true}),0);
+}
+
+function removeCtxMenu() { document.getElementById("ctx-menu")?.remove(); }
+
+document.addEventListener("contextmenu", e=>{
+  // User right-click (avatar or name)
+  const userEl=e.target.closest("[data-profile-uid]");
+  const msgEl=e.target.closest(".message-group,.msg-followup");
+
+  if (userEl&&!e.target.closest(".msg-action-btn")) {
+    const uid=userEl.dataset.profileUid;
+    if (!uid) return;
+    e.preventDefault();
+    const isSelf=uid===state.user?.uid;
+    const isFriend=state.friends.some(f=>f.uid===uid);
+    const items=[
+      {label:"👤 View Profile", action:"ctx-view-profile", data:{uid}},
+    ];
+    if (!isSelf) {
+      items.push({label:"💬 Message", action:"ctx-message", data:{uid}});
+      if (!isFriend) items.push({label:"➕ Add Friend", action:"ctx-add-friend", data:{uid}});
+      items.push("divider");
+      items.push({label:"🚫 Block", action:"ctx-block", data:{uid}, danger:true});
+    } else {
+      items.push({label:"⚙️ Edit Profile", action:"ctx-edit-profile"});
+    }
+    showCtxMenu(e.clientX, e.clientY, items);
+    return;
+  }
+
+  if (msgEl) {
+    const msgId=msgEl.dataset.msgId;
+    const msg=state.messages.find(m=>m.id===msgId);
+    if (!msg) return;
+    e.preventDefault();
+    const isSelf=msg.senderUid===state.user?.uid;
+    const items=[
+      {label:"↩️ Reply",          action:"ctx-reply",    data:{msgId}},
+      {label:"📋 Copy Text",      action:"ctx-copy-text",data:{msgId}},
+      {label:"🆔 Copy Msg ID",    action:"ctx-copy-id",  data:{msgId}},
+      "divider",
+    ];
+    if (isSelf) {
+      items.push({label:"✏️ Edit",   action:"ctx-edit",   data:{msgId}});
+      items.push({label:"🗑️ Delete", action:"ctx-delete", data:{msgId}, danger:true});
+    } else {
+      items.push({label:"🚩 Report", action:"ctx-report", data:{msgId, uid:msg.senderUid, name:msg.senderName||"User"}, danger:true});
+    }
+    showCtxMenu(e.clientX, e.clientY, items);
+  }
+});
+
+document.addEventListener("click", async e=>{
+  const item=e.target.closest(".ctx-item");
+  if (!item) return;
+  const action=item.dataset.ctx;
+  const { uid, msgId, name } = item.dataset;
+  removeCtxMenu();
+
+  if (action==="ctx-view-profile") { showProfileCard(uid, e); }
+  else if (action==="ctx-message")  { await openOrCreateDm(uid); }
+  else if (action==="ctx-edit-profile") { openSettingsModal(); }
+  else if (action==="ctx-add-friend") {
+    const p=state.userCache[uid]||{};
+    try {
+      await setDoc(doc(db,"friendRequests",`${state.user.uid}_${uid}`),{
+        fromUid:state.user.uid, toUid:uid,
+        fromName:state.user.displayName, fromPhoto:state.user.photoURL||null,
+        toName:p.username||p.displayName||"User", toPhoto:p.photoURL||null,
+        createdAt:serverTimestamp()
+      });
+      showToast("Friend request sent!");
+    } catch(err){ showToast("Error: "+err.message); }
+  }
+  else if (action==="ctx-block")  { await blockUser(uid); }
+  else if (action==="ctx-reply")  { const m=state.messages.find(x=>x.id===msgId); if(m) setReplyTo(m); }
+  else if (action==="ctx-copy-text") {
+    const m=state.messages.find(x=>x.id===msgId);
+    if (m) navigator.clipboard.writeText(m.text||"").then(()=>showToast("Copied!"));
+  }
+  else if (action==="ctx-copy-id") {
+    navigator.clipboard.writeText(msgId||"").then(()=>showToast("Message ID copied!"));
+  }
+  else if (action==="ctx-edit")   { startEditMessage(msgId); }
+  else if (action==="ctx-delete") { await deleteMessage(msgId); }
+  else if (action==="ctx-report") { openReportModal(uid, name, msgId); }
+});
+
+
+/* =====================================================================
+   DELETE MESSAGE
+   ===================================================================== */
+async function deleteMessage(msgId) {
+  const msg=state.messages.find(m=>m.id===msgId);
+  if (!msg||msg.senderUid!==state.user?.uid) return;
+  if (!confirm("Delete this message?")) return;
+  try {
+    await deleteDoc(doc(db,"chats",state.activeChatId,"messages",msgId));
+    showToast("Message deleted.");
+  } catch(err){ showToast("Delete failed: "+err.message); }
+}
+
+
+/* =====================================================================
+   BLOCKING
+   ===================================================================== */
+async function blockUser(uid) {
+  if (!uid||uid===state.user?.uid) return;
+  if (!confirm("Block this user? Their messages will be hidden from you.")) return;
+  try {
+    await updateDoc(doc(db,"users",state.user.uid),{ blockedUsers:arrayUnion(uid) });
+    state.blockedUsers.add(uid);
+    renderMessages();
+    showToast("User blocked.");
+  } catch(err){ showToast("Block failed: "+err.message); }
+}
+
+// Load blocked list on sign-in (wired in bootSubscriptions ownProfile listener)
+function applyBlockedFromProfile(data) {
+  if (Array.isArray(data.blockedUsers)) {
+    state.blockedUsers=new Set(data.blockedUsers);
+  }
+}
+
+
+// Badge rendering and resolved status are wired directly inside showProfileCard
+// (see the existing function above — edits applied inline)
+
+
+/* =====================================================================
+   JUMP TO LATEST BUTTON
+   ===================================================================== */
+function updateJumpBtn() {
+  const wrap=$("#messages");
+  const btn=$("#jump-latest");
+  if (!wrap||!btn) return;
+  const atBottom=wrap.scrollHeight-wrap.scrollTop-wrap.clientHeight<80;
+  btn.classList.toggle("hidden", atBottom);
+}
+
+// Wire up the scroll listener once — it's fine to attach to the #messages element
+// which persists across chat switches (innerHTML changes, element stays)
+(function wireJumpBtn() {
+  const wrap=$("#messages");
+  const btn=$("#jump-latest");
+  if (!wrap||!btn) return;
+  wrap.addEventListener("scroll", updateJumpBtn, {passive:true});
+  btn.addEventListener("click", ()=>{
+    wrap.scrollTo({top:wrap.scrollHeight, behavior:"smooth"});
+  });
+})();
+
+
+/* =====================================================================
+   SAVE DRAFT ON PAGE CLOSE
+   ===================================================================== */
+window.addEventListener("beforeunload", ()=>{
+  // Persist draft for current chat
+  const chatId=state.activeChatId;
+  if (chatId) {
+    const draftVal=$("#composer-input")?.value||"";
+    localStorage.setItem(`sc_draft_${chatId}`, draftVal);
+  }
+});
