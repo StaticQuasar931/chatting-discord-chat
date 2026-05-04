@@ -453,12 +453,12 @@ function formatMessage(raw) {
   const codeBlocks = [];
   text = text.replace(/```([\s\S]*?)```/g, (_,inner) => {
     codeBlocks.push(inner.replace(/^\n/,""));
-    return ` CB${codeBlocks.length-1} `;
+    return `\x01CB${codeBlocks.length-1}\x01`;
   });
   const inlineCodes = [];
   text = text.replace(/`([^`\n]+)`/g, (_,inner) => {
     inlineCodes.push(inner);
-    return ` IC${inlineCodes.length-1} `;
+    return `\x01IC${inlineCodes.length-1}\x01`;
   });
 
   // Markdown
@@ -466,20 +466,29 @@ function formatMessage(raw) {
   text = text.replace(/__([^_\n][^_\n]*?)__/g,"<u>$1</u>");
   text = text.replace(/(^|[^*])\*([^*\n]+?)\*(?!\*)/g,"$1<em>$2</em>");
 
-  // Emoji :name:  — :Static: gets no alt/title to avoid text display
+  // Emoji :name:  — use a placeholder so the URL regex below can't touch the
+  // img tag's src attribute and corrupt it.
+  const emojiBlocks = [];
   text = text.replace(/:([A-Za-z0-9_+\-]+):/g,(m,name)=>{
-    if (name==="Static")
-      return `<img class="msg-emoji msg-emoji-static" src="${STATIC_EMOJI_URL}" alt="" />`;
-    if (EMOJI_MAP[name]) return EMOJI_MAP[name];
-    return m;
+    let html;
+    if (name==="Static") {
+      html = `<img class="msg-emoji msg-emoji-static" src="${STATIC_EMOJI_URL}" alt="" />`;
+    } else if (EMOJI_MAP[name]) {
+      return EMOJI_MAP[name];   // plain Unicode char — safe, no URL inside
+    } else {
+      return m;
+    }
+    emojiBlocks.push(html);
+    return `\x01EB${emojiBlocks.length-1}\x01`;
   });
 
-  // Restore code
-  text = text.replace(/ IC(\d+) /g,(_,i)=>`<code class="inline-code">${inlineCodes[+i]}</code>`);
-  text = text.replace(/ CB(\d+) /g,(_,i)=>`<pre class="code-block"><code>${codeBlocks[+i]}</code></pre>`);
+  // Restore code blocks BEFORE URL pass so code isn't turned into a link
+  text = text.replace(/\x01IC(\d+)\x01/g,(_,i)=>`<code class="inline-code">${inlineCodes[+i]}</code>`);
+  text = text.replace(/\x01CB(\d+)\x01/g,(_,i)=>`<pre class="code-block"><code>${codeBlocks[+i]}</code></pre>`);
 
   // URLs → embeds or plain links.  Run safeUrl() so malformed strings never
   // produce broken href= attributes that GitHub Pages misroutes.
+  // This runs AFTER emoji placeholders are in place, so img src attrs are safe.
   text = text.replace(/https?:\/\/[^\s<>"]+/g, rawUrl => {
     const url = safeUrl(rawUrl);
     if (!url) return escapeHtml(rawUrl);
@@ -488,6 +497,9 @@ function formatMessage(raw) {
     }
     return `<a class="msg-link" href="${url}" target="_blank" rel="noopener noreferrer">${url}</a>`;
   });
+
+  // Restore emoji HTML (after URL pass — their src attrs are now safe)
+  text = text.replace(/\x01EB(\d+)\x01/g,(_,i)=>emojiBlocks[+i]);
 
   text = text.replace(/\n/g,"<br>");
   return text;
@@ -889,11 +901,13 @@ function bootSubscriptions() {
       }
 
       // Background notification: play sound if any non-active chat got a new message
+      // from someone OTHER than the current user
       if (Object.keys(_prevChatTimes).length > 0) {
         for (const c of arr) {
           const prev=_prevChatTimes[c.id]||0;
           const cur=c.lastMessageAt?.toMillis?.()||0;
-          if (cur>prev && c.id!==state.activeChatId) {
+          const sentByMe=c.lastSenderUid===uid;
+          if (cur>prev && c.id!==state.activeChatId && !sentByMe) {
             playSound("message"); break;
           }
         }
@@ -1133,6 +1147,8 @@ async function acceptRequest(requestId) {
    ===================================================================== */
 function chatHasUnread(c) {
   if (!c||state.activeChatId===c.id) return false;
+  // If the current user sent the last message, it can't be "unread" for them
+  if (c.lastSenderUid && c.lastSenderUid===state.user?.uid) return false;
   const readAt=parseInt(localStorage.getItem(`sc_read_${c.id}`)||"0",10);
   const lastMsg=c.lastMessageAt?.toMillis?.()||0;
   return lastMsg>readAt && readAt>0;
@@ -1388,9 +1404,14 @@ function renderMessages() {
   const leaders=Array.isArray(c?.leaders)?c.leaders:[];
   const lastRead=state.lastReadMarker[state.activeChatId]||0;
   let unreadDividerInserted=false;
-  // Pre-count unread messages for the divider label
+  // Pre-count unread messages for the divider label — only count messages from OTHERS
+  const myUid=state.user?.uid;
   const unreadCount=lastRead>0
-    ? state.messages.filter(m=>!state.blockedUsers.has(m.senderUid)&&(m.createdAt?.toMillis?.()??0)>lastRead).length
+    ? state.messages.filter(m=>
+        !state.blockedUsers.has(m.senderUid) &&
+        m.senderUid!==myUid &&
+        (m.createdAt?.toMillis?.()??0)>lastRead
+      ).length
     : 0;
 
   for (const m of state.messages) {
@@ -1400,8 +1421,9 @@ function renderMessages() {
     const ts=m.createdAt;
     const tms=ts?.toMillis?ts.toMillis():0;
 
-    // Insert unread divider before first new message (only if there's at least one message above it)
-    if (!unreadDividerInserted && lastRead>0 && tms>lastRead && html.length>0) {
+    // Insert unread divider before first NEW message from someone else
+    // (skip own messages — you can't have "unread" messages you sent yourself)
+    if (!unreadDividerInserted && unreadCount>0 && lastRead>0 && tms>lastRead && m.senderUid!==myUid && html.length>0) {
       const label=unreadCount===1?"1 New Message":`${unreadCount} New Messages`;
       html.push(`<div class="unread-divider" role="separator" id="unread-divider-bar" title="Click to dismiss"><span>${label}</span></div>`);
       unreadDividerInserted=true;
@@ -1484,6 +1506,8 @@ function renderMessages() {
     const atBottom=wrap.scrollHeight-wrap.scrollTop-wrap.clientHeight<120;
     if (atBottom) wrap.scrollTop=wrap.scrollHeight;
   }
+  // Store unread count so jump button can show it
+  state._unreadDisplayCount = unreadCount;
   updateJumpBtn();
 }
 
@@ -1604,7 +1628,7 @@ async function sendCurrentMessage() {
         await addDoc(collection(db,"chats",chatId,"messages"),{
           ...baseMsg, text:result, type:"command", commandResult:true, xpValue:0
         });
-        await updateDoc(doc(db,"chats",chatId),{ lastMessage:result.slice(0,200), lastMessageAt:serverTimestamp() });
+        await updateDoc(doc(db,"chats",chatId),{ lastMessage:result.slice(0,200), lastMessageAt:serverTimestamp(), lastSenderUid:state.user.uid });
       } catch(err){ showToast("Send failed: "+err.message); composer.value=raw; }
       return;
     }
@@ -1616,7 +1640,7 @@ async function sendCurrentMessage() {
   localStorage.removeItem(`sc_draft_${chatId}`);
   try {
     await addDoc(collection(db,"chats",chatId,"messages"),{ ...baseMsg, text });
-    await updateDoc(doc(db,"chats",chatId),{ lastMessage:text.slice(0,200), lastMessageAt:serverTimestamp() });
+    await updateDoc(doc(db,"chats",chatId),{ lastMessage:text.slice(0,200), lastMessageAt:serverTimestamp(), lastSenderUid:state.user.uid });
   } catch(err){ showToast("Send failed: "+err.message); composer.value=raw; updateSendBtn(); }
 }
 
@@ -2692,6 +2716,10 @@ function updateJumpBtn() {
   if (!wrap||!btn) return;
   const atBottom=wrap.scrollHeight-wrap.scrollTop-wrap.clientHeight<80;
   btn.classList.toggle("hidden", atBottom);
+  if (!atBottom) {
+    const n=state._unreadDisplayCount||0;
+    btn.textContent=n>0?`↓  +${n} new messages`:"↓  Jump to Latest";
+  }
 }
 
 // Wire up the scroll listener once — it's fine to attach to the #messages element
