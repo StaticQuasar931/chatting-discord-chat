@@ -28,6 +28,7 @@
   --c-danger-hover: #d83a3d;
   --c-success: #23a55a;
   --c-warn: #f0b232;
+  --radius: 6px;
   --radius-sm: 4px;
   --radius-md: 8px;
   --radius-lg: 12px;
@@ -1026,24 +1027,23 @@ body[data-theme="daylight"] .msg-followup:hover { background: rgba(0,0,50,.05); 
    ================================================= */
 .reply-preview {
   display: flex; align-items: center; gap: 6px;
-  margin: 0 0 4px 0; padding: 3px 8px 3px 8px;
+  margin: 0 0 2px 0; padding: 2px 0 2px 0;
   font-size: 12px; color: var(--t-muted);
   cursor: pointer; overflow: hidden;
   max-width: 100%; position: relative;
-  transition: filter .1s;
-  /* Left connector: little curved line like Discord */
+  transition: filter .12s;
 }
-/* The curved connector line from the avatar area */
+/* Curved connector emerging from the avatar column */
 .reply-preview::before {
-  content: ""; flex-shrink: 0;
-  display: block; width: 28px; height: 12px;
+  content: ""; flex-shrink: 0; display: block;
+  width: 32px; height: 14px; min-width: 32px;
   border-left: 2px solid var(--c-border-2);
   border-top: 2px solid var(--c-border-2);
-  border-top-left-radius: 6px;
-  margin-right: -2px; margin-top: -2px;
-  position: relative; top: 6px; flex-shrink: 0;
+  border-top-left-radius: 8px;
+  align-self: flex-end; margin-bottom: -2px;
 }
-.reply-preview:hover { filter: brightness(1.2); }
+.reply-preview:hover { filter: brightness(1.3); }
+.reply-preview:hover::before { border-color: var(--t-muted); }
 /* suppress the absolute-positioned old connector (kept for safety) */
 .reply-connector { display: none; }
 .reply-avatar {
@@ -1571,3 +1571,196 @@ body[data-theme="daylight"] .msg-followup:hover { background: rgba(0,0,50,.05); 
   white-space: nowrap;
 }
 .ctx-item:hover .ctx-key { color: var(--t-secondary); }
+
+/* =================================================
+   STATUS DOTS — shared base + variants
+   ================================================= */
+[data-status] { border-radius: 50%; }
+.side-status-dot, .friend-status-dot,
+.header-status-dot, .chat-header-status-dot {
+  display: inline-block; border-radius: 50%;
+  flex-shrink: 0; pointer-events: none;
+}
+/* DM sidebar dot */
+.side-status-dot {
+  width: 12px; height: 12px;
+  position: absolute; bottom: -1px; right: -1px;
+  border: 2.5px solid var(--c-sidebar);
+}
+/* Friends list dot */
+.friend-avatar-wrap { position: relative; display: inline-block; flex-shrink: 0; }
+.friend-status-dot {
+  position: absolute; bottom: -1px; right: -1px;
+  width: 13px; height: 13px;
+  border: 2.5px solid var(--c-main);
+}
+/* Chat header sub-line dot */
+.header-status-dot {
+  width: 9px; height: 9px;
+  display: inline-block; margin-right: 5px;
+  vertical-align: middle;
+}
+/* Chat header avatar overlay dot */
+.chat-header-avatar-status-wrap { position: relative; display: inline-block; }
+.chat-header-status-dot {
+  position: absolute; bottom: -1px; right: -1px;
+  width: 12px; height: 12px;
+  border: 2.5px solid var(--c-main);
+}
+/* Color rules for all status dots */
+.side-status-dot[data-status="online"],
+.friend-status-dot[data-status="online"],
+.header-status-dot[data-status="online"],
+.chat-header-status-dot[data-status="online"]   { background: var(--c-online); }
+.side-status-dot[data-status="idle"],
+.friend-status-dot[data-status="idle"],
+.header-status-dot[data-status="idle"],
+.chat-header-status-dot[data-status="idle"]     { background: var(--c-idle); }
+.side-status-dot[data-status="dnd"],
+.friend-status-dot[data-status="dnd"],
+.header-status-dot[data-status="dnd"],
+.chat-header-status-dot[data-status="dnd"]      { background: var(--c-dnd); }
+.side-status-dot[data-status="offline"],
+.friend-status-dot[data-status="offline"],
+.header-status-dot[data-status="offline"],
+.chat-header-status-dot[data-status="offline"]  { background: var(--c-invisible); }
+/* invisible = show hollow ring */
+.side-status-dot[data-status="invisible"],
+.friend-status-dot[data-status="invisible"],
+.header-status-dot[data-status="invisible"],
+.chat-header-status-dot[data-status="invisible"] {
+  background: transparent; border-color: var(--c-invisible);
+  border-style: solid;
+}
+/* Make header name cursor pointer in DMs */
+#chat-header-name { cursor: default; }
+.chat-header-info:has(+ .chat-header-actions) #chat-header-name { cursor: default; }
+#chat-header-avatar-wrap[data-profile-uid] { cursor: pointer; }
+
+/* =================================================
+   STATUS PICKER PANEL  (bottom-left popup)
+   ================================================= */
+.status-picker-panel {
+  position: fixed; z-index: 200;
+  background: var(--c-overlay); border: 1px solid var(--c-border);
+  border-radius: var(--radius-lg); box-shadow: var(--shadow-2);
+  padding: 8px; min-width: 240px;
+  animation: fadeSlideUp .15s ease both;
+}
+.sp-user-card {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 6px 10px;
+}
+.sp-avatar-wrap { position: relative; flex-shrink: 0; }
+.sp-avatar, .sp-avatar-fallback { width: 38px; height: 38px; border-radius: 50%; }
+.sp-avatar { object-fit: cover; }
+.sp-avatar-fallback {
+  background: var(--c-accent); color: #fff;
+  font-size: 16px; font-weight: 700;
+  display: grid; place-items: center;
+}
+.sp-status-ring {
+  position: absolute; bottom: -1px; right: -1px;
+  width: 13px; height: 13px; border-radius: 50%;
+  border: 2.5px solid var(--c-overlay); pointer-events: none;
+}
+.sp-status-ring[data-status="online"]    { background: var(--c-online); }
+.sp-status-ring[data-status="idle"]      { background: var(--c-idle); }
+.sp-status-ring[data-status="dnd"]       { background: var(--c-dnd); }
+.sp-status-ring[data-status="offline"]   { background: var(--c-invisible); }
+.sp-status-ring[data-status="invisible"] { background: transparent; border-color: var(--c-invisible); }
+.sp-user-info { flex: 1; min-width: 0; }
+.sp-username { font-size: 14px; font-weight: 700; color: var(--t-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sp-tag { font-size: 12px; color: var(--t-muted); }
+.sp-divider { height: 1px; background: var(--c-border-2); margin: 4px 0; }
+.sp-label { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--t-muted); padding: 4px 8px 2px; user-select: none; }
+.sp-option {
+  display: flex; align-items: center; gap: 10px;
+  width: 100%; padding: 8px 8px; border-radius: var(--radius-sm);
+  color: var(--t-secondary); cursor: pointer; transition: background .1s, color .1s;
+  text-align: left;
+}
+.sp-option:hover { background: rgba(255,255,255,.07); color: var(--t-primary); }
+.sp-option.active { color: var(--t-primary); }
+.sp-dot { width: 12px; height: 12px; border-radius: 50%; flex-shrink: 0; }
+.sp-option-text { flex: 1; min-width: 0; }
+.sp-option-label { font-size: 14px; font-weight: 500; }
+.sp-option-sub { font-size: 11px; color: var(--t-muted); margin-top: 1px; }
+.sp-check { flex-shrink: 0; color: var(--c-online); }
+.sp-settings { color: var(--t-muted); font-size: 13px; gap: 8px; }
+.sp-settings span { font-weight: 500; }
+.sp-settings:hover { color: var(--t-primary); }
+
+/* =================================================
+   GIF PICKER — improved
+   ================================================= */
+.gif-picker {
+  position: absolute; bottom: calc(100% + 8px); right: 0;
+  width: 380px; max-height: 480px;
+  background: var(--c-overlay); border: 1px solid var(--c-border);
+  border-radius: var(--radius-lg); box-shadow: var(--shadow-2);
+  display: flex; flex-direction: column; overflow: hidden;
+  z-index: 120;
+}
+.gif-picker-header { padding: 8px 8px 0; flex-shrink: 0; }
+.gif-search-wrap {
+  display: flex; align-items: center; gap: 6px;
+  background: var(--c-input); border-radius: var(--radius-pill);
+  padding: 0 10px; height: 36px;
+}
+.gif-search-icon { flex-shrink: 0; color: var(--t-muted); }
+.gif-search-wrap input {
+  flex: 1; background: none; border: none; color: var(--t-primary);
+  font-size: 14px; outline: none; min-width: 0;
+}
+.gif-search-wrap input::placeholder { color: var(--t-muted); }
+.gif-cats { padding: 6px 8px; }
+.gif-grid {
+  flex: 1; overflow-y: auto; padding: 4px 8px 8px;
+  display: grid; grid-template-columns: repeat(2,1fr); gap: 4px;
+}
+.gif-cell {
+  border-radius: var(--radius-sm); overflow: hidden;
+  cursor: pointer; border: 2px solid transparent;
+  transition: border-color .12s, transform .1s;
+  background: var(--c-input-2);
+  aspect-ratio: 16/9; display: block;
+}
+.gif-cell:hover { border-color: var(--c-accent); transform: scale(1.02); }
+.gif-cell img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.gif-hint { color: var(--t-muted); font-size: 13px; padding: 20px 8px; text-align: center; grid-column: 1/-1; }
+.gif-footer {
+  display: flex; align-items: center; justify-content: center; gap: 4px;
+  font-size: 10px; color: var(--t-muted); padding: 4px 8px;
+  border-top: 1px solid var(--c-border-2); flex-shrink: 0;
+}
+
+/* =================================================
+   SETTINGS PROFILE PREVIEW CARD
+   ================================================= */
+.settings-profile-preview {
+  border-radius: var(--radius-lg); overflow: hidden;
+  background: var(--c-input-2); border: 1px solid var(--c-border-2);
+  margin-bottom: 24px;
+}
+.spp-banner { height: 60px; background: linear-gradient(135deg,#4f7cff,#7c3aed); }
+.spp-body { padding: 0 16px 16px; }
+.spp-avatar-wrap { margin-top: -28px; margin-bottom: 8px; }
+.spp-avatar-wrap .setup-avatar-preview { border: 4px solid var(--c-input-2) !important; }
+.spp-name { font-size: 18px; font-weight: 700; color: var(--t-primary); }
+.spp-tag  { font-size: 13px; color: var(--t-muted); }
+.settings-field-group { margin-bottom: 20px; }
+.settings-field-group:last-of-type { margin-bottom: 0; }
+
+/* =================================================
+   FRIEND ROW — clickable name/avatar
+   ================================================= */
+.friend-row-info[data-profile-uid]:hover .friend-row-name { text-decoration: underline; color: var(--c-accent); }
+.friend-avatar-wrap:hover .friend-row-avatar,
+.friend-avatar-wrap:hover .friend-row-fallback { opacity: .85; }
+
+/* =================================================
+   CHAT HEADER — DM status sub-line
+   ================================================= */
+.chat-header-sub { display: flex; align-items: center; }
+/* DM header name click handled in JS — add .clickable class there */

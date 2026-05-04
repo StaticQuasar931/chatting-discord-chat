@@ -463,6 +463,30 @@ function fullFormatTime(ts) {
   return d.toLocaleDateString([],{weekday:"long",year:"numeric",month:"long",day:"numeric"}) + " at " + time;
 }
 
+// Returns a relative-time string, or "" if the message is too old to be useful
+function relativeTime(ts) {
+  if (!ts) return "";
+  const d = ts.toDate ? ts.toDate() : new Date(ts);
+  const diff = Date.now() - d.getTime(); // ms
+  if (diff < 10000)  return "just now";
+  if (diff < 60000)  return `${Math.floor(diff/1000)} seconds ago`;
+  if (diff < 3600000)return `${Math.floor(diff/60000)} minute${Math.floor(diff/60000)===1?"":"s"} ago`;
+  if (diff < 86400000)return `${Math.floor(diff/3600000)} hour${Math.floor(diff/3600000)===1?"":"s"} ago`;
+  // Older than 1 day — hover tooltip should show the full date (which is what fullFormatTime gives)
+  return "";
+}
+
+// Build the title attribute for a message — only show relative time for recent msgs,
+// full date for old ones; skip if no new info is added
+function msgHoverTitle(ts) {
+  if (!ts) return "";
+  const rel=relativeTime(ts);
+  if (rel) return rel + " · " + fullFormatTime(ts);
+  // For messages older than 1 day, the visible timestamp already shows something like
+  // "Jan 5" or "2 days ago" — hover shows full date + weekday which IS new info
+  return fullFormatTime(ts);
+}
+
 function genDiscriminator() {
   return String(Math.floor(Math.random()*10000)).padStart(4,"0");
 }
@@ -832,20 +856,58 @@ document.addEventListener("click", e=>{
 function toggleStatusPicker(anchor) {
   let picker = $("#status-picker");
   if (picker) { picker.remove(); return; }
+
+  const u=state.user;
+  const STATUS_META={
+    online:    {label:"Online",         sub:"You are active",               color:"var(--c-online)"},
+    idle:      {label:"Idle",           sub:"Away — but reachable",         color:"var(--c-idle)"},
+    dnd:       {label:"Do Not Disturb", sub:"Mute all notifications",       color:"var(--c-dnd)"},
+    invisible: {label:"Invisible",      sub:"Appear offline to others",     color:"var(--c-invisible)"},
+  };
+
   picker = document.createElement("div");
   picker.id = "status-picker";
-  picker.className = "status-picker";
-  picker.innerHTML = Object.entries(STATUS_LABELS).map(([s,label])=>`
-    <div class="status-picker-option${s===state.status?" active":""}" data-status="${s}">
-      <span class="status-dot-sm" data-status="${s}"></span>${label}
-    </div>`).join("");
+  picker.className = "status-picker-panel";
 
-  const rect = anchor.getBoundingClientRect();
-  picker.style.left = (rect.right+8)+"px";
-  picker.style.top  = (rect.top-4)+"px";
+  // Mini user card at top
+  const curVis=resolveStatus({...u, status:state.status});
+  picker.innerHTML=`
+    <div class="sp-user-card">
+      <div class="sp-avatar-wrap">
+        ${avatarMarkup(u.username||u.displayName,u.photoURL,"sp-avatar","sp-avatar-fallback")}
+        <span class="sp-status-ring" data-status="${escapeHtml(state.status==="invisible"?"invisible":curVis)}"></span>
+      </div>
+      <div class="sp-user-info">
+        <div class="sp-username">${escapeHtml(u.username||u.displayName||"You")}</div>
+        <div class="sp-tag">${u.discriminator?`#${escapeHtml(u.discriminator)}`:""}</div>
+      </div>
+    </div>
+    <div class="sp-divider"></div>
+    <div class="sp-label">Set Status</div>
+    ${Object.entries(STATUS_META).map(([s,{label,sub,color}])=>`
+      <button class="sp-option${s===state.status?" active":""}" data-status="${s}">
+        <span class="sp-dot" style="background:${color}${s==="invisible"?";border:2px solid var(--c-invisible);background:transparent":""}"></span>
+        <div class="sp-option-text">
+          <div class="sp-option-label">${escapeHtml(label)}</div>
+          <div class="sp-option-sub">${escapeHtml(sub)}</div>
+        </div>
+        ${s===state.status?`<svg class="sp-check" viewBox="0 0 24 24" width="14" height="14"><path fill="currentColor" d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>`:""}
+      </button>`).join("")}
+    <div class="sp-divider"></div>
+    <button class="sp-option sp-settings" id="sp-open-settings">
+      <svg viewBox="0 0 24 24" width="15" height="15" style="flex-shrink:0"><path fill="currentColor" d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/></svg>
+      <span>User Settings</span>
+    </button>`;
+
+  // Position above the user panel
+  const panelRect=anchor.closest("#user-panel")?.getBoundingClientRect()||anchor.getBoundingClientRect();
+  picker.style.left  = panelRect.left+"px";
+  picker.style.bottom= (window.innerHeight-panelRect.top+8)+"px";
+  picker.style.width = Math.max(panelRect.width, 240)+"px";
   document.body.appendChild(picker);
 
   picker.addEventListener("click", async e2=>{
+    if (e2.target.closest("#sp-open-settings")) { picker.remove(); openSettingsModal(); return; }
     const opt = e2.target.closest("[data-status]");
     if (!opt) return;
     const ns = opt.dataset.status;
@@ -855,8 +917,13 @@ function toggleStatusPicker(anchor) {
     picker.remove();
     try { await updateDoc(doc(db,"users",state.user.uid),{status:ns}); } catch(_){}
   });
+
   setTimeout(()=>{
-    document.addEventListener("click",()=>{ document.getElementById("status-picker")?.remove(); },{once:true});
+    document.addEventListener("click", ev=>{
+      if (!document.getElementById("status-picker")) return;
+      if (!ev.target.closest("#status-picker")&&!ev.target.closest("#user-panel-avatar-wrap"))
+        document.getElementById("status-picker")?.remove();
+    },{once:true});
   },0);
 }
 
@@ -996,25 +1063,33 @@ function renderFriendsList() {
   $("#all-count").textContent=`All Friends — ${state.friends.length}`;
   if (!state.friends.length) { list.innerHTML=""; empty.hidden=false; return; }
   empty.hidden=true;
-  list.innerHTML=filtered.map(f=>`
+  list.innerHTML=filtered.map(f=>{
+    const fProfile=state.userCache[f.uid]||{};
+    const fStatus=resolveStatus(fProfile);
+    const fStatusLabel={online:"Online",idle:"Idle",dnd:"Do Not Disturb",offline:"Offline"}[fStatus]||"Offline";
+    return `
     <div class="friend-row" data-uid="${escapeHtml(f.uid)}">
-      ${avatarMarkup(f.displayName,f.photoURL,"friend-row-avatar","friend-row-fallback")}
-      <div class="friend-row-info">
+      <div class="friend-avatar-wrap" data-profile-uid="${escapeHtml(f.uid)}" role="button" tabindex="0" style="cursor:pointer">
+        ${avatarMarkup(f.displayName,f.photoURL,"friend-row-avatar","friend-row-fallback")}
+        <span class="friend-status-dot" data-status="${escapeHtml(fStatus)}"></span>
+      </div>
+      <div class="friend-row-info" data-profile-uid="${escapeHtml(f.uid)}" role="button" tabindex="0" style="cursor:pointer">
         <div class="friend-row-name">${escapeHtml(f.displayName)}</div>
-        <div class="friend-row-tag">${f.discriminator?`#${escapeHtml(f.discriminator)}`:""}</div>
+        <div class="friend-row-tag">${f.discriminator?`#${escapeHtml(f.discriminator)} · `:""}<span style="color:${fStatus==="offline"?"var(--t-muted)":"var(--c-"+fStatus+")"}">${escapeHtml(fStatusLabel)}</span></div>
       </div>
       <div class="friend-row-actions">
         <button class="action-circle" title="Message" data-action="message" data-uid="${escapeHtml(f.uid)}">
-          <svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2z"/></svg>
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none"><path fill="currentColor" d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H6l-4 4V6c0-1.1.9-2 2-2z"/></svg>
         </button>
         <button class="action-circle" title="View Profile" data-action="view-profile" data-uid="${escapeHtml(f.uid)}">
-          <svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M12 12c2.7 0 5-2.3 5-5s-2.3-5-5-5-5 2.3-5 5 2.3 5 5 5zm0 2c-3.3 0-10 1.7-10 5v2h20v-2c0-3.3-6.7-5-10-5z"/></svg>
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none"><path fill="currentColor" d="M12 12c2.7 0 5-2.3 5-5s-2.3-5-5-5-5 2.3-5 5 2.3 5 5 5zm0 2c-3.3 0-10 1.7-10 5v2h20v-2c0-3.3-6.7-5-10-5z"/></svg>
         </button>
         <button class="action-circle decline" title="Remove friend" data-action="remove" data-uid="${escapeHtml(f.uid)}" data-friendship-id="${escapeHtml(f.friendshipId)}">
-          <svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M19 13H5v-2h14v2z"/></svg>
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none"><path fill="currentColor" d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zm3-9h2v7H9v-7zm4 0h2v7h-2v-7zM15.5 4l-1-1h-5l-1 1H5v2h14V4z"/></svg>
         </button>
       </div>
-    </div>`).join("");
+    </div>`;
+  }).join("");
 }
 
 function renderPendingLists() {
@@ -1052,8 +1127,12 @@ function renderPendingLists() {
     </div>`).join("");
 }
 
-// Friends view delegation
+// Friends view delegation — clicking an avatar or name with data-profile-uid opens profile
 $("#friends-view").addEventListener("click", async e=>{
+  const profileEl=e.target.closest("[data-profile-uid]");
+  if (profileEl && !e.target.closest("button[data-action]")) {
+    showProfileCard(profileEl.dataset.profileUid, e); return;
+  }
   const btn = e.target.closest("button[data-action]");
   if (!btn) return;
   const action=btn.dataset.action;
@@ -1261,6 +1340,23 @@ $("#dm-list").addEventListener("click", e=>{
   if (close) { e.stopPropagation(); if(state.activeChatId===close.dataset.chatId) showFriendsView(); return; }
   const row=e.target.closest(".side-row"); if(row) openChat(row.dataset.chatId);
 });
+
+// Right-click on a DM row → quick actions
+$("#dm-list").addEventListener("contextmenu", e=>{
+  const row=e.target.closest(".side-row[data-type='dm']"); if (!row) return;
+  e.preventDefault();
+  const chatId=row.dataset.chatId;
+  const chat=state.chats.find(c=>c.id===chatId); if (!chat) return;
+  const otherUid=chat.members.find(u=>u!==state.user?.uid);
+  const items=[
+    {label:"Open",         action:"ctx-open-dm",      data:{chatId}},
+    {label:"View Profile", action:"ctx-view-profile",  data:{uid:otherUid||""}},
+    {label:"Message",      action:"ctx-message",       data:{uid:otherUid||""}},
+    "divider",
+    {label:"Close DM",     action:"ctx-close-dm",      data:{chatId}},
+  ];
+  showCtxMenu(e.clientX, e.clientY, items);
+});
 $("#group-list").addEventListener("click", e=>{ const row=e.target.closest(".side-row"); if(row) openChat(row.dataset.chatId); });
 $("#rail-groups").addEventListener("click", e=>{ const av=e.target.closest(".rail-group-avatar"); if(av) openChat(av.dataset.chatId); });
 $("#sidebar-search").addEventListener("input", e=>{ state.filters.sidebar=e.target.value; renderChatLists(); });
@@ -1379,17 +1475,26 @@ async function renderChatHeader() {
     const profile=await fetchUserProfile(otherUid);
     const name=profile?.username||profile?.displayName||"Direct Message";
     const tag=profile?.discriminator?`#${profile.discriminator}`:"";
-    const status=profile?.status||"online";
-    $("#chat-header-name").textContent=name;
-    $("#chat-header-sub").textContent=tag?`${tag} · Direct Message`:"Direct Message";
-    avatarWrap.innerHTML=avatarMarkup(name,profile?.photoURL,"chat-header-avatar","chat-header-avatar-fallback");
+    const visStatus=resolveStatus(profile);
+    const STATUS_LABEL_MAP={online:"Online",idle:"Idle",dnd:"Do Not Disturb",offline:"Offline"};
+    const statusLabel=STATUS_LABEL_MAP[visStatus]||"Offline";
+    const nameEl=$("#chat-header-name");
+    nameEl.textContent=name;
+    nameEl.classList.add("clickable");
+    nameEl.style.cursor="pointer";
+    $("#chat-header-sub").innerHTML=`<span class="header-status-dot" data-status="${escapeHtml(visStatus)}"></span><span>${escapeHtml(statusLabel)}</span>`;
+    avatarWrap.innerHTML=`<div class="chat-header-avatar-status-wrap">${avatarMarkup(name,profile?.photoURL,"chat-header-avatar","chat-header-avatar-fallback")}<span class="chat-header-status-dot" data-status="${escapeHtml(visStatus)}"></span></div>`;
+    avatarWrap.dataset.profileUid=otherUid||"";
     if(addBtn) addBtn.hidden=true; if(leaveBtn) leaveBtn.hidden=true;
     if(codeBadge) codeBadge.hidden=true;
   } else {
     const isLeader=Array.isArray(c.leaders)&&c.leaders.includes(state.user.uid);
-    $("#chat-header-name").textContent=c.name||"Group";
-    $("#chat-header-sub").textContent=`${c.members.length} member${c.members.length===1?"":"s"}${isLeader?" · 👑 You're a leader":""}`;
+    const nameEl2=$("#chat-header-name");
+    nameEl2.textContent=c.name||"Group";
+    nameEl2.classList.remove("clickable"); nameEl2.style.cursor="";
+    $("#chat-header-sub").textContent=`${c.members.length} member${c.members.length===1?"":"s"}${isLeader?" · 👑 Leader":""}`;
     avatarWrap.innerHTML=`<div class="chat-header-avatar-fallback">${escapeHtml(groupInitials(c.name||"G"))}</div>`;
+    delete avatarWrap.dataset.profileUid;
     if(addBtn) addBtn.hidden=false; if(leaveBtn) leaveBtn.hidden=false;
     if (codeBadge) {
       if (c.joinCode) { codeBadge.textContent=c.joinCode; codeBadge.hidden=false; codeBadge.title="Click to copy join code"; }
@@ -1397,6 +1502,22 @@ async function renderChatHeader() {
     }
   }
 }
+
+// Chat header avatar/name click → open profile (DMs only)
+document.addEventListener("click", e=>{
+  const wrap=e.target.closest("#chat-header-avatar-wrap");
+  if (wrap && wrap.dataset.profileUid) { showProfileCard(wrap.dataset.profileUid, e); }
+});
+document.addEventListener("click", e=>{
+  const nameEl=e.target.closest("#chat-header-name");
+  if (nameEl) {
+    const c=state.activeChat;
+    if (c?.type==="dm") {
+      const otherUid=c.members.find(u=>u!==state.user?.uid);
+      if (otherUid) showProfileCard(otherUid, e);
+    }
+  }
+});
 
 // Copy join code on badge click
 document.addEventListener("click", e=>{
@@ -1510,7 +1631,7 @@ function renderMessages() {
     const replyHtml=buildReplyPreview(m);
     const reactionsHtml=buildReactionBar(m.reactions||{}, m.id);
 
-    const tsTitle = escapeHtml(fullFormatTime(ts));
+    const tsTitle = escapeHtml(msgHoverTitle(ts));
     const msgQuickReact=`<div class="msg-quick-react">${QUICK_REACTS.map(e=>`<button class="quick-react-btn" data-qr-emoji="${e}" data-qr-msg="${escapeHtml(m.id)}" title="${e}">${e}</button>`).join("")}</div>`;
     const msgActions=`<div class="msg-actions">
       ${msgQuickReact}
@@ -1547,16 +1668,10 @@ function renderMessages() {
           ${msgActions}
         </div>`);
     } else {
-      const senderStatus=resolveStatus(state.userCache[m.senderUid]);
-      const avatarWithDot=isSelf?avatarMarkup(m.senderName,m.senderPhoto,"msg-avatar","msg-avatar-fallback"):`
-        <div class="msg-avatar-status-wrap">
-          ${avatarMarkup(m.senderName,m.senderPhoto,"msg-avatar","msg-avatar-fallback")}
-          <span class="msg-status-dot" data-status="${escapeHtml(senderStatus)}"></span>
-        </div>`;
       html.push(`
         <div class="message-group${extraClass}" data-msg-id="${escapeHtml(m.id)}" title="${tsTitle}">
           <div class="msg-avatar-btn" data-profile-uid="${escapeHtml(m.senderUid)}" role="button" tabindex="0">
-            ${avatarWithDot}
+            ${avatarMarkup(m.senderName,m.senderPhoto,"msg-avatar","msg-avatar-fallback")}
           </div>
           <div class="msg-content">
             <div class="msg-head">
@@ -2026,8 +2141,10 @@ $$(".modal").forEach(m=>m.addEventListener("click",e=>{ if(e.target===m) m.class
 function onSettingsClose() {
   if (_pendingTheme!==null && _pendingTheme!==state.theme) applyTheme(state.theme);
 }
-document.querySelector("[data-close='settings-modal']")?.addEventListener("click", onSettingsClose);
-$("#settings-modal")?.addEventListener("click", e=>{ if(e.target===$("#settings-modal")) onSettingsClose(); });
+// Revert pending theme on any settings close (X, Cancel, backdrop)
+document.addEventListener("click", e=>{
+  if (e.target.closest("[data-close='settings-modal']")||e.target===$("#settings-modal")) onSettingsClose();
+});
 
 
 // Suggestions link is a plain <a target="_blank"> in the HTML — no JS needed.
@@ -2040,7 +2157,12 @@ let _pendingTheme=null, _pendingStatus=null, _pendingBannerColor=undefined, _pen
 
 $("#settings-btn").addEventListener("click", openSettingsModal);
 
-function openSettingsModal() {
+function switchSettingsPane(paneId) {
+  $$(".settings-pane").forEach(p=>p.classList.toggle("hidden",p.dataset.pane!==paneId));
+  $$(".settings-discord-nav-item[data-pane]").forEach(n=>n.classList.toggle("active",n.dataset.pane===paneId));
+}
+
+function openSettingsModal(pane="account") {
   const u=state.user;
   _pendingTheme=state.theme;
   _pendingStatus=state.status;
@@ -2054,16 +2176,11 @@ function openSettingsModal() {
   if($("#settings-sound-toggle"))   $("#settings-sound-toggle").checked=state.soundEnabled;
   if($("#settings-hints-toggle"))   $("#settings-hints-toggle").checked=localStorage.getItem("sc_hints")!=="false";
 
-  // Theme swatches
   $$(".theme-swatch").forEach(sw=>sw.classList.toggle("active",sw.dataset.theme===_pendingTheme));
-  // Status options
   $$(".status-row-option").forEach(opt=>opt.classList.toggle("active",opt.dataset.status===_pendingStatus));
-  // Banner swatches
   $$(".banner-swatch").forEach(sw=>sw.classList.toggle("active",(sw.dataset.color||"")===((_pendingBannerColor)||"")));
-  // Privacy
   const privToggle=$("#settings-privacy-toggle");
   if (privToggle) privToggle.checked=!!_pendingPrivate;
-  // Member since
   const sinceEl=$("#settings-created-at");
   if (sinceEl&&u.createdAt) {
     const d=u.createdAt.toDate?u.createdAt.toDate():new Date(u.createdAt);
@@ -2071,16 +2188,52 @@ function openSettingsModal() {
   }
 
   updateAvatarPreview("settings",u.username||u.displayName,u.photoURL);
+  // Populate preview banner from pending banner color
+  const previewBanner=$("#settings-preview-banner");
+  if (previewBanner&&_pendingBannerColor) {
+    const [c1,c2]=_pendingBannerColor.split(",");
+    previewBanner.style.background=c2?`linear-gradient(135deg,${c1},${c2})`:c1;
+  }
+  const pName=$("#settings-preview-name"); if(pName) pName.textContent=u.username||u.displayName||"";
+  const pTag=$("#settings-preview-tag"); if(pTag) pTag.textContent=u.discriminator?`#${u.discriminator}`:"";
+  switchSettingsPane(pane);
   openModal("settings-modal");
 }
 
+// Settings Discord left-nav clicks
+document.addEventListener("click", e=>{
+  const navItem=e.target.closest(".settings-discord-nav-item[data-pane]");
+  if (navItem) switchSettingsPane(navItem.dataset.pane);
+});
+
+// Second Save Changes button (in Profile pane) delegates to main one
+document.addEventListener("click", e=>{
+  if (e.target.closest("#settings-save-btn-2")) $("#settings-save-btn")?.click();
+  if (e.target.closest("#settings-signout-btn")) {
+    closeModal("settings-modal");
+    setTimeout(()=>signOut(auth).catch(()=>{}), 150);
+  }
+});
+
+// Live preview helpers for settings
+function _updateSettingsPreview() {
+  const name=$("#settings-username-input")?.value.trim()||state.user?.username||"";
+  const photo=$("#settings-photo-input")?.value.trim()||null;
+  updateAvatarPreview("settings",name,photo);
+  // Update name/tag in preview card
+  const pName=$("#settings-preview-name"); if(pName) pName.textContent=name||"Username";
+  const pTag=$("#settings-preview-tag"); if(pTag) pTag.textContent=state.user?.discriminator?`#${state.user.discriminator}`:"";
+  // Update banner if pending
+  const banner=$("#settings-preview-banner");
+  if(banner&&_pendingBannerColor){
+    const [c1,c2]=_pendingBannerColor.split(",");
+    banner.style.background=c2?`linear-gradient(135deg,${c1},${c2})`:c1;
+  }
+}
+
 // Settings live preview
-$("#settings-photo-input")?.addEventListener("input",()=>{
-  updateAvatarPreview("settings",$("#settings-username-input")?.value.trim(),$("#settings-photo-input")?.value.trim()||null);
-});
-$("#settings-username-input")?.addEventListener("input",()=>{
-  updateAvatarPreview("settings",$("#settings-username-input")?.value.trim(),$("#settings-photo-input")?.value.trim()||null);
-});
+$("#settings-photo-input")?.addEventListener("input",_updateSettingsPreview);
+$("#settings-username-input")?.addEventListener("input",_updateSettingsPreview);
 
 // Settings modal interactions (theme/status/banner)
 $("#settings-modal")?.addEventListener("click", e=>{
@@ -2101,6 +2254,7 @@ $("#settings-modal")?.addEventListener("click", e=>{
   if (bannerSwatch) {
     _pendingBannerColor=bannerSwatch.dataset.color||null;
     $$(".banner-swatch").forEach(s=>s.classList.toggle("active",(s.dataset.color||"")===((_pendingBannerColor)||"")));
+    _updateSettingsPreview();
     return;
   }
 });
@@ -2593,37 +2747,67 @@ document.addEventListener("visibilitychange", ()=>{ if (!document.hidden) update
    ===================================================================== */
 const TENOR_KEY = "LIVDSRZULELA";
 
-async function searchGifs(query) {
-  try {
-    const url=`https://api.tenor.com/v1/search?q=${encodeURIComponent(query)}&key=${TENOR_KEY}&limit=20&contentfilter=high&media_filter=minimal`;
-    const r=await fetch(url);
-    const d=await r.json();
-    return d.results||[];
-  } catch(e){ console.error("GIF search:",e); return []; }
-}
+const GIF_CATEGORIES=[
+  {id:"trending",  label:"Trending"},
+  {id:"reactions", label:"Reactions"},
+  {id:"memes",     label:"Memes"},
+  {id:"gaming",    label:"Gaming"},
+  {id:"animals",   label:"Animals"},
+  {id:"sports",    label:"Sports"},
+  {id:"anime",     label:"Anime"},
+  {id:"love",      label:"Love"},
+];
+let _gifActiveCat="trending";
 
-async function loadTrendingGifs() {
+async function fetchGifs(query, isTrending=false) {
   try {
-    const url=`https://api.tenor.com/v1/trending?key=${TENOR_KEY}&limit=20&contentfilter=high&media_filter=minimal`;
-    const r=await fetch(url);
+    const base=isTrending
+      ? `https://api.tenor.com/v1/trending?key=${TENOR_KEY}&limit=30&contentfilter=high`
+      : `https://api.tenor.com/v1/search?q=${encodeURIComponent(query)}&key=${TENOR_KEY}&limit=30&contentfilter=high`;
+    const r=await fetch(base);
     const d=await r.json();
     return d.results||[];
-  } catch(e){ return []; }
+  } catch(e){ console.error("GIF:",e); return []; }
 }
 
 function renderGifGrid(results) {
   const grid=$("#gif-grid"); if (!grid) return;
-  if (!results.length) {
-    grid.innerHTML=`<p class="gif-hint">No GIFs found.</p>`; return;
-  }
+  if (!results.length) { grid.innerHTML=`<p class="gif-hint">No GIFs found — try a different search.</p>`; return; }
   grid.innerHTML=results.map(r=>{
     const media=r.media?.[0];
-    const url=media?.tinygif?.url||media?.gif?.url||"";
-    if (!url) return "";
-    return `<button class="gif-cell" data-gif-url="${escapeHtml(url)}" title="${escapeHtml(r.title||"")}">
-      <img src="${escapeHtml(url)}" alt="" loading="lazy" />
+    // Use tinygif for preview display; gif for insertion (better quality)
+    const previewUrl=media?.tinygif?.url||media?.gif?.url||"";
+    const insertUrl =media?.gif?.url||media?.tinygif?.url||"";
+    if (!previewUrl) return "";
+    return `<button class="gif-cell" data-gif-url="${escapeHtml(insertUrl)}" title="${escapeHtml(r.title||"")}">
+      <img src="${escapeHtml(previewUrl)}" alt="${escapeHtml(r.title||"GIF")}" loading="lazy" />
     </button>`;
   }).filter(Boolean).join("");
+}
+
+async function loadGifCategory(cat) {
+  _gifActiveCat=cat;
+  // Update active tab
+  $$(".gif-cat-btn").forEach(b=>b.classList.toggle("active",b.dataset.cat===cat));
+  const grid=$("#gif-grid");
+  if (grid) grid.innerHTML=`<p class="gif-hint">Loading…</p>`;
+  const q=cat==="trending"?"":cat;
+  const results=await fetchGifs(q, cat==="trending");
+  renderGifGrid(results);
+}
+
+// Build category tabs into the picker (called once when GIF picker opens first time)
+function initGifCategoryTabs() {
+  const bar=$("#gif-cats"); if (!bar||bar.dataset.init) return;
+  bar.dataset.init="1";
+  bar.innerHTML=GIF_CATEGORIES.map(c=>`
+    <button class="gif-cat-btn${c.id===_gifActiveCat?" active":""}" data-cat="${escapeHtml(c.id)}">${escapeHtml(c.label)}</button>
+  `).join("");
+  bar.addEventListener("click", e=>{
+    const btn=e.target.closest(".gif-cat-btn"); if (!btn) return;
+    const q=$("#gif-search-input"); if (q) q.value="";
+    loadGifCategory(btn.dataset.cat);
+  });
 }
 
 // GIF picker toggle
@@ -2634,13 +2818,12 @@ $("#gif-btn")?.addEventListener("click", async ()=>{
   gifOpen=!gifOpen;
   if (gifOpen) {
     picker.classList.remove("hidden");
-    // Close emoji picker
     $("#emoji-picker")?.classList.add("hidden"); emojiOpen=false;
+    initGifCategoryTabs();
+    // Load trending only if grid is empty / has placeholder
     const grid=$("#gif-grid");
-    if (grid&&grid.innerHTML.includes("gif-hint")) {
-      grid.innerHTML=`<p class="gif-hint">Loading trending GIFs…</p>`;
-      const results=await loadTrendingGifs();
-      renderGifGrid(results);
+    if (!grid||grid.querySelector(".gif-hint")||!grid.children.length) {
+      await loadGifCategory("trending");
     }
     $("#gif-search-input")?.focus();
   } else {
@@ -2648,25 +2831,22 @@ $("#gif-btn")?.addEventListener("click", async ()=>{
   }
 });
 
-// GIF search button
-$("#gif-search-btn")?.addEventListener("click", async ()=>{
+// GIF search on input (debounced) + button + Enter
+let _gifSearchTimer=null;
+function doGifSearch() {
   const q=$("#gif-search-input")?.value.trim();
-  if (!q) return;
+  if (!q) { loadGifCategory(_gifActiveCat); return; }
+  $$(".gif-cat-btn").forEach(b=>b.classList.remove("active"));
   const grid=$("#gif-grid");
   if (grid) grid.innerHTML=`<p class="gif-hint">Searching…</p>`;
-  const results=await searchGifs(q);
-  renderGifGrid(results);
+  fetchGifs(q).then(renderGifGrid);
+}
+$("#gif-search-input")?.addEventListener("input", ()=>{
+  clearTimeout(_gifSearchTimer);
+  _gifSearchTimer=setTimeout(doGifSearch, 380);
 });
-
-// GIF search on Enter
-$("#gif-search-input")?.addEventListener("keydown", async e=>{
-  if (e.key!=="Enter") return;
-  const q=e.target.value.trim(); if (!q) return;
-  const grid=$("#gif-grid");
-  if (grid) grid.innerHTML=`<p class="gif-hint">Searching…</p>`;
-  const results=await searchGifs(q);
-  renderGifGrid(results);
-});
+$("#gif-search-input")?.addEventListener("keydown", e=>{ if(e.key==="Enter"){ clearTimeout(_gifSearchTimer); doGifSearch(); } });
+$("#gif-search-btn")?.addEventListener("click", ()=>{ clearTimeout(_gifSearchTimer); doGifSearch(); });
 
 // Click a GIF cell → insert URL into composer
 document.addEventListener("click", e=>{
@@ -2692,6 +2872,9 @@ document.addEventListener("click", e=>{
 /* =====================================================================
    RIGHT-CLICK CONTEXT MENUS
    ===================================================================== */
+// Convert camelCase key to data-hyphen-case so dataset.camelCase reads back correctly
+function _toDataAttr(k) { return "data-"+k.replace(/[A-Z]/g,c=>"-"+c.toLowerCase()); }
+
 function showCtxMenu(x, y, items) {
   document.getElementById("ctx-menu")?.remove();
   const menu=document.createElement("div");
@@ -2699,11 +2882,14 @@ function showCtxMenu(x, y, items) {
   menu.className="ctx-menu";
   menu.innerHTML=items.map(item=>{
     if (item==="divider") return `<div class="ctx-divider"></div>`;
-    const dataAttrs=Object.entries(item.data||{}).map(([k,v])=>`data-${k}="${escapeHtml(String(v))}"`).join(" ");
-    return `<button class="ctx-item${item.danger?" danger":""}" data-ctx="${item.action}" ${dataAttrs}>${item.icon||""} ${item.label}</button>`;
+    const dataAttrs=Object.entries(item.data||{}).map(([k,v])=>`${_toDataAttr(k)}="${escapeHtml(String(v))}"`).join(" ");
+    const keyHint=item.key?`<span class="ctx-key">${escapeHtml(item.key)}</span>`:"";
+    return `<button class="ctx-item${item.danger?" danger":""}" data-ctx="${item.action}" ${dataAttrs}>${escapeHtml(item.label)}${keyHint}</button>`;
   }).join("");
-  menu.style.left=Math.min(x,window.innerWidth-210)+"px";
-  menu.style.top =Math.min(y,window.innerHeight-200)+"px";
+  // Clamp to viewport with some breathing room
+  const menuW=200, menuH=items.length*36;
+  menu.style.left=Math.min(x, window.innerWidth -menuW-12)+"px";
+  menu.style.top  =Math.min(y, window.innerHeight-menuH-12)+"px";
   document.body.appendChild(menu);
   setTimeout(()=>document.addEventListener("click",removeCtxMenu,{once:true}),0);
 }
@@ -2722,15 +2908,15 @@ document.addEventListener("contextmenu", e=>{
     const isSelf=uid===state.user?.uid;
     const isFriend=state.friends.some(f=>f.uid===uid);
     const items=[
-      {label:"👤 View Profile", action:"ctx-view-profile", data:{uid}},
+      {label:"View Profile",  action:"ctx-view-profile", data:{uid}},
     ];
     if (!isSelf) {
-      items.push({label:"💬 Message", action:"ctx-message", data:{uid}});
-      if (!isFriend) items.push({label:"➕ Add Friend", action:"ctx-add-friend", data:{uid}});
+      items.push({label:"Message",    action:"ctx-message",    data:{uid}});
+      if (!isFriend) items.push({label:"Add Friend", action:"ctx-add-friend", data:{uid}});
       items.push("divider");
-      items.push({label:"🚫 Block", action:"ctx-block", data:{uid}, danger:true});
+      items.push({label:"Block User", action:"ctx-block", data:{uid}, danger:true});
     } else {
-      items.push({label:"⚙️ Edit Profile", action:"ctx-edit-profile"});
+      items.push({label:"Edit Profile", action:"ctx-edit-profile"});
     }
     showCtxMenu(e.clientX, e.clientY, items);
     return;
@@ -2743,21 +2929,23 @@ document.addEventListener("contextmenu", e=>{
     e.preventDefault();
     const isSelf=msg.senderUid===state.user?.uid;
     const isPinned=(state.activeChat?.pinnedMessages||[]).some(p=>p.msgId===msgId);
-    const items=[
-      {label:"↩️ Reply",          action:"ctx-reply",    data:{msgId}},
-      {label:"📋 Copy Text",      action:"ctx-copy-text",data:{msgId}},
-      {label:"🆔 Copy Msg ID",    action:"ctx-copy-id",  data:{msgId}},
-      "divider",
-      isPinned
-        ?{label:"📌 Unpin",       action:"ctx-unpin",    data:{msgId}}
-        :{label:"📌 Pin",         action:"ctx-pin",      data:{msgId}},
-      "divider",
-    ];
+    const items=[];
+    // Own messages: reply → edit → delete first
+    items.push({label:"Reply",     action:"ctx-reply",     data:{msgId}, key:"R"});
     if (isSelf) {
-      items.push({label:"✏️ Edit",   action:"ctx-edit",   data:{msgId}});
-      items.push({label:"🗑️ Delete", action:"ctx-delete", data:{msgId}, danger:true});
-    } else {
-      items.push({label:"🚩 Report", action:"ctx-report", data:{msgId, uid:msg.senderUid, name:msg.senderName||"User"}, danger:true});
+      items.push({label:"Edit",    action:"ctx-edit",      data:{msgId}, key:"E"});
+      items.push({label:"Delete",  action:"ctx-delete",    data:{msgId}, danger:true, key:"Del"});
+      items.push("divider");
+    }
+    items.push({label:"Copy Text", action:"ctx-copy-text", data:{msgId}, key:"C"});
+    items.push({label:"Copy ID",   action:"ctx-copy-id",   data:{msgId}});
+    items.push("divider");
+    items.push(isPinned
+      ?{label:"Unpin Message", action:"ctx-unpin", data:{msgId}}
+      :{label:"Pin Message",   action:"ctx-pin",   data:{msgId}});
+    if (!isSelf) {
+      items.push("divider");
+      items.push({label:"Report",  action:"ctx-report", data:{msgId, uid:msg.senderUid, name:msg.senderName||"User"}, danger:true});
     }
     showCtxMenu(e.clientX, e.clientY, items);
   }
@@ -2770,7 +2958,9 @@ document.addEventListener("click", async e=>{
   const { uid, msgId, name } = item.dataset;
   removeCtxMenu();
 
-  if (action==="ctx-view-profile") { showProfileCard(uid, e); }
+  if (action==="ctx-open-dm")   { if(item.dataset.chatId) openChat(item.dataset.chatId); }
+  else if (action==="ctx-close-dm") { if(item.dataset.chatId&&state.activeChatId===item.dataset.chatId) showFriendsView(); }
+  else if (action==="ctx-view-profile") { showProfileCard(uid, e); }
   else if (action==="ctx-message")  { await openOrCreateDm(uid); }
   else if (action==="ctx-edit-profile") { openSettingsModal(); }
   else if (action==="ctx-add-friend") {

@@ -71,8 +71,9 @@ export function buildUI() {
       </div>
       <div class="sidebar-content">
         <button class="side-btn" id="open-friends-btn">
-          <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
-            <path fill="currentColor" d="M16 11c1.66 0 3-1.34 3-3s-1.34-3-3-3-3 1.34-3 3 1.34 3 3 3zm-8 0c1.66 0 3-1.34 3-3S9.66 5 8 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5C15 14.17 10.33 13 8 13zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z"/>
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" aria-hidden="true">
+            <path fill="currentColor" d="M13 10a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z"/>
+            <path fill="currentColor" d="M3 5v-.75C3 3.56 3.56 3 4.25 3s1.24.56 1.33 1.25C6.12 8.65 9.46 12 13 12h1a8 8 0 0 1 8 8 2 2 0 0 1-2 2 .21.21 0 0 1-.2-.15 7.65 7.65 0 0 0-1.32-2.3c-.15-.2-.42-.06-.39.17l.25 2c.02.15-.1.28-.25.28H9a2 2 0 0 1-2-2v-2.22c0-1.57-.67-3.05-1.53-4.37A15.85 15.85 0 0 1 3 5Z"/>
           </svg>
           <span>Friends</span>
         </button>
@@ -125,8 +126,9 @@ export function buildUI() {
       <section id="friends-view" class="view">
         <header class="main-header">
           <div class="main-header-title">
-            <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
-              <path fill="currentColor" d="M16 11c1.66 0 3-1.34 3-3s-1.34-3-3-3-3 1.34-3 3 1.34 3 3 3zm-8 0c1.66 0 3-1.34 3-3S9.66 5 8 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5C15 14.17 10.33 13 8 13zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z"/>
+            <svg viewBox="0 0 24 24" width="22" height="22" fill="none" aria-hidden="true">
+              <path fill="currentColor" d="M13 10a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z"/>
+              <path fill="currentColor" d="M3 5v-.75C3 3.56 3.56 3 4.25 3s1.24.56 1.33 1.25C6.12 8.65 9.46 12 13 12h1a8 8 0 0 1 8 8 2 2 0 0 1-2 2 .21.21 0 0 1-.2-.15 7.65 7.65 0 0 0-1.32-2.3c-.15-.2-.42-.06-.39.17l.25 2c.02.15-.1.28-.25.28H9a2 2 0 0 1-2-2v-2.22c0-1.57-.67-3.05-1.53-4.37A15.85 15.85 0 0 1 3 5Z"/>
             </svg>
             Friends
           </div>
@@ -264,11 +266,17 @@ export function buildUI() {
               <textarea id="composer-input" placeholder="Message… or /help for commands" rows="1"></textarea>
             </div>
             <button class="icon-btn composer-emoji-btn" id="emoji-btn" title="Emoji">
-              <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
-                <path fill="currentColor" d="M11.99 2C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2zM12 20c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8zm3.5-9c.83 0 1.5-.67 1.5-1.5S16.33 8 15.5 8 14 8.67 14 9.5s.67 1.5 1.5 1.5zm-7 0C9.33 11 10 10.33 10 9.5S9.33 8 8.5 8 7 8.67 7 9.5 7.67 11 8.5 11zm3.5 6.5c2.33 0 4.31-1.46 5.11-3.5H6.89c.8 2.04 2.78 3.5 5.11 3.5z"/>
+              <!-- Modern Discord emoji icon -->
+              <svg viewBox="0 0 24 24" width="20" height="20" fill="none" aria-hidden="true">
+                <path fill="currentColor" fill-rule="evenodd" clip-rule="evenodd" d="M12 2C6.477 2 2 6.477 2 12s4.477 10 10 10 10-4.477 10-10S17.523 2 12 2ZM8.5 9a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3Zm7 0a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3ZM8.003 15.484A.502.502 0 0 1 8.5 15h7a.5.5 0 0 1 .392.81C14.972 17.345 13.572 18 12 18c-1.572 0-2.972-.655-3.892-1.69a.5.5 0 0 1-.105-.826Z"/>
               </svg>
             </button>
-            <button class="icon-btn composer-gif-btn" id="gif-btn" title="Search GIFs">GIF</button>
+            <button class="icon-btn composer-gif-btn" id="gif-btn" title="Send a GIF">
+              <!-- Modern Discord GIF icon -->
+              <svg viewBox="0 0 24 24" width="20" height="20" fill="none" aria-hidden="true">
+                <path fill="currentColor" d="M2 5a3 3 0 0 1 3-3h14a3 3 0 0 1 3 3v14a3 3 0 0 1-3 3H5a3 3 0 0 1-3-3V5Zm6.5 4.5h-3A2.5 2.5 0 0 0 3 12v.5a2.5 2.5 0 0 0 2.5 2.5h1a.5.5 0 0 0 .5-.5v-2a.5.5 0 0 0-.5-.5H6a.5.5 0 0 0 0 1h.5v1H5.5A1.5 1.5 0 0 1 4 12.5V12a1.5 1.5 0 0 1 1.5-1.5h3a.5.5 0 0 0 0-1ZM10 9.5a.5.5 0 0 0-1 0v6a.5.5 0 0 0 1 0v-6Zm1.5 0a.5.5 0 0 1 .5-.5h3a.5.5 0 0 1 0 1H12.5v1.5H14a.5.5 0 0 1 0 1h-1.5V15.5a.5.5 0 0 1-1 0v-6Z"/>
+              </svg>
+            </button>
             <button class="icon-btn composer-send-btn" id="send-btn" title="Send" data-active="false">
               <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
                 <path fill="currentColor" d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/>
@@ -293,14 +301,23 @@ export function buildUI() {
         <!-- GIF picker -->
         <div id="gif-picker" class="gif-picker hidden" role="dialog" aria-label="GIF picker">
           <div class="gif-picker-header">
-            <input type="text" id="gif-search-input" placeholder="Search GIFs…" autocomplete="off" />
-            <button class="btn-primary" id="gif-search-btn" style="padding:6px 12px;font-size:13px;">Search</button>
+            <div class="gif-search-wrap">
+              <svg class="gif-search-icon" viewBox="0 0 24 24" width="14" height="14" aria-hidden="true">
+                <path fill="currentColor" d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/>
+              </svg>
+              <input type="text" id="gif-search-input" placeholder="Search GIFs…" autocomplete="off" />
+              <button class="icon-btn" id="gif-search-btn" title="Search" style="flex-shrink:0">
+                <svg viewBox="0 0 24 24" width="14" height="14"><path fill="currentColor" d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
+              </button>
+            </div>
           </div>
+          <div class="gif-cats" id="gif-cats"></div>
           <div id="gif-grid" class="gif-grid">
-            <p class="gif-hint">Type something and hit Search!</p>
+            <p class="gif-hint">Loading trending GIFs…</p>
           </div>
           <div class="gif-footer">
-            <span style="font-size:10px;color:var(--t-muted);">Powered by Tenor</span>
+            <svg viewBox="0 0 24 24" width="10" height="10" style="opacity:.4"><path fill="currentColor" d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2z"/></svg>
+            <span>Powered by Tenor</span>
           </div>
         </div>
       </section>
@@ -371,65 +388,72 @@ export function buildUI() {
     </div>
   </div>
 
-  <!-- Settings Modal -->
+  <!-- Settings Modal — Discord left-nav style -->
   <div class="modal hidden" id="settings-modal">
-    <div class="modal-card modal-card-wide">
-      <div class="modal-head">
-        <h2>User Settings</h2>
-        <button class="icon-btn modal-close" data-close="settings-modal">
-          <svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
-        </button>
-      </div>
-      <div class="modal-body">
-        <div class="settings-section">
-          <div class="settings-section-title">My Account</div>
-          <div class="setup-avatar-section">
-            <div class="setup-avatar-preview" id="settings-avatar-preview">
-              <span id="settings-avatar-initial">?</span>
-            </div>
-            <div class="setup-avatar-meta">
-              <label class="modal-label">Profile Photo URL</label>
-              <input type="text" id="settings-photo-input" placeholder="https://…" autocomplete="off" />
-              <p class="hint" style="margin:5px 0 0;">Paste a direct image URL, or clear to use your Google photo.</p>
+    <div class="modal-card settings-modal-discord">
+
+      <!-- Left nav -->
+      <nav class="settings-discord-nav">
+        <div class="settings-discord-nav-label">User Settings</div>
+        <button class="settings-discord-nav-item active" data-pane="account">My Account</button>
+        <button class="settings-discord-nav-item" data-pane="profile">Profile</button>
+        <button class="settings-discord-nav-item" data-pane="appearance">Appearance</button>
+        <button class="settings-discord-nav-item" data-pane="notifications">Notifications</button>
+        <div class="settings-discord-nav-divider"></div>
+        <button class="settings-discord-nav-item danger" id="settings-signout-btn">Sign Out</button>
+      </nav>
+
+      <!-- Right content -->
+      <div class="settings-discord-body">
+
+        <!-- ACCOUNT PANE -->
+        <div class="settings-pane" data-pane="account">
+          <div class="settings-pane-title">My Account</div>
+
+          <!-- Live preview card -->
+          <div class="settings-profile-preview" id="settings-profile-preview-card">
+            <div class="spp-banner" id="settings-preview-banner"></div>
+            <div class="spp-body">
+              <div class="spp-avatar-wrap">
+                <div class="setup-avatar-preview" id="settings-avatar-preview" style="width:72px;height:72px;font-size:26px;">
+                  <span id="settings-avatar-initial">?</span>
+                </div>
+              </div>
+              <div class="spp-name" id="settings-preview-name">Username</div>
+              <div class="spp-tag" id="settings-preview-tag">#0000</div>
             </div>
           </div>
-          <div style="margin-top:16px;">
+
+          <div class="settings-field-group">
+            <label class="modal-label">Profile Photo URL</label>
+            <input type="text" id="settings-photo-input" placeholder="https://…" autocomplete="off" />
+            <p class="hint" style="margin:5px 0 0;">Paste a direct image URL, or clear to use your Google photo.</p>
+          </div>
+          <div class="settings-field-group">
             <label class="modal-label">Username</label>
             <input type="text" id="settings-username-input" maxlength="32" spellcheck="false" />
             <p class="hint" style="margin:5px 0 0;">Your full tag: <strong id="settings-tag-display">#0000</strong></p>
           </div>
-          <div style="margin-top:14px;">
+          <div class="settings-field-group">
             <label class="modal-label">Bio <span class="label-optional">up to 200 chars</span></label>
-            <textarea id="settings-bio-input" class="modal-textarea" maxlength="200" rows="3"></textarea>
+            <textarea id="settings-bio-input" class="modal-textarea" maxlength="200" rows="3" placeholder="Tell people a bit about yourself…"></textarea>
+          </div>
+          <div class="settings-field-group">
+            <div class="settings-info-row">
+              <span class="settings-info-label">Member Since</span>
+              <span id="settings-created-at" class="settings-info-value">—</span>
+            </div>
+          </div>
+          <div class="settings-pane-foot">
+            <button class="btn-secondary" data-close="settings-modal">Cancel</button>
+            <button class="btn-primary" id="settings-save-btn">Save Changes</button>
           </div>
         </div>
 
-        <div class="settings-section" style="margin-top:24px;">
-          <div class="settings-section-title">Appearance</div>
-          <label class="modal-label">Theme</label>
-          <div class="theme-swatches" id="theme-swatches">
-            <button class="theme-swatch" data-theme="dark">🌙 Dark</button>
-            <button class="theme-swatch" data-theme="oled">⬛ OLED</button>
-            <button class="theme-swatch" data-theme="midnight">🔵 Midnight</button>
-            <button class="theme-swatch" data-theme="light">☀️ Light</button>
-            <button class="theme-swatch" data-theme="warm">🍂 Warm</button>
-            <button class="theme-swatch" data-theme="daylight">🌤️ Daylight</button>
-          </div>
-        </div>
-
-        <div class="settings-section" style="margin-top:24px;">
-          <div class="settings-section-title">Status</div>
-          <div class="status-row-options" id="settings-status-options">
-            <button class="status-row-option" data-status="online"><span class="status-dot-sm" data-status="online"></span>Online</button>
-            <button class="status-row-option" data-status="idle"><span class="status-dot-sm" data-status="idle"></span>Idle</button>
-            <button class="status-row-option" data-status="dnd"><span class="status-dot-sm" data-status="dnd"></span>Do Not Disturb</button>
-            <button class="status-row-option" data-status="invisible"><span class="status-dot-sm" data-status="invisible"></span>Invisible</button>
-          </div>
-        </div>
-
-        <div class="settings-section" style="margin-top:24px;">
-          <div class="settings-section-title">Profile</div>
-          <label class="modal-label">Banner Color</label>
+        <!-- PROFILE PANE -->
+        <div class="settings-pane hidden" data-pane="profile">
+          <div class="settings-pane-title">Profile</div>
+          <div class="settings-section-title" style="margin-bottom:10px;">Banner Color</div>
           <div class="banner-swatches" id="banner-swatches">
             <button class="banner-swatch active" data-color="#4f7cff,#7c3aed" title="Blue-Purple" style="background:linear-gradient(135deg,#4f7cff,#7c3aed)"></button>
             <button class="banner-swatch" data-color="#23a55a,#1a8a4b" title="Green" style="background:linear-gradient(135deg,#23a55a,#1a8a4b)"></button>
@@ -440,7 +464,7 @@ export function buildUI() {
             <button class="banner-swatch" data-color="#e91e8c,#b5166e" title="Pink" style="background:linear-gradient(135deg,#e91e8c,#b5166e)"></button>
             <button class="banner-swatch" data-color="#7c3aed,#5b1fb5" title="Purple" style="background:linear-gradient(135deg,#7c3aed,#5b1fb5)"></button>
           </div>
-          <div style="margin-top:14px;">
+          <div style="margin-top:20px;">
             <label class="settings-toggle-row">
               <div class="settings-toggle-info">
                 <div class="settings-toggle-label">Private Profile</div>
@@ -452,10 +476,38 @@ export function buildUI() {
               </span>
             </label>
           </div>
+          <div class="settings-pane-foot">
+            <button class="btn-secondary" data-close="settings-modal">Cancel</button>
+            <button class="btn-primary" id="settings-save-btn-2">Save Changes</button>
+          </div>
         </div>
 
-        <div class="settings-section" style="margin-top:24px;">
-          <div class="settings-section-title">Notifications &amp; Sounds</div>
+        <!-- APPEARANCE PANE -->
+        <div class="settings-pane hidden" data-pane="appearance">
+          <div class="settings-pane-title">Appearance</div>
+          <div class="settings-section-title" style="margin-bottom:10px;">Theme</div>
+          <div class="theme-swatches" id="theme-swatches">
+            <button class="theme-swatch" data-theme="dark">Dark</button>
+            <button class="theme-swatch" data-theme="oled">OLED</button>
+            <button class="theme-swatch" data-theme="midnight">Midnight</button>
+            <button class="theme-swatch" data-theme="light">Light</button>
+            <button class="theme-swatch" data-theme="warm">Warm</button>
+            <button class="theme-swatch" data-theme="daylight">Daylight</button>
+          </div>
+          <div style="margin-top:20px;">
+            <div class="settings-section-title" style="margin-bottom:10px;">Status</div>
+            <div class="status-row-options" id="settings-status-options">
+              <button class="status-row-option" data-status="online"><span class="status-dot-sm" data-status="online"></span>Online</button>
+              <button class="status-row-option" data-status="idle"><span class="status-dot-sm" data-status="idle"></span>Idle</button>
+              <button class="status-row-option" data-status="dnd"><span class="status-dot-sm" data-status="dnd"></span>Do Not Disturb</button>
+              <button class="status-row-option" data-status="invisible"><span class="status-dot-sm" data-status="invisible"></span>Invisible</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- NOTIFICATIONS PANE -->
+        <div class="settings-pane hidden" data-pane="notifications">
+          <div class="settings-pane-title">Notifications &amp; Sounds</div>
           <label class="settings-toggle-row">
             <div class="settings-toggle-info">
               <div class="settings-toggle-label">Message sounds</div>
@@ -466,7 +518,7 @@ export function buildUI() {
               <span class="toggle-track"></span>
             </span>
           </label>
-          <label class="settings-toggle-row" style="margin-top:10px;">
+          <label class="settings-toggle-row" style="margin-top:12px;">
             <div class="settings-toggle-info">
               <div class="settings-toggle-label">Show formatting tips</div>
               <div class="settings-toggle-sub">Show the hint bar below the message box</div>
@@ -478,18 +530,12 @@ export function buildUI() {
           </label>
         </div>
 
-        <div class="settings-section" style="margin-top:24px;">
-          <div class="settings-section-title">Account</div>
-          <div class="settings-info-row">
-            <span class="settings-info-label">Member Since</span>
-            <span id="settings-created-at" class="settings-info-value">—</span>
-          </div>
-        </div>
-      </div>
-      <div class="modal-foot">
-        <button class="btn-secondary" data-close="settings-modal">Cancel</button>
-        <button class="btn-primary" id="settings-save-btn">Save Changes</button>
-      </div>
+      </div><!-- /.settings-discord-body -->
+
+      <!-- Close button (outside both columns) -->
+      <button class="settings-discord-close-btn" data-close="settings-modal" title="Close (Esc)">
+        <svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+      </button>
     </div>
   </div>
 
