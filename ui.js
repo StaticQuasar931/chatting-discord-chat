@@ -178,6 +178,16 @@ export function buildUI() {
           </div>
           <div class="chat-header-actions">
             <div class="join-code-badge hidden" id="chat-join-code-badge"></div>
+            <button class="icon-btn" id="chat-search-btn" title="Search messages (Ctrl+F)">
+              <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+                <path fill="currentColor" d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/>
+              </svg>
+            </button>
+            <button class="icon-btn" id="chat-pins-btn" title="Pinned messages">
+              <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+                <path fill="currentColor" d="M16 12V4h1V2H7v2h1v8l-2 2v2h5.2v6h1.6v-6H18v-2l-2-2z"/>
+              </svg>
+            </button>
             <button class="icon-btn" id="chat-add-member-btn" title="Add members" hidden>
               <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
                 <path fill="currentColor" d="M15 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm-9-2V7H4v3H1v2h3v3h2v-3h3v-2H6zm9 4c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/>
@@ -191,7 +201,40 @@ export function buildUI() {
           </div>
         </header>
 
+        <!-- In-chat message search bar -->
+        <div id="chat-search-bar" class="chat-search-bar hidden">
+          <div class="chat-search-inner">
+            <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true" style="flex-shrink:0;color:var(--t-muted)">
+              <path fill="currentColor" d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/>
+            </svg>
+            <input type="text" id="chat-search-input" placeholder="Search messages…" autocomplete="off" />
+            <span id="chat-search-count" class="chat-search-count"></span>
+            <button class="icon-btn chat-search-nav" id="chat-search-prev" title="Previous (Shift+Enter)">
+              <svg viewBox="0 0 24 24" width="14" height="14"><path fill="currentColor" d="M7.41 15.41L12 10.83l4.59 4.58L18 14l-6-6-6 6z"/></svg>
+            </button>
+            <button class="icon-btn chat-search-nav" id="chat-search-next" title="Next (Enter)">
+              <svg viewBox="0 0 24 24" width="14" height="14"><path fill="currentColor" d="M7.41 8.59L12 13.17l4.59-4.58L18 10l-6 6-6-6z"/></svg>
+            </button>
+            <button class="icon-btn" id="chat-search-close" title="Close (Esc)">
+              <svg viewBox="0 0 24 24" width="14" height="14"><path fill="currentColor" d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+            </button>
+          </div>
+        </div>
+
         <div class="messages" id="messages"></div>
+
+        <!-- Pinned messages side panel -->
+        <div id="pins-panel" class="pins-panel hidden">
+          <div class="pins-panel-head">
+            <span>📌 Pinned Messages</span>
+            <button class="icon-btn" id="pins-panel-close" title="Close">
+              <svg viewBox="0 0 24 24" width="16" height="16"><path fill="currentColor" d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+            </button>
+          </div>
+          <div class="pins-panel-body" id="pins-panel-body">
+            <p class="pins-empty">No pinned messages yet.<br><span style="font-size:12px;color:var(--t-muted)">Right-click a message to pin it.</span></p>
+          </div>
+        </div>
 
         <!-- Jump to latest button (shown when scrolled up) -->
         <button id="jump-latest" class="jump-latest hidden" title="Jump to latest messages">

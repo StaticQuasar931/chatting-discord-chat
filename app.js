@@ -21,7 +21,7 @@ buildUI();
 /* =====================================================================
    EMOJI DATA
    ===================================================================== */
-const STATIC_EMOJI_URL = "https://cdn.jsdelivr.net/gh/StaticQuasar931/Images@main/icon.png";
+const STATIC_EMOJI_URL = "./thumb.jpg";
 
 const EMOJI_CATS = [
   { id: "all",      label: "★"  },
@@ -418,6 +418,19 @@ function shortTime(ts) {
   if (!ts) return "";
   const d = ts.toDate ? ts.toDate() : new Date(ts);
   return d.toLocaleTimeString([],{hour:"numeric",minute:"2-digit"});
+}
+
+function fullFormatTime(ts) {
+  if (!ts) return "";
+  const d = ts.toDate ? ts.toDate() : new Date(ts);
+  const today = new Date();
+  const isToday = d.toDateString() === today.toDateString();
+  const yest  = new Date(today - 86400000);
+  const isYest = d.toDateString() === yest.toDateString();
+  const time = d.toLocaleTimeString([],{hour:"numeric",minute:"2-digit"});
+  if (isToday) return `Today at ${time}`;
+  if (isYest)  return `Yesterday at ${time}`;
+  return d.toLocaleDateString([],{weekday:"long",year:"numeric",month:"long",day:"numeric"}) + " at " + time;
 }
 
 function genDiscriminator() {
@@ -1177,9 +1190,14 @@ function renderChatLists() {
     if (filterText&&!name.toLowerCase().includes(filterText)) return "";
     const active=state.activeChatId===c.id?"active":"";
     const unread=chatHasUnread(c)?`<span class="side-item-unread" title="New messages">●</span>`:"";
+    const onlineStatus=resolveStatus(profile);
+    const dmAvatar=`<div class="side-row-avatar-wrap">
+      ${avatarMarkup(name,photo,"side-row-avatar","side-row-fallback")}
+      <span class="side-status-dot" data-status="${escapeHtml(onlineStatus)}"></span>
+    </div>`;
     return `
       <div class="side-row ${active}" data-chat-id="${escapeHtml(c.id)}" data-type="dm">
-        ${avatarMarkup(name,photo,"side-row-avatar","side-row-fallback")}
+        ${dmAvatar}
         <div class="side-row-name">${escapeHtml(name)}</div>
         ${unread}
         <button class="icon-btn side-row-close" title="Close" data-action="close-dm" data-chat-id="${escapeHtml(c.id)}">
@@ -1322,6 +1340,8 @@ async function renderChatHeader() {
   const avatarWrap=$("#chat-header-avatar-wrap");
   const addBtn=$("#chat-add-member-btn"), leaveBtn=$("#chat-leave-btn");
   const codeBadge=$("#chat-join-code-badge");
+  // Refresh pinned panel if it's open
+  if (!$("#pins-panel")?.classList.contains("hidden")) renderPinsPanel();
 
   if (c.type==="dm") {
     const otherUid=c.members.find(m=>m!==state.user.uid);
@@ -1366,6 +1386,7 @@ document.addEventListener("click", e=>{
 const SVG_EDIT   = `<svg viewBox="0 0 24 24" width="15" height="15"><path fill="currentColor" d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34a1 1 0 0 0-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg>`;
 const SVG_REPORT = `<svg viewBox="0 0 24 24" width="15" height="15"><path fill="currentColor" d="M14.4 6L14 4H5v17h2v-7h5.6l.4 2h7V6h-5.6z"/></svg>`;
 const SVG_REPLY  = `<svg viewBox="0 0 24 24" width="15" height="15"><path fill="currentColor" d="M10 9V5l-7 7 7 7v-4.1c5 0 8.5 1.6 11 5.1-1-5-4-10-11-11z"/></svg>`;
+const QUICK_REACTS = ["👍","❤️","😂","😮","😢"];
 
 const BADGE_DEFS = {
   og:           { label:"OG",           color:"#ffd700", bg:"rgba(255,215,0,.15)",  title:"Original member" },
@@ -1458,7 +1479,10 @@ function renderMessages() {
     const replyHtml=buildReplyPreview(m);
     const reactionsHtml=buildReactionBar(m.reactions||{}, m.id);
 
+    const tsTitle = escapeHtml(fullFormatTime(ts));
+    const msgQuickReact=`<div class="msg-quick-react">${QUICK_REACTS.map(e=>`<button class="quick-react-btn" data-qr-emoji="${e}" data-qr-msg="${escapeHtml(m.id)}" title="${e}">${e}</button>`).join("")}</div>`;
     const msgActions=`<div class="msg-actions">
+      ${msgQuickReact}
       <button class="msg-action-btn" data-action="reply-msg" data-msg-id="${escapeHtml(m.id)}" title="Reply">${SVG_REPLY}</button>
       ${isSelf
         ?`<button class="msg-action-btn" data-action="edit-msg" data-msg-id="${escapeHtml(m.id)}" title="Edit">${SVG_EDIT}</button>`
@@ -1479,7 +1503,7 @@ function renderMessages() {
         </div>`);
     } else if (sameSender&&closeInTime&&lastSenderUid!==null) {
       html.push(`
-        <div class="msg-followup" data-msg-id="${escapeHtml(m.id)}">
+        <div class="msg-followup" data-msg-id="${escapeHtml(m.id)}" title="${tsTitle}">
           <span class="msg-time-inline">${escapeHtml(shortTime(ts))}</span>
           ${replyHtml}
           <div class="msg-body">${formatMessage(m.text||"")}${editedLabel}</div>
@@ -1488,7 +1512,7 @@ function renderMessages() {
         </div>`);
     } else {
       html.push(`
-        <div class="message-group" data-msg-id="${escapeHtml(m.id)}">
+        <div class="message-group" data-msg-id="${escapeHtml(m.id)}" title="${tsTitle}">
           <div class="msg-avatar-btn" data-profile-uid="${escapeHtml(m.senderUid)}" role="button" tabindex="0">
             ${avatarMarkup(m.senderName,m.senderPhoto,"msg-avatar","msg-avatar-fallback")}
           </div>
@@ -1578,6 +1602,10 @@ $("#messages").addEventListener("click", async e=>{
     }
     return;
   }
+  // Quick-react buttons (hover bar)
+  const qrBtn=e.target.closest(".quick-react-btn");
+  if (qrBtn) { await toggleReaction(qrBtn.dataset.qrMsg, qrBtn.dataset.qrEmoji); return; }
+
   // Reaction pills
   const reactPill=e.target.closest(".reaction-pill");
   if (reactPill) { await toggleReaction(reactPill.dataset.reactMsg, reactPill.dataset.reactEmoji); return; }
@@ -2662,10 +2690,15 @@ document.addEventListener("contextmenu", e=>{
     if (!msg) return;
     e.preventDefault();
     const isSelf=msg.senderUid===state.user?.uid;
+    const isPinned=(state.activeChat?.pinnedMessages||[]).some(p=>p.msgId===msgId);
     const items=[
       {label:"↩️ Reply",          action:"ctx-reply",    data:{msgId}},
       {label:"📋 Copy Text",      action:"ctx-copy-text",data:{msgId}},
       {label:"🆔 Copy Msg ID",    action:"ctx-copy-id",  data:{msgId}},
+      "divider",
+      isPinned
+        ?{label:"📌 Unpin",       action:"ctx-unpin",    data:{msgId}}
+        :{label:"📌 Pin",         action:"ctx-pin",      data:{msgId}},
       "divider",
     ];
     if (isSelf) {
@@ -2701,6 +2734,8 @@ document.addEventListener("click", async e=>{
     } catch(err){ showToast("Error: "+err.message); }
   }
   else if (action==="ctx-block")  { await blockUser(uid); }
+  else if (action==="ctx-pin")    { await pinMessage(msgId); }
+  else if (action==="ctx-unpin")  { await unpinMessage(msgId); }
   else if (action==="ctx-reply")  { const m=state.messages.find(x=>x.id===msgId); if(m) setReplyTo(m); }
   else if (action==="ctx-copy-text") {
     const m=state.messages.find(x=>x.id===msgId);
@@ -2753,6 +2788,178 @@ function applyBlockedFromProfile(data) {
 
 // Badge rendering and resolved status are wired directly inside showProfileCard
 // (see the existing function above — edits applied inline)
+
+
+/* =====================================================================
+   IN-CHAT MESSAGE SEARCH
+   ===================================================================== */
+let _chatSearchMatches=[], _chatSearchIdx=0;
+
+function openChatSearch() {
+  const bar=$("#chat-search-bar"); if (!bar) return;
+  bar.classList.remove("hidden");
+  const inp=$("#chat-search-input");
+  if (inp) { inp.focus(); inp.select(); }
+}
+
+function closeChatSearch() {
+  const bar=$("#chat-search-bar"); if (!bar) return;
+  bar.classList.add("hidden");
+  $$(".msg-search-match").forEach(el=>el.classList.remove("msg-search-match","msg-search-focus"));
+  _chatSearchMatches=[]; _chatSearchIdx=0;
+  const count=$("#chat-search-count"); if (count) count.textContent="";
+}
+
+function runChatSearch(q) {
+  $$(".msg-search-match").forEach(el=>el.classList.remove("msg-search-match","msg-search-focus"));
+  _chatSearchMatches=[]; _chatSearchIdx=0;
+  const count=$("#chat-search-count");
+  if (!q.trim()) { if (count) count.textContent=""; return; }
+  const ql=q.toLowerCase();
+  const wrap=$("#messages"); if (!wrap) return;
+  wrap.querySelectorAll(".message-group,.msg-followup").forEach(el=>{
+    const body=el.querySelector(".msg-body");
+    if (!body) return;
+    if (body.textContent.toLowerCase().includes(ql)) {
+      el.classList.add("msg-search-match");
+      _chatSearchMatches.push(el);
+    }
+  });
+  if (!_chatSearchMatches.length) { if (count) count.textContent="No results"; return; }
+  focusChatSearchMatch(0);
+}
+
+function focusChatSearchMatch(idx) {
+  $$(".msg-search-focus").forEach(el=>el.classList.remove("msg-search-focus"));
+  if (!_chatSearchMatches.length) return;
+  _chatSearchIdx=((idx%_chatSearchMatches.length)+_chatSearchMatches.length)%_chatSearchMatches.length;
+  const el=_chatSearchMatches[_chatSearchIdx];
+  if (el) { el.classList.add("msg-search-focus"); el.scrollIntoView({behavior:"smooth",block:"center"}); }
+  const count=$("#chat-search-count");
+  if (count) count.textContent=`${_chatSearchIdx+1} / ${_chatSearchMatches.length}`;
+}
+
+// Ctrl+F opens search
+document.addEventListener("keydown", e=>{
+  if ((e.ctrlKey||e.metaKey)&&e.key==="f"&&state.activeChatId) {
+    e.preventDefault(); openChatSearch();
+  }
+});
+
+$("#chat-search-btn")?.addEventListener("click", openChatSearch);
+$("#chat-search-close")?.addEventListener("click", closeChatSearch);
+$("#chat-search-input")?.addEventListener("input", e=>runChatSearch(e.target.value));
+$("#chat-search-input")?.addEventListener("keydown", e=>{
+  if (e.key==="Enter") {
+    e.preventDefault();
+    if (e.shiftKey) focusChatSearchMatch(_chatSearchIdx-1);
+    else focusChatSearchMatch(_chatSearchIdx+1);
+  }
+  if (e.key==="Escape") closeChatSearch();
+});
+$("#chat-search-prev")?.addEventListener("click", ()=>focusChatSearchMatch(_chatSearchIdx-1));
+$("#chat-search-next")?.addEventListener("click", ()=>focusChatSearchMatch(_chatSearchIdx+1));
+
+
+/* =====================================================================
+   MESSAGE PINNING
+   ===================================================================== */
+async function pinMessage(msgId) {
+  const chatId=state.activeChatId; if (!chatId) return;
+  const msg=state.messages.find(m=>m.id===msgId); if (!msg) return;
+  const pins=[...(state.activeChat?.pinnedMessages||[])];
+  if (pins.some(p=>p.msgId===msgId)) { showToast("Already pinned"); return; }
+  if (pins.length>=50)               { showToast("Max 50 pinned messages"); return; }
+  pins.push({
+    msgId,
+    text:(msg.text||"").slice(0,200),
+    senderName:msg.senderName||"User",
+    senderUid:msg.senderUid,
+    pinnedAt:Date.now(),
+    pinnedByUid:state.user.uid
+  });
+  try {
+    await updateDoc(doc(db,"chats",chatId),{pinnedMessages:pins});
+    showToast("📌 Message pinned");
+  } catch(err){ showToast("Pin failed: "+err.message); }
+}
+
+async function unpinMessage(msgId) {
+  const chatId=state.activeChatId; if (!chatId) return;
+  const pins=(state.activeChat?.pinnedMessages||[]).filter(p=>p.msgId!==msgId);
+  try {
+    await updateDoc(doc(db,"chats",chatId),{pinnedMessages:pins});
+    showToast("📌 Message unpinned");
+    renderPinsPanel();
+  } catch(err){ showToast("Unpin failed: "+err.message); }
+}
+
+function showPinsPanel() {
+  const panel=$("#pins-panel"); if (!panel) return;
+  panel.classList.remove("hidden");
+  renderPinsPanel();
+}
+
+function hidePinsPanel() { $("#pins-panel")?.classList.add("hidden"); }
+
+function renderPinsPanel() {
+  const body=$("#pins-panel-body"); if (!body) return;
+  const pins=[...(state.activeChat?.pinnedMessages||[])].reverse();
+  if (!pins.length) {
+    body.innerHTML=`<p class="pins-empty">No pinned messages yet.<br><span style="font-size:12px;color:var(--t-muted)">Right-click a message to pin it.</span></p>`;
+    return;
+  }
+  body.innerHTML=pins.map(p=>{
+    const preview=(p.text||"(attachment)").slice(0,120)+(p.text?.length>120?"…":"");
+    return `<div class="pin-item">
+      <div class="pin-item-content">
+        <div class="pin-item-author">📌 ${escapeHtml(p.senderName)}</div>
+        <div class="pin-item-text">${escapeHtml(preview)}</div>
+      </div>
+      <div class="pin-item-actions">
+        <button class="icon-btn" data-pin-jump="${escapeHtml(p.msgId)}" title="Jump to message">
+          <svg viewBox="0 0 24 24" width="14" height="14"><path fill="currentColor" d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 14H9V8l7 4-7 4z"/></svg>
+        </button>
+        <button class="icon-btn" style="color:var(--t-muted)" data-pin-remove="${escapeHtml(p.msgId)}" title="Unpin">
+          <svg viewBox="0 0 24 24" width="14" height="14"><path fill="currentColor" d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </div>
+    </div>`;
+  }).join("");
+}
+
+// Pins panel toggle + delegation
+$("#chat-pins-btn")?.addEventListener("click", ()=>{
+  const panel=$("#pins-panel"); if (!panel) return;
+  if (panel.classList.contains("hidden")) showPinsPanel(); else hidePinsPanel();
+});
+$("#pins-panel-close")?.addEventListener("click", hidePinsPanel);
+
+document.addEventListener("click", e=>{
+  const jumpBtn=e.target.closest("[data-pin-jump]");
+  if (jumpBtn) {
+    const msgId=jumpBtn.dataset.pinJump;
+    const msgEl=$("#messages")?.querySelector(`[data-msg-id="${CSS.escape(msgId)}"]`);
+    if (msgEl) {
+      hidePinsPanel();
+      msgEl.scrollIntoView({behavior:"smooth",block:"center"});
+      msgEl.classList.add("msg-jump-highlight");
+      setTimeout(()=>msgEl.classList.remove("msg-jump-highlight"),1400);
+    } else { showToast("Message not found in current view"); }
+    return;
+  }
+  const removeBtn=e.target.closest("[data-pin-remove]");
+  if (removeBtn) { unpinMessage(removeBtn.dataset.pinRemove); return; }
+});
+
+
+/* =====================================================================
+   USER PANEL AVATAR CLICK → STATUS PICKER
+   ===================================================================== */
+document.addEventListener("click", e=>{
+  const wrap=e.target.closest("#user-panel-avatar-wrap");
+  if (wrap) { e.stopPropagation(); toggleStatusPicker(wrap); }
+});
 
 
 /* =====================================================================
