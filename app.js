@@ -356,6 +356,7 @@ const state = {
   typingNames: [],
   lastReadMarker: {},    // chatId → timestamp ms (from localStorage on open)
   chatScrolledInitial: new Set(), // chatIds that have had their initial scroll done
+  silentTyping: localStorage.getItem("sc_silent_typing") === "true",
 };
 
 // Apply theme before anything renders
@@ -607,10 +608,37 @@ function playSound(type="message") {
 /* =====================================================================
    AUTH
    ===================================================================== */
-$("#google-signin-btn").addEventListener("click", async ()=>{
-  try { await signInWithPopup(auth,provider); }
-  catch(e){ showToast("Sign-in failed: "+(e.message||e.code)); }
-});
+(function() {
+  const btn = document.getElementById("google-signin-btn");
+  if (!btn) return;
+  let _signingIn = false;
+  btn.addEventListener("click", async () => {
+    if (_signingIn) return;
+    _signingIn = true;
+    btn.classList.add("loading");
+    const errEl = document.getElementById("login-error");
+    if (errEl) { errEl.textContent = ""; errEl.classList.add("hidden"); }
+    try {
+      await signInWithPopup(auth, provider);
+      // On success onAuthStateChanged fires — no need to do anything here
+    } catch(err) {
+      _signingIn = false;
+      btn.classList.remove("loading");
+      const code = err.code || "";
+      const msg = code === "auth/popup-blocked"
+        ? "Popups are blocked. Please allow popups for this site, then try again."
+        : code === "auth/popup-closed-by-user"
+        ? "Sign-in was cancelled."
+        : code === "auth/network-request-failed"
+        ? "Network error. Check your connection and try again."
+        : code === "auth/unauthorized-domain"
+        ? "This domain isn't authorised for sign-in. Contact the site owner."
+        : "Sign-in failed: " + (err.message || code);
+      if (errEl) { errEl.textContent = msg; errEl.classList.remove("hidden"); }
+      else showToast(msg, 6000);
+    }
+  });
+})();
 
 $("#signout-btn").addEventListener("click", async ()=>{
   cleanupAllSubscriptions();
@@ -886,7 +914,7 @@ function toggleStatusPicker(anchor) {
     <div class="sp-label">Set Status</div>
     ${Object.entries(STATUS_META).map(([s,{label,sub,color}])=>`
       <button class="sp-option${s===state.status?" active":""}" data-status="${s}">
-        <span class="sp-dot" style="background:${color}${s==="invisible"?";border:2px solid var(--c-invisible);background:transparent":""}"></span>
+        <span class="sp-dot" data-status="${s}" style="background:${s==="invisible"?"transparent":color}${s==="invisible"?";border:2px solid var(--c-invisible)":""}"></span>
         <div class="sp-option-text">
           <div class="sp-option-label">${escapeHtml(label)}</div>
           <div class="sp-option-sub">${escapeHtml(sub)}</div>
@@ -2163,6 +2191,9 @@ function switchSettingsPane(paneId) {
 }
 
 function openSettingsModal(pane="account") {
+  // Remap removed panes to merged ones
+  if (pane==="profile")       pane="account";
+  if (pane==="notifications")  pane="appearance";
   const u=state.user;
   _pendingTheme=state.theme;
   _pendingStatus=state.status;
@@ -2647,13 +2678,16 @@ let _typingTimer=null, _typingWritten=false;
 
 function onComposerTyping() {
   if (!state.activeChatId||!state.user) return;
-  if (!_typingWritten) {
-    _typingWritten=true;
-    setDoc(doc(db,"chats",state.activeChatId,"typing",state.user.uid),
-      {name:state.user.displayName, uid:state.user.uid, ts:serverTimestamp()}).catch(()=>{});
+  // Silent typing mode — don't broadcast typing indicator to others
+  if (!state.silentTyping) {
+    if (!_typingWritten) {
+      _typingWritten=true;
+      setDoc(doc(db,"chats",state.activeChatId,"typing",state.user.uid),
+        {name:state.user.displayName, uid:state.user.uid, ts:serverTimestamp()}).catch(()=>{});
+    }
+    clearTimeout(_typingTimer);
+    _typingTimer=setTimeout(clearTypingIndicator, 3000);
   }
-  clearTimeout(_typingTimer);
-  _typingTimer=setTimeout(clearTypingIndicator, 3000);
   // Auto-dismiss the unread divider when the user starts typing
   const divider=$("#messages")?.querySelector("#unread-divider-bar");
   if (divider) {
@@ -3284,15 +3318,77 @@ window.addEventListener("beforeunload", ()=>{
 
 
 /* =====================================================================
-   LOGIN BUTTON — loading state
+   SILENT TYPING TOGGLE
    ===================================================================== */
-$("#google-signin-btn")?.addEventListener("mousedown", function() {
-  this.classList.add("loading");
-}, {once:false});
-// Reset if sign-in fails (handled in auth listener — just add class removal on any click that resolves)
-document.addEventListener("click", e=>{
-  if (!e.target.closest("#google-signin-btn")) {
-    $("#google-signin-btn")?.classList.remove("loading");
+(function() {
+  const btn = $("#silent-typing-btn");
+  if (!btn) return;
+  // Apply initial state
+  if (state.silentTyping) btn.classList.add("active");
+  btn.setAttribute("aria-pressed", state.silentTyping ? "true" : "false");
+  btn.title = state.silentTyping
+    ? "Silent typing ON — others can't see you typing (click to turn off)"
+    : "Silent typing — others won't see you typing (click to enable)";
+
+  btn.addEventListener("click", () => {
+    state.silentTyping = !state.silentTyping;
+    localStorage.setItem("sc_silent_typing", state.silentTyping ? "true" : "false");
+    btn.classList.toggle("active", state.silentTyping);
+    btn.setAttribute("aria-pressed", state.silentTyping ? "true" : "false");
+    btn.title = state.silentTyping
+      ? "Silent typing ON — others can't see you typing (click to turn off)"
+      : "Silent typing — others won't see you typing (click to enable)";
+    // Clear any in-progress typing indicator if toggling off
+    if (!state.silentTyping && _typingWritten) clearTypingIndicator();
+    showToast(state.silentTyping ? "🔇 Silent typing on" : "💬 Silent typing off", 2000);
+  });
+})();
+
+
+/* =====================================================================
+   ESC KEY — close any open overlay
+   ===================================================================== */
+document.addEventListener("keydown", e => {
+  if (e.key !== "Escape") return;
+  let closed = false;
+  // Context menu
+  if (document.getElementById("ctx-menu")) { removeCtxMenu(); closed = true; }
+  // Emoji picker
+  if (emojiOpen) {
+    $("#emoji-picker")?.classList.add("hidden"); emojiOpen = false; closed = true;
+  }
+  // GIF picker
+  if (gifOpen) {
+    $("#gif-picker")?.classList.add("hidden"); gifOpen = false; closed = true;
+  }
+  // Status picker
+  if (document.getElementById("status-picker")) {
+    document.getElementById("status-picker").remove(); closed = true;
+  }
+  // Pins panel
+  const pinsPanel = $("#pins-panel");
+  if (pinsPanel && !pinsPanel.classList.contains("hidden")) {
+    hidePinsPanel(); closed = true;
+  }
+  // Profile card
+  const profileCard = $("#profile-card");
+  if (profileCard && !profileCard.classList.contains("hidden")) {
+    profileCard.classList.add("hidden"); closed = true;
+  }
+  // In-chat search
+  const searchBar = $("#chat-search-bar");
+  if (searchBar && !searchBar.classList.contains("hidden")) {
+    closeChatSearch(); closed = true;
+  }
+  // Modals (close top-most open modal)
+  if (!closed) {
+    const openModal = document.querySelector(".modal:not(.hidden)");
+    if (openModal) {
+      // Don't close profile-setup modal (required flow)
+      if (openModal.id !== "profile-setup-modal" && openModal.id !== "tos-overlay") {
+        closeModal(openModal.id);
+      }
+    }
   }
 });
 

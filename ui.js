@@ -12,31 +12,41 @@ export function buildUI() {
   <!-- ====== LOGIN SCREEN ====== -->
   <div id="login-screen" class="login-screen">
     <div class="login-card">
-      <div class="login-logo-wrap">
-        <img class="login-logo" src="${LOGO}" alt="Static Chat logo" />
+      <!-- Banner strip — logo + app name -->
+      <div class="login-banner">
+        <img class="login-banner-logo" src="${LOGO}" alt="Static Chat"
+             onerror="this.style.display='none';this.nextElementSibling.style.display='flex'" />
+        <div class="login-banner-fallback">S</div>
+        <div class="login-banner-text">
+          <h1 class="login-title">Static Chat</h1>
+          <p class="login-sub">Your school-safe space to chat.</p>
+        </div>
       </div>
-      <h1 class="login-title">Static Chat</h1>
-      <p class="login-sub">Your school-safe space to chat with friends.</p>
-      <ul class="login-features">
-        <li>💬 Direct Messages</li>
-        <li>👥 Group Chats</li>
-        <li>🎭 GIFs &amp; Emojis</li>
-        <li>🔒 School-safe</li>
-      </ul>
-      <button id="google-signin-btn" class="btn-google">
-        <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
-          <path fill="#fff" d="M21.35 11.1H12v2.9h5.35c-.23 1.5-1.7 4.4-5.35 4.4-3.22 0-5.85-2.66-5.85-5.95S8.78 6.5 12 6.5c1.83 0 3.06.78 3.76 1.45l2.56-2.47C16.78 3.97 14.6 3 12 3 6.95 3 2.85 7.06 2.85 12.45S6.95 21.9 12 21.9c6.93 0 9.5-4.86 9.5-7.4 0-.5-.05-.95-.15-1.4z"/>
-        </svg>
-        Continue with Google
-      </button>
-      <hr class="login-divider" />
-      <p class="login-game-plug">
-        From the same creator —
-        <a href="https://sites.google.com/view/staticquasar931/static-gmes/wheres-epstein"
-           target="_blank" rel="noopener noreferrer">🕵️ Where's Epstein?</a>
-        — a fun hidden-object game!
-      </p>
-      <p class="login-footer">By continuing you agree to use this chat respectfully.</p>
+
+      <!-- Card body -->
+      <div class="login-body">
+        <ul class="login-features">
+          <li>💬 Direct Messages</li>
+          <li>👥 Group Chats</li>
+          <li>🎭 GIFs &amp; Emojis</li>
+          <li>🔒 School-safe</li>
+        </ul>
+        <button id="google-signin-btn" class="btn-google">
+          <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+            <path fill="#fff" d="M21.35 11.1H12v2.9h5.35c-.23 1.5-1.7 4.4-5.35 4.4-3.22 0-5.85-2.66-5.85-5.95S8.78 6.5 12 6.5c1.83 0 3.06.78 3.76 1.45l2.56-2.47C16.78 3.97 14.6 3 12 3 6.95 3 2.85 7.06 2.85 12.45S6.95 21.9 12 21.9c6.93 0 9.5-4.86 9.5-7.4 0-.5-.05-.95-.15-1.4z"/>
+          </svg>
+          Continue with Google
+        </button>
+        <p class="login-error hidden" id="login-error"></p>
+        <hr class="login-divider" />
+        <p class="login-game-plug">
+          From the same creator —
+          <a href="https://sites.google.com/view/staticquasar931/static-gmes/wheres-epstein"
+             target="_blank" rel="noopener noreferrer">🕵️ Where's Epstein?</a>
+          — a fun hidden-object game!
+        </p>
+        <p class="login-footer">By continuing you agree to use this chat respectfully.</p>
+      </div>
     </div>
   </div>
 
@@ -271,6 +281,20 @@ export function buildUI() {
                 <path fill="currentColor" fill-rule="evenodd" clip-rule="evenodd" d="M12 2C6.477 2 2 6.477 2 12s4.477 10 10 10 10-4.477 10-10S17.523 2 12 2ZM8.5 9a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3Zm7 0a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3ZM8.003 15.484A.502.502 0 0 1 8.5 15h7a.5.5 0 0 1 .392.81C14.972 17.345 13.572 18 12 18c-1.572 0-2.972-.655-3.892-1.69a.5.5 0 0 1-.105-.826Z"/>
               </svg>
             </button>
+            <!-- Silent typing toggle — hides YOUR typing indicator from others -->
+            <button class="icon-btn composer-silent-btn" id="silent-typing-btn"
+                    title="Silent typing — others won't see you typing" aria-pressed="false">
+              <svg viewBox="0 0 24 24" width="20" height="20" fill="none" aria-hidden="true">
+                <!-- chat bubble outline -->
+                <path fill="currentColor" opacity="0.85" d="M20 2H4C2.9 2 2 2.9 2 4v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 14H6l-2 2V4h16v12z"/>
+                <!-- typing dots -->
+                <circle fill="currentColor" cx="8" cy="11" r="1.3"/>
+                <circle fill="currentColor" cx="12" cy="11" r="1.3"/>
+                <circle fill="currentColor" cx="16" cy="11" r="1.3"/>
+                <!-- slash (only visible when .active) -->
+                <line class="silent-slash" x1="3" y1="21" x2="21" y2="3" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/>
+              </svg>
+            </button>
             <button class="icon-btn composer-gif-btn" id="gif-btn" title="Send a GIF">
               <!-- Modern Discord GIF icon -->
               <svg viewBox="0 0 24 24" width="20" height="20" fill="none" aria-hidden="true">
@@ -395,10 +419,8 @@ export function buildUI() {
       <!-- Left nav -->
       <nav class="settings-discord-nav">
         <div class="settings-discord-nav-label">User Settings</div>
-        <button class="settings-discord-nav-item active" data-pane="account">My Account</button>
-        <button class="settings-discord-nav-item" data-pane="profile">Profile</button>
+        <button class="settings-discord-nav-item active" data-pane="account">Account &amp; Profile</button>
         <button class="settings-discord-nav-item" data-pane="appearance">Appearance</button>
-        <button class="settings-discord-nav-item" data-pane="notifications">Notifications</button>
         <div class="settings-discord-nav-divider"></div>
         <button class="settings-discord-nav-item danger" id="settings-signout-btn">Sign Out</button>
       </nav>
@@ -406,9 +428,9 @@ export function buildUI() {
       <!-- Right content -->
       <div class="settings-discord-body">
 
-        <!-- ACCOUNT PANE -->
+        <!-- ACCOUNT & PROFILE PANE (merged) -->
         <div class="settings-pane" data-pane="account">
-          <div class="settings-pane-title">My Account</div>
+          <div class="settings-pane-title">Account &amp; Profile</div>
 
           <!-- Live preview card -->
           <div class="settings-profile-preview" id="settings-profile-preview-card">
@@ -426,8 +448,7 @@ export function buildUI() {
 
           <div class="settings-field-group">
             <label class="modal-label">Profile Photo URL</label>
-            <input type="text" id="settings-photo-input" placeholder="https://…" autocomplete="off" />
-            <p class="hint" style="margin:5px 0 0;">Paste a direct image URL, or clear to use your Google photo.</p>
+            <input type="text" id="settings-photo-input" placeholder="https://… (leave blank to use Google photo)" autocomplete="off" />
           </div>
           <div class="settings-field-group">
             <label class="modal-label">Username</label>
@@ -436,24 +457,10 @@ export function buildUI() {
           </div>
           <div class="settings-field-group">
             <label class="modal-label">Bio <span class="label-optional">up to 200 chars</span></label>
-            <textarea id="settings-bio-input" class="modal-textarea" maxlength="200" rows="3" placeholder="Tell people a bit about yourself…"></textarea>
+            <textarea id="settings-bio-input" maxlength="200" rows="3" placeholder="Tell people a bit about yourself…"></textarea>
           </div>
-          <div class="settings-field-group">
-            <div class="settings-info-row">
-              <span class="settings-info-label">Member Since</span>
-              <span id="settings-created-at" class="settings-info-value">—</span>
-            </div>
-          </div>
-          <div class="settings-pane-foot">
-            <button class="btn-secondary" data-close="settings-modal">Cancel</button>
-            <button class="btn-primary" id="settings-save-btn">Save Changes</button>
-          </div>
-        </div>
 
-        <!-- PROFILE PANE -->
-        <div class="settings-pane hidden" data-pane="profile">
-          <div class="settings-pane-title">Profile</div>
-          <div class="settings-section-title" style="margin-bottom:10px;">Banner Color</div>
+          <div class="settings-section-title" style="margin-top:20px;margin-bottom:10px;">Banner Color</div>
           <div class="banner-swatches" id="banner-swatches">
             <button class="banner-swatch active" data-color="#4f7cff,#7c3aed" title="Blue-Purple" style="background:linear-gradient(135deg,#4f7cff,#7c3aed)"></button>
             <button class="banner-swatch" data-color="#23a55a,#1a8a4b" title="Green" style="background:linear-gradient(135deg,#23a55a,#1a8a4b)"></button>
@@ -464,6 +471,7 @@ export function buildUI() {
             <button class="banner-swatch" data-color="#e91e8c,#b5166e" title="Pink" style="background:linear-gradient(135deg,#e91e8c,#b5166e)"></button>
             <button class="banner-swatch" data-color="#7c3aed,#5b1fb5" title="Purple" style="background:linear-gradient(135deg,#7c3aed,#5b1fb5)"></button>
           </div>
+
           <div style="margin-top:20px;">
             <label class="settings-toggle-row">
               <div class="settings-toggle-info">
@@ -476,15 +484,24 @@ export function buildUI() {
               </span>
             </label>
           </div>
+
+          <div class="settings-field-group" style="margin-top:16px;">
+            <div class="settings-info-row">
+              <span class="settings-info-label">Member Since</span>
+              <span id="settings-created-at" class="settings-info-value">—</span>
+            </div>
+          </div>
+
           <div class="settings-pane-foot">
             <button class="btn-secondary" data-close="settings-modal">Cancel</button>
-            <button class="btn-primary" id="settings-save-btn-2">Save Changes</button>
+            <button class="btn-primary" id="settings-save-btn">Save Changes</button>
           </div>
         </div>
 
-        <!-- APPEARANCE PANE -->
+        <!-- APPEARANCE PANE (theme + status + sounds + hints) -->
         <div class="settings-pane hidden" data-pane="appearance">
-          <div class="settings-pane-title">Appearance</div>
+          <div class="settings-pane-title">Appearance &amp; Preferences</div>
+
           <div class="settings-section-title" style="margin-bottom:10px;">Theme</div>
           <div class="theme-swatches" id="theme-swatches">
             <button class="theme-swatch" data-theme="dark">Dark</button>
@@ -494,40 +511,53 @@ export function buildUI() {
             <button class="theme-swatch" data-theme="warm">Warm</button>
             <button class="theme-swatch" data-theme="daylight">Daylight</button>
           </div>
-          <div style="margin-top:20px;">
+
+          <div style="margin-top:24px;">
             <div class="settings-section-title" style="margin-bottom:10px;">Status</div>
             <div class="status-row-options" id="settings-status-options">
-              <button class="status-row-option" data-status="online"><span class="status-dot-sm" data-status="online"></span>Online</button>
-              <button class="status-row-option" data-status="idle"><span class="status-dot-sm" data-status="idle"></span>Idle</button>
-              <button class="status-row-option" data-status="dnd"><span class="status-dot-sm" data-status="dnd"></span>Do Not Disturb</button>
-              <button class="status-row-option" data-status="invisible"><span class="status-dot-sm" data-status="invisible"></span>Invisible</button>
+              <button class="status-row-option" data-status="online">
+                <span class="status-dot-sm" data-status="online"></span>Online
+              </button>
+              <button class="status-row-option" data-status="idle">
+                <span class="status-dot-sm" data-status="idle"></span>Idle
+              </button>
+              <button class="status-row-option" data-status="dnd">
+                <span class="status-dot-sm" data-status="dnd"></span>Do Not Disturb
+              </button>
+              <button class="status-row-option" data-status="invisible">
+                <span class="status-dot-sm" data-status="invisible"></span>Invisible
+              </button>
             </div>
           </div>
-        </div>
 
-        <!-- NOTIFICATIONS PANE -->
-        <div class="settings-pane hidden" data-pane="notifications">
-          <div class="settings-pane-title">Notifications &amp; Sounds</div>
-          <label class="settings-toggle-row">
-            <div class="settings-toggle-info">
-              <div class="settings-toggle-label">Message sounds</div>
-              <div class="settings-toggle-sub">Play a sound when new messages arrive</div>
-            </div>
-            <span class="toggle-switch">
-              <input type="checkbox" id="settings-sound-toggle" />
-              <span class="toggle-track"></span>
-            </span>
-          </label>
-          <label class="settings-toggle-row" style="margin-top:12px;">
-            <div class="settings-toggle-info">
-              <div class="settings-toggle-label">Show formatting tips</div>
-              <div class="settings-toggle-sub">Show the hint bar below the message box</div>
-            </div>
-            <span class="toggle-switch">
-              <input type="checkbox" id="settings-hints-toggle" checked />
-              <span class="toggle-track"></span>
-            </span>
-          </label>
+          <div style="margin-top:24px;">
+            <div class="settings-section-title" style="margin-bottom:10px;">Notifications &amp; Sounds</div>
+            <label class="settings-toggle-row">
+              <div class="settings-toggle-info">
+                <div class="settings-toggle-label">Message sounds</div>
+                <div class="settings-toggle-sub">Play a sound when new messages arrive</div>
+              </div>
+              <span class="toggle-switch">
+                <input type="checkbox" id="settings-sound-toggle" />
+                <span class="toggle-track"></span>
+              </span>
+            </label>
+            <label class="settings-toggle-row" style="margin-top:12px;">
+              <div class="settings-toggle-info">
+                <div class="settings-toggle-label">Show formatting tips</div>
+                <div class="settings-toggle-sub">Show the hint bar below the message box</div>
+              </div>
+              <span class="toggle-switch">
+                <input type="checkbox" id="settings-hints-toggle" checked />
+                <span class="toggle-track"></span>
+              </span>
+            </label>
+          </div>
+
+          <div class="settings-pane-foot">
+            <button class="btn-secondary" data-close="settings-modal">Cancel</button>
+            <button class="btn-primary" id="settings-save-btn-2">Save Changes</button>
+          </div>
         </div>
 
       </div><!-- /.settings-discord-body -->

@@ -150,11 +150,19 @@ input, textarea { font-family: inherit; font-size: inherit; color: var(--t-prima
   border-radius: 50%;
   flex-shrink: 0;
   vertical-align: middle;
+  position: relative;
 }
 .status-dot-sm[data-status="online"]    { background: var(--c-online); }
-.status-dot-sm[data-status="idle"]      { background: var(--c-idle); }
-.status-dot-sm[data-status="dnd"]       { background: var(--c-dnd); }
-.status-dot-sm[data-status="invisible"] { background: var(--c-invisible); }
+.status-dot-sm[data-status="idle"]      { background: transparent; box-shadow: inset 3px -2px 0 1px var(--c-idle); }
+.status-dot-sm[data-status="dnd"]       { background: var(--c-dnd); overflow: hidden; }
+.status-dot-sm[data-status="dnd"]::after {
+  content: ''; position: absolute;
+  top: 50%; left: 10%; right: 10%;
+  height: 30%; max-height: 3px;
+  background: rgba(255,255,255,.88);
+  transform: translateY(-50%); border-radius: 2px;
+}
+.status-dot-sm[data-status="invisible"] { background: transparent; border: 2px solid var(--c-invisible); }
 .status-dot-sm[data-status="offline"]   { background: var(--c-invisible); }
 
 /* =================================================
@@ -188,17 +196,6 @@ input, textarea { font-family: inherit; font-size: inherit; color: var(--t-prima
 /* =================================================
    LOGIN SCREEN
    ================================================= */
-/* =================================================
-   LOGIN SCREEN — revamped
-   ================================================= */
-@keyframes logoFloat {
-  0%,100% { transform: translateY(0) scale(1); }
-  50%      { transform: translateY(-6px) scale(1.03); }
-}
-@keyframes logoGlow {
-  0%,100% { box-shadow: 0 0 18px rgba(79,124,255,.45), 0 4px 20px rgba(0,0,0,.5); }
-  50%      { box-shadow: 0 0 36px rgba(79,124,255,.75), 0 8px 32px rgba(0,0,0,.5); }
-}
 @keyframes fadeSlideUp {
   from { opacity: 0; transform: translateY(18px); }
   to   { opacity: 1; transform: translateY(0); }
@@ -221,41 +218,62 @@ input, textarea { font-family: inherit; font-size: inherit; color: var(--t-prima
 }
 .login-card {
   position: relative; z-index: 1;
-  width: 100%; max-width: 440px;
-  background: rgba(30,32,36,0.92);
-  border: 1px solid rgba(79,124,255,0.22);
+  width: 100%; max-width: 420px;
+  background: rgba(30,32,36,0.96);
+  border: 1px solid rgba(79,124,255,0.18);
   border-radius: 20px;
-  padding: 44px 36px 32px;
-  text-align: center;
-  box-shadow: 0 0 0 1px rgba(255,255,255,.04) inset, 0 16px 48px rgba(0,0,0,.6);
-  backdrop-filter: blur(12px);
-  animation: fadeSlideUp .5s cubic-bezier(.22,.68,0,1.2) both;
+  overflow: hidden;
+  box-shadow: 0 0 0 1px rgba(255,255,255,.04) inset, 0 20px 60px rgba(0,0,0,.7);
+  backdrop-filter: blur(16px);
+  animation: fadeSlideUp .45s cubic-bezier(.22,.68,0,1.2) both;
 }
-.login-logo-wrap {
-  display: inline-flex; align-items: center; justify-content: center;
-  width: 84px; height: 84px;
-  background: linear-gradient(135deg,#2a2f3e,#1a1d24);
-  border-radius: 22px; margin-bottom: 20px;
-  animation: logoFloat 3.5s ease-in-out infinite, logoGlow 3.5s ease-in-out infinite;
+/* Banner strip at top of card */
+.login-banner {
+  background: linear-gradient(135deg, #3a5aff 0%, #7c3aed 55%, #5b1fb5 100%);
+  padding: 32px 24px 24px;
+  display: flex; align-items: center; gap: 16px;
+  position: relative; overflow: hidden;
 }
-.login-logo { width: 56px; height: 56px; object-fit: contain; border-radius: 12px; }
+.login-banner::after {
+  content: ""; position: absolute; inset: 0;
+  background: radial-gradient(ellipse 80% 120% at 110% -10%, rgba(255,255,255,.12), transparent 60%);
+  pointer-events: none;
+}
+.login-banner-logo {
+  width: 64px; height: 64px; border-radius: 16px;
+  object-fit: contain; flex-shrink: 0;
+  box-shadow: 0 4px 16px rgba(0,0,0,.4);
+}
+.login-banner-fallback {
+  width: 64px; height: 64px; border-radius: 16px;
+  background: rgba(255,255,255,.18);
+  display: none; align-items: center; justify-content: center;
+  font-size: 28px; font-weight: 900; color: #fff;
+  flex-shrink: 0; box-shadow: 0 4px 16px rgba(0,0,0,.4);
+}
+.login-banner-text { flex: 1; min-width: 0; }
 .login-title {
-  margin: 0 0 4px;
-  font-size: 26px; font-weight: 800; letter-spacing: -0.5px;
-  background: linear-gradient(135deg, #fff 20%, #a0b4ff 80%);
-  -webkit-background-clip: text; -webkit-text-fill-color: transparent;
-  background-clip: text;
+  margin: 0 0 2px;
+  font-size: 24px; font-weight: 800; letter-spacing: -0.3px; color: #fff;
 }
-.login-sub { margin: 0 0 8px; color: var(--t-secondary); font-size: 14px; }
+.login-sub { margin: 0; color: rgba(255,255,255,.75); font-size: 13px; }
+/* Body below banner */
+.login-body { padding: 28px 32px 24px; text-align: center; }
 .login-features {
   display: flex; gap: 6px; justify-content: center; flex-wrap: wrap;
-  margin: 16px 0 28px; padding: 0; list-style: none;
+  margin: 0 0 24px; padding: 0; list-style: none;
 }
 .login-features li {
   font-size: 12px; color: var(--t-muted);
   background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.07);
   border-radius: var(--radius-pill); padding: 4px 10px;
 }
+.login-error {
+  margin: 10px 0 0; font-size: 13px; color: var(--c-dnd);
+  background: rgba(242,63,67,.1); border-radius: var(--radius-sm);
+  padding: 8px 12px; text-align: left; line-height: 1.4;
+}
+.login-error.hidden { display: none; }
 .btn-google {
   display: inline-flex; align-items: center; gap: 10px;
   background: linear-gradient(135deg, #4f7cff 0%, #7c3aed 100%);
@@ -1558,6 +1576,36 @@ body[data-theme="daylight"] .msg-followup:hover { background: rgba(0,0,50,.05); 
   display: flex; justify-content: flex-end; gap: 8px;
   margin-top: 28px; padding-top: 16px; border-top: 1px solid var(--c-border-2);
 }
+/* Settings pane inputs — ensure readable contrast */
+.settings-pane input[type="text"],
+.settings-pane textarea {
+  width: 100%; box-sizing: border-box;
+  background: var(--c-input-2); border: 1px solid var(--c-border);
+  border-radius: var(--radius-sm); padding: 9px 12px;
+  color: var(--t-primary) !important; font-size: 14px;
+  outline: none; font-family: inherit; line-height: 1.5;
+  transition: border-color .12s;
+}
+.settings-pane input[type="text"]:focus,
+.settings-pane textarea:focus { border-color: var(--c-accent); }
+.settings-pane input[type="text"]::placeholder,
+.settings-pane textarea::placeholder { color: var(--t-muted); opacity: 1; }
+.settings-pane textarea { resize: vertical; }
+.settings-section-title {
+  font-size: 11px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: .05em; color: var(--t-muted); margin-bottom: 8px;
+}
+/* Silent typing toggle button */
+.composer-silent-btn {
+  width: 34px; height: 34px; flex-shrink: 0;
+  color: var(--t-muted); border-radius: var(--radius-sm);
+  display: flex !important; align-items: center; justify-content: center;
+  transition: background .12s, color .12s;
+}
+.composer-silent-btn:hover { background: rgba(255,255,255,.08); color: var(--t-secondary); }
+.composer-silent-btn.active { color: var(--c-dnd); background: rgba(242,63,67,.08); }
+.composer-silent-btn .silent-slash { display: none; }
+.composer-silent-btn.active .silent-slash { display: block; }
 
 /* =================================================
    RIGHT-CLICK CONTEXT MENU KEYBOARD HINTS
@@ -1632,6 +1680,54 @@ body[data-theme="daylight"] .msg-followup:hover { background: rgba(0,0,50,.05); 
   background: transparent; border-color: var(--c-invisible);
   border-style: solid;
 }
+
+/* =================================================
+   STATUS ICONS — idle moon & DND stripe
+   ================================================= */
+/* Non-absolute status dots need position:relative so ::after is scoped to them */
+.friend-status-dot, .header-status-dot, .sp-dot {
+  position: relative;
+}
+/* Absolute-positioned dots are already positioned, so ::after works without override */
+/* Idle: crescent moon via inset box-shadow (overrides background) */
+.side-status-dot[data-status="idle"],
+.friend-status-dot[data-status="idle"],
+.header-status-dot[data-status="idle"],
+.chat-header-status-dot[data-status="idle"],
+#user-status-dot[data-status="idle"],
+.status-dot[data-status="idle"],
+.sp-status-ring[data-status="idle"],
+.sp-dot[data-status="idle"] {
+  background: transparent !important;
+  box-shadow: inset 3px -2px 0 1px var(--c-idle) !important;
+}
+/* DND: keep red but add a white horizontal bar */
+.side-status-dot[data-status="dnd"],
+.friend-status-dot[data-status="dnd"],
+.header-status-dot[data-status="dnd"],
+.chat-header-status-dot[data-status="dnd"],
+#user-status-dot[data-status="dnd"],
+.status-dot[data-status="dnd"],
+.sp-status-ring[data-status="dnd"],
+.sp-dot[data-status="dnd"] {
+  overflow: hidden;
+}
+.side-status-dot[data-status="dnd"]::after,
+.friend-status-dot[data-status="dnd"]::after,
+.header-status-dot[data-status="dnd"]::after,
+.chat-header-status-dot[data-status="dnd"]::after,
+#user-status-dot[data-status="dnd"]::after,
+.status-dot[data-status="dnd"]::after,
+.sp-status-ring[data-status="dnd"]::after,
+.sp-dot[data-status="dnd"]::after {
+  content: '';
+  position: absolute;
+  top: 50%; left: 10%; right: 10%;
+  height: 30%; max-height: 3px;
+  background: rgba(255,255,255,.88);
+  transform: translateY(-50%);
+  border-radius: 2px;
+}
 /* Make header name cursor pointer in DMs */
 #chat-header-name { cursor: default; }
 .chat-header-info:has(+ .chat-header-actions) #chat-header-name { cursor: default; }
@@ -1695,8 +1791,8 @@ body[data-theme="daylight"] .msg-followup:hover { background: rgba(0,0,50,.05); 
    GIF PICKER — improved
    ================================================= */
 .gif-picker {
-  position: absolute; bottom: calc(100% + 8px); right: 0;
-  width: 380px; max-height: 480px;
+  position: absolute; bottom: 88px; right: 16px;
+  width: 380px; max-width: calc(100% - 32px); max-height: 480px;
   background: var(--c-overlay); border: 1px solid var(--c-border);
   border-radius: var(--radius-lg); box-shadow: var(--shadow-2);
   display: flex; flex-direction: column; overflow: hidden;
