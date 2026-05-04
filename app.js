@@ -1046,22 +1046,32 @@ async function searchUsers() {
   const raw = $("#add-friend-input").value.trim();
   const results = $("#search-results");
   results.innerHTML="";
-  if (!raw) { $("#search-hint").textContent="Enter a username to search."; return; }
+
+  const hashMatch = raw.match(/^(.+)#(\d{4})$/);
+
+  // Safety gate: require 3+ chars for prefix searches (prevent scraping all users by typing "a")
+  if (!hashMatch) {
+    if (!raw) { $("#search-hint").textContent="Enter a username to search."; return; }
+    if (raw.length < 3) { $("#search-hint").textContent="Type at least 3 characters to search."; return; }
+    if (/^(.)1+$/i.test(raw)) { $("#search-hint").textContent="Enter a more specific username."; return; }
+  }
+
   $("#search-hint").textContent="Searching…";
 
   try {
     let found=[];
-    const hashMatch = raw.match(/^(.+)#(\d{4})$/);
 
     if (hashMatch) {
+      // Exact tag search — very specific, no length restriction
       const [,uname,disc]=hashMatch;
       const term=uname.toLowerCase();
       const q=query(collection(db,"users"),orderBy("displayNameLower"),startAt(term),endAt(term+""),limit(50));
       const snap=await getDocs(q);
       snap.forEach(d=>{ const u=d.data(); if(u.uid&&u.uid!==state.user.uid&&u.displayNameLower===term&&u.discriminator===disc) found.push(u); });
     } else {
+      // Prefix search — capped at 10 results to avoid enumeration attacks
       const term=raw.toLowerCase();
-      const q=query(collection(db,"users"),orderBy("displayNameLower"),startAt(term),endAt(term+""),limit(20));
+      const q=query(collection(db,"users"),orderBy("displayNameLower"),startAt(term),endAt(term+""),limit(10));
       const snap=await getDocs(q);
       snap.forEach(d=>{ const u=d.data(); if(u.uid&&u.uid!==state.user.uid) found.push(u); });
     }
@@ -1375,10 +1385,19 @@ function buildReplyPreview(m) {
   if (!m.replyToMessageId) return "";
   const ref=state.messages.find(x=>x.id===m.replyToMessageId);
   const name=m.replyToSenderName||(ref?.senderName)||"Unknown";
-  const preview=m.replyToTextPreview||(ref?.text||"").slice(0,80)||"";
-  return `<div class="reply-preview">
+  const rawPreview=m.replyToTextPreview||(ref?.text||"")||"";
+  // Truncate and strip any markdown/emoji syntax for the preview snippet
+  const preview=rawPreview.replace(/:[A-Za-z0-9_+\-]+:/g,"🔷").replace(/\*\*|__|~~|\*/g,"").slice(0,80);
+  const photo=ref?state.userCache[ref.senderUid]?.photoURL:null;
+  const initial=name.charAt(0).toUpperCase();
+  const avatarHtml=photo
+    ?`<img class="reply-avatar" src="${escapeHtml(photo)}" alt="" />`
+    :`<span class="reply-avatar reply-avatar-fallback">${escapeHtml(initial)}</span>`;
+  return `<div class="reply-preview" data-jump-to="${escapeHtml(m.replyToMessageId)}" title="Jump to original message" role="button" tabindex="0">
+    <div class="reply-connector"></div>
+    ${avatarHtml}
     <span class="reply-preview-name">${escapeHtml(name)}</span>
-    <span class="reply-preview-text">${escapeHtml(preview)}</span>
+    <span class="reply-preview-text">${escapeHtml(preview)||"<em>Message unavailable</em>"}</span>
   </div>`;
 }
 
@@ -1489,7 +1508,13 @@ function renderMessages() {
     }
     lastSenderUid=m.senderUid; lastTime=tms;
   }
+  // Capture scroll state BEFORE innerHTML wipe — innerHTML resets scrollTop to 0
+  const prevScrollTop    = wrap.scrollTop;
+  const prevScrollHeight = wrap.scrollHeight;
+  const wasAtBottom      = prevScrollHeight - prevScrollTop - wrap.clientHeight < 120;
+
   wrap.innerHTML=html.join("");
+
   const cid=state.activeChatId;
   const alreadyScrolled=state.chatScrolledInitial.has(cid);
   if (!alreadyScrolled) {
@@ -1502,9 +1527,9 @@ function renderMessages() {
       wrap.scrollTop=wrap.scrollHeight;
     }
   } else {
-    // Subsequent renders (live updates): only auto-scroll if user was near the bottom
-    const atBottom=wrap.scrollHeight-wrap.scrollTop-wrap.clientHeight<120;
-    if (atBottom) wrap.scrollTop=wrap.scrollHeight;
+    // Subsequent renders (live updates): only auto-scroll if user was already at the bottom
+    if (wasAtBottom) wrap.scrollTop=wrap.scrollHeight;
+    // else: user is reading history — don't jump
   }
   // Store unread count so jump button can show it
   state._unreadDisplayCount = unreadCount;
@@ -1525,6 +1550,20 @@ $("#messages").addEventListener("click", e=>{
 
 // Message area delegation
 $("#messages").addEventListener("click", async e=>{
+  // Click on a reply-preview → jump to the original message
+  const replyJump=e.target.closest("[data-jump-to]");
+  if (replyJump) {
+    const targetId=replyJump.dataset.jumpTo;
+    const targetEl=$("#messages").querySelector(`[data-msg-id="${targetId}"]`);
+    if (targetEl) {
+      targetEl.scrollIntoView({behavior:"smooth", block:"center"});
+      // Flash highlight
+      targetEl.classList.add("msg-jump-highlight");
+      setTimeout(()=>targetEl.classList.remove("msg-jump-highlight"), 1400);
+    }
+    return;
+  }
+
   const profileTrigger=e.target.closest("[data-profile-uid]");
   if (profileTrigger&&!e.target.closest(".msg-action-btn")) { showProfileCard(profileTrigger.dataset.profileUid,e); return; }
 
@@ -2082,7 +2121,11 @@ function buildEmojiGrid(filter="") {
       return nameMatch||altMatch;
     });
   } else {
-    items=state.activeCat==="all" ? EMOJI_DATA : EMOJI_DATA.filter(e=>e.cat===state.activeCat);
+    const pool = state.activeCat==="all" ? EMOJI_DATA : EMOJI_DATA.filter(e=>e.cat===state.activeCat);
+    // :Static: always first in any listing
+    const staticEntry=pool.find(e=>e.isStatic);
+    const rest=pool.filter(e=>!e.isStatic);
+    items=staticEntry?[staticEntry,...rest]:rest;
   }
   if (!emojiGrid) return;
   emojiGrid.innerHTML=items.map(e=>{
@@ -2204,10 +2247,15 @@ async function showProfileCard(uid, event) {
   // Privacy check
   const isPrivate=profile.isPrivate&&!isFriend&&!isSelf;
 
-  // Banner
+  // Banner — for own profile always use the live state value (avoids cache desync)
+  const bannerColor=isSelf ? (state.bannerColor||null) : (profile.bannerColor||null);
   const bannerEl=$("#profile-card-banner");
   if (bannerEl) {
-    bannerEl.style.background=profile.bannerColor||"var(--sidebar-bg)";
+    if (bannerColor) {
+      bannerEl.style.background=`linear-gradient(135deg,${bannerColor.includes(",")?bannerColor:bannerColor+","+bannerColor})`;
+    } else {
+      bannerEl.style.background="linear-gradient(135deg,var(--c-input-2),var(--c-rail))";
+    }
     bannerEl.style.display="";
   }
 
@@ -2776,3 +2824,25 @@ document.addEventListener("click", e=>{
     $("#google-signin-btn")?.classList.remove("loading");
   }
 });
+
+
+/* =====================================================================
+   TERMS OF USE — show on first visit, block everything until agreed
+   ===================================================================== */
+(function initToS() {
+  const overlay=$("#tos-overlay");
+  if (!overlay) return;
+  if (localStorage.getItem("sc_tos_v1")==="agreed") {
+    overlay.remove(); return;
+  }
+  // Block interaction with the rest of the page
+  overlay.classList.remove("hidden");
+  overlay.style.display="grid";
+  $("#tos-agree-btn")?.addEventListener("click", ()=>{
+    localStorage.setItem("sc_tos_v1","agreed");
+    overlay.style.animation="none";
+    overlay.style.opacity="0";
+    overlay.style.transition="opacity .3s";
+    setTimeout(()=>overlay.remove(), 320);
+  });
+})();

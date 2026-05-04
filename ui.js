@@ -273,6 +273,32 @@ export function buildUI() {
 
   <!-- Status picker popup (created dynamically, placeholder kept here for reference) -->
 
+  <!-- ====== TERMS OF USE — shown on first visit ====== -->
+  <div id="tos-overlay" class="tos-overlay" role="dialog" aria-modal="true" aria-labelledby="tos-title">
+    <div class="tos-card">
+      <div class="tos-header">
+        <img src="${LOGO}" alt="" class="tos-logo" />
+        <h2 id="tos-title">Before You Continue</h2>
+        <p class="tos-sub">Static Chat is a community tool. By entering, you agree to the following.</p>
+      </div>
+      <div class="tos-body">
+        <ul class="tos-list">
+          <li>⚠️ <strong>Use at your own risk.</strong> This is a school-built, school-safe project — but no platform is 100% monitored.</li>
+          <li>🧠 <strong>Be mature.</strong> Treat everyone with respect. Harassment, bullying, and hate speech will result in removal.</li>
+          <li>🔒 <strong>Protect your privacy.</strong> Never share passwords, addresses, phone numbers, or any sensitive personal information.</li>
+          <li>📵 <strong>No inappropriate content.</strong> Keep it school-appropriate. No NSFW text, links, or images.</li>
+          <li>🚩 <strong>Report problems.</strong> Use the report button if you see something wrong. Don't abuse it.</li>
+          <li>📋 <strong>No abuse of the platform.</strong> No spam, bots, impersonation, or attempts to exploit the system.</li>
+          <li>👤 <strong>You are responsible</strong> for what you send. Think before you type.</li>
+        </ul>
+        <p class="tos-footer-note">By clicking "I Agree", you acknowledge you've read this and agree to use Static Chat responsibly.</p>
+      </div>
+      <div class="tos-foot">
+        <button class="btn-primary" id="tos-agree-btn" style="width:100%;padding:13px;font-size:15px;">I Agree — Let Me In</button>
+      </div>
+    </div>
+  </div>
+
   <!-- ====== MODALS ====== -->
 
   <!-- Profile Setup Modal -->

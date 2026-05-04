@@ -681,8 +681,11 @@ input, textarea { font-family: inherit; font-size: inherit; color: var(--t-prima
 }
 .emoji-cell:hover { background: rgba(255,255,255,0.08); transform: scale(1.1); }
 .emoji-cell img.static-emoji-square {
-  width: 28px; height: 28px; border-radius: 6px; object-fit: contain; display: block;
+  width: 24px; height: 24px; border-radius: 5px; object-fit: contain; display: block;
+  image-rendering: -webkit-optimize-contrast;
 }
+/* Ensure the last row in the emoji grid isn't clipped */
+.emoji-picker-grid { padding-bottom: 10px; }
 
 /* =================================================
    EMOJI AUTOCOMPLETE DROPDOWN
@@ -1019,18 +1022,44 @@ body[data-theme="daylight"] .msg-followup:hover { background: rgba(0,0,50,.05); 
 .reply-bar-cancel { width: 22px; height: 22px; flex-shrink: 0; }
 
 /* =================================================
-   REPLY PREVIEW IN MESSAGES
+   REPLY PREVIEW IN MESSAGES — Discord-style
    ================================================= */
 .reply-preview {
   display: flex; align-items: center; gap: 6px;
-  padding: 3px 8px; margin-bottom: 3px;
-  background: var(--c-input-2); border-left: 3px solid var(--c-accent);
-  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
-  font-size: 12px; color: var(--t-muted); max-width: 480px;
+  margin: 0 0 4px 12px; padding: 2px 8px 2px 4px;
+  border-radius: var(--radius-pill);
+  font-size: 12px; color: var(--t-muted);
   cursor: pointer; white-space: nowrap; overflow: hidden;
+  max-width: 440px; position: relative;
+  transition: background .12s;
 }
-.reply-preview-name { font-weight: 600; color: var(--c-accent); flex-shrink: 0; }
-.reply-preview-text { overflow: hidden; text-overflow: ellipsis; }
+.reply-preview:hover { background: rgba(255,255,255,.06); }
+.reply-connector {
+  position: absolute; left: -20px; top: 50%;
+  width: 20px; height: 16px;
+  border-left: 2px solid var(--c-border-2);
+  border-top: 2px solid var(--c-border-2);
+  border-top-left-radius: 6px;
+  pointer-events: none;
+}
+.reply-avatar {
+  width: 16px; height: 16px; border-radius: 50%; flex-shrink: 0;
+  object-fit: cover;
+}
+.reply-avatar-fallback {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 16px; height: 16px; border-radius: 50%;
+  background: var(--c-accent); color: #fff; font-size: 9px; font-weight: 700; flex-shrink: 0;
+}
+.reply-preview-name { font-weight: 600; color: var(--c-accent); flex-shrink: 0; margin-right: 2px; }
+.reply-preview-text { overflow: hidden; text-overflow: ellipsis; opacity: 0.8; }
+
+/* Flash highlight when jumping to a message */
+@keyframes msgHighlight {
+  0%   { background: rgba(79,124,255,.30); }
+  100% { background: transparent; }
+}
+.msg-jump-highlight { animation: msgHighlight 1.4s ease-out both; border-radius: var(--radius-sm); }
 
 /* =================================================
    TYPING INDICATOR
@@ -1143,10 +1172,13 @@ body[data-theme="daylight"] .msg-followup:hover { background: rgba(0,0,50,.05); 
    STATIC EMOJI — square crop, no tooltip artefacts
    ================================================= */
 .msg-emoji-static {
-  width: 18px; height: 18px;
-  border-radius: 3px; object-fit: cover;
-  vertical-align: -4px; display: inline-block;
-  overflow: hidden;
+  width: 20px !important; height: 20px !important;
+  min-width: 20px; min-height: 20px; max-width: 20px; max-height: 20px;
+  border-radius: 4px; object-fit: contain;
+  vertical-align: -5px; display: inline-block;
+  overflow: hidden; flex-shrink: 0;
+  image-rendering: -webkit-optimize-contrast;
+  image-rendering: crisp-edges;
 }
 
 /* =================================================
@@ -1195,6 +1227,47 @@ body[data-theme="daylight"] .msg-followup:hover { background: rgba(0,0,50,.05); 
   content: ""; flex: 1;
   height: 1px; background: var(--c-danger); opacity: 0.4;
 }
+
+/* =================================================
+   TERMS OF USE OVERLAY
+   ================================================= */
+.tos-overlay {
+  position: fixed; inset: 0; z-index: 200;
+  display: grid; place-items: center;
+  background: rgba(0,0,0,.85); backdrop-filter: blur(6px);
+  padding: 24px;
+  animation: fadeSlideUp .35s cubic-bezier(.22,.68,0,1.2) both;
+}
+.tos-card {
+  width: 100%; max-width: 520px;
+  background: var(--c-sidebar);
+  border: 1px solid rgba(79,124,255,.2);
+  border-radius: 18px; overflow: hidden;
+  box-shadow: 0 24px 64px rgba(0,0,0,.7);
+  display: flex; flex-direction: column;
+}
+.tos-header {
+  padding: 28px 28px 16px; text-align: center;
+  background: linear-gradient(135deg, rgba(79,124,255,.12), rgba(122,66,255,.08));
+  border-bottom: 1px solid var(--c-border-2);
+}
+.tos-logo { width: 48px; height: 48px; border-radius: 12px; margin-bottom: 10px; object-fit: contain; }
+.tos-header h2 { margin: 0 0 6px; font-size: 20px; font-weight: 800; }
+.tos-sub { margin: 0; font-size: 13px; color: var(--t-secondary); }
+.tos-body { padding: 20px 28px; overflow-y: auto; max-height: 340px; }
+.tos-list {
+  margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 10px;
+}
+.tos-list li {
+  font-size: 13px; color: var(--t-secondary); line-height: 1.5;
+  padding: 8px 12px; background: rgba(255,255,255,.04);
+  border-radius: var(--radius-sm); border-left: 3px solid var(--c-border-2);
+}
+.tos-list li strong { color: var(--t-primary); }
+.tos-footer-note {
+  margin: 16px 0 0; font-size: 12px; color: var(--t-muted); text-align: center;
+}
+.tos-foot { padding: 16px 28px 24px; }
 
 /* =================================================
    JUMP TO LATEST BUTTON
