@@ -405,22 +405,64 @@ const state = {
   dblClickReact:     localStorage.getItem("sc_dblclick_react") === "true",
   dblClickEmoji:     localStorage.getItem("sc_dblclick_emoji") || "👍",
   compactMode:       localStorage.getItem("sc_compact") === "true",
+  textSize:          parseFloat(localStorage.getItem("sc_text_size")) || 15,
   customStatus:      localStorage.getItem("sc_custom_status")||"",
   favGifs: {},   // gifUrl → { url, previewUrl, title }
   favEmojis: {}, // emojiName → { name, char }
 };
 
-// Apply theme + compact mode before anything renders
+// Apply theme, compact mode, and text size before anything renders
 (function initTheme() {
   document.body.dataset.theme = state.theme;
   if (state.compactMode) document.body.classList.add("compact-mode");
+  if (state.textSize !== 15) document.body.style.setProperty("--msg-font-size", state.textSize + "px");
 })();
 
 function applyTheme(t) {
   state.theme = t;
   document.body.dataset.theme = t;
   localStorage.setItem("sc_theme", t);
+  if (t==="custom") _applyCustomThemeColors();
 }
+
+// Apply custom theme from stored/picker colors
+function _applyCustomThemeColors() {
+  const bg      = localStorage.getItem("sc_custom_bg")      || ($("#tc-bg")?.value)      || "#1a1b1e";
+  const sidebar = localStorage.getItem("sc_custom_sidebar") || ($("#tc-sidebar")?.value) || "#131416";
+  const accent  = localStorage.getItem("sc_custom_accent")  || ($("#tc-accent")?.value)  || "#4f7cff";
+  const root = document.body;
+  // Derive related shades from the main bg
+  root.style.setProperty("--c-rail",    _darken(bg, 8));
+  root.style.setProperty("--c-sidebar", sidebar);
+  root.style.setProperty("--c-main",    bg);
+  root.style.setProperty("--c-input",   _lighten(bg, 6));
+  root.style.setProperty("--c-input-2", _darken(bg, 4));
+  root.style.setProperty("--c-overlay", _darken(bg, 12));
+  root.style.setProperty("--c-border",  _lighten(bg, 12));
+  root.style.setProperty("--c-border-2",_lighten(bg, 6));
+  root.style.setProperty("--c-accent",        accent);
+  root.style.setProperty("--c-accent-hover",  _darken(accent, 12));
+  root.style.setProperty("--c-accent-soft",   accent+"28");
+  root.style.setProperty("--shadow-accent",   `0 4px 16px ${accent}44`);
+}
+
+// Simple hex color manipulators
+function _hexToRgb(h) {
+  h=h.replace("#","");
+  if (h.length===3) h=h[0]+h[0]+h[1]+h[1]+h[2]+h[2];
+  return [parseInt(h.slice(0,2),16),parseInt(h.slice(2,4),16),parseInt(h.slice(4,6),16)];
+}
+function _rgbToHex(r,g,b){return"#"+[r,g,b].map(v=>Math.max(0,Math.min(255,Math.round(v))).toString(16).padStart(2,"0")).join("");}
+function _lighten(hex,amt){ const [r,g,b]=_hexToRgb(hex); return _rgbToHex(r+amt,g+amt,b+amt); }
+function _darken(hex,amt) { return _lighten(hex,-amt); }
+
+// Wire custom theme color pickers (live update)
+document.addEventListener("input", e=>{
+  if (!["tc-bg","tc-sidebar","tc-accent"].includes(e.target.id)) return;
+  if (state.theme!=="custom") return;
+  localStorage.setItem("sc_custom_"+e.target.id.slice(3), e.target.value);
+  _applyCustomThemeColors();
+});
 
 
 /* =====================================================================
@@ -487,6 +529,52 @@ function escapeHtml(text) {
   return String(text)
     .replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")
     .replace(/"/g,"&quot;").replace(/'/g,"&#39;");
+}
+
+/* =====================================================================
+   AUTOFLAG SYSTEM
+   Silently logs messages containing concerning phrases to Firestore.
+   ===================================================================== */
+const _AUTOFLAG_PATTERNS = [
+  // Threats / violence
+  { pattern: /\b(i(?:'?ll|m going to|'m gonna))\s+(kill|hurt|stab|shoot|beat up|fight)\s+(you|u|him|her|them)\b/i, category: "threat" },
+  { pattern: /\bkill\s+your(self|selves)\b/i, category: "threat" },
+  { pattern: /\bi\s+(want|will|gonna|going to)\s+(hurt|kill|end)\s+(my|myself|me|him|her|them)\b/i, category: "threat_self" },
+  // Self-harm / crisis
+  { pattern: /\b(kms|kys)\b/i, category: "self_harm" },
+  { pattern: /\b(want to die|wanna die|going to (kill|end) myself|suicide|suicidal)\b/i, category: "self_harm" },
+  { pattern: /\b(cutting myself|self.?harm|self.?hurt)\b/i, category: "self_harm" },
+  // Doxxing / contact exchange
+  { pattern: /\b(my (phone|cell|number|address|snapchat|instagram) is|text me at|dm me (on|at)|add me on)\b/i, category: "contact_share" },
+  { pattern: /\b\d{3}[-.\s]?\d{3}[-.\s]?\d{4}\b/, category: "phone_number" },
+  // Bullying / harassment
+  { pattern: /\b(nobody likes you|you should (die|leave|quit)|go (kill|hurt) yourself|worthless|you're (nothing|pathetic|disgusting))\b/i, category: "bullying" },
+  // Slurs — placeholder pattern (extend as needed)
+  { pattern: /\b(n[i1]gg[ae3]r|f[a4]gg[o0]t)\b/i, category: "slur" },
+  // Links to inappropriate sites
+  { pattern: /\b(pornhub|xvideos|xnxx|chaturbate|onlyfans)\b/i, category: "nsfw_link" },
+];
+
+async function _autoFlagCheck(text, msgId, chatId, senderUid, senderName) {
+  if (!text || !state.user) return;
+  const lc = text.toLowerCase();
+  for (const { pattern, category } of _AUTOFLAG_PATTERNS) {
+    if (pattern.test(lc)) {
+      try {
+        await addDoc(collection(db, "Autoflag"), {
+          messageId: msgId || null,
+          chatId: chatId || null,
+          senderUid: senderUid || state.user.uid,
+          senderName: senderName || state.user.displayName || null,
+          text,
+          matchedCategory: category,
+          flaggedAt: serverTimestamp(),
+          reviewed: false,
+        });
+      } catch (_) { /* fail silently */ }
+      return; // one flag per message
+    }
+  }
 }
 
 function avatarMarkup(displayName, photoURL, sizeClass="side-row-avatar", fallbackClass="side-row-fallback") {
@@ -640,6 +728,10 @@ function formatMessage(raw) {
     const url = safeUrl(rawUrl);
     if (!url) return escapeHtml(rawUrl);
     if (IMAGE_URL_RE.test(url) || GIF_CDN_RE.test(url)) {
+      const isGif = /\.gif(\?|$)/i.test(url) || GIF_CDN_RE.test(url);
+      if (isGif) {
+        return `<div class="gif-embed-wrap"><img class="msg-embed-img gif-embed-live" src="${url}" alt="" loading="lazy" onerror="this.style.display='none'" title="Click to freeze" /><span class="gif-embed-tag">GIF</span></div>`;
+      }
       return `<a href="${url}" target="_blank" rel="noopener"><img class="msg-embed-img" src="${url}" alt="" loading="lazy" onerror="this.style.display='none'" /></a>`;
     }
     return `<a class="msg-link" href="${url}" target="_blank" rel="noopener noreferrer">${url}</a>`;
@@ -1680,6 +1772,10 @@ async function openChat(chatId) {
       if (isNew) {
         const newest=state.messages[state.messages.length-1];
         if (newest&&newest.senderUid!==state.user.uid&&!isChatMuted(chatId)&&!newest.silent) playSound("message");
+        // Autoflag incoming messages from others (silent, no UX impact)
+        if (newest&&newest.senderUid!==state.user.uid&&newest.text) {
+          _autoFlagCheck(newest.text, newest.id, chatId, newest.senderUid, newest.senderName);
+        }
       }
       state.chatInitialized.add(chatId);
       renderMessages();
@@ -2139,7 +2235,52 @@ $("#messages").addEventListener("click", async e=>{
     return;
   }
 
-  // Clicking a @mention span → open that user's profile
+  // GIF replay button (check BEFORE profile trigger)
+  const replayBtnA = e.target.closest(".gif-replay-btn");
+  if (replayBtnA) {
+    const wrap = replayBtnA.closest(".gif-embed-wrap");
+    if (!wrap) return;
+    const gifImg = wrap.querySelector(".gif-embed-live");
+    if (!gifImg) return;
+    const origSrc = gifImg.dataset.origSrc;
+    if (origSrc) { gifImg.src = ""; requestAnimationFrame(() => { gifImg.src = origSrc; }); }
+    gifImg.dataset.frozen = "false";
+    gifImg.style.display = "";
+    wrap.querySelector(".gif-freeze-canvas")?.remove();
+    wrap.querySelector(".gif-freeze-overlay")?.remove();
+    gifImg.title = "Click to freeze";
+    return;
+  }
+  // GIF freeze click (check BEFORE profile trigger)
+  const gifEmbedA = e.target.closest(".gif-embed-live");
+  if (gifEmbedA && gifEmbedA.dataset.frozen !== "true") {
+    const wrap = gifEmbedA.closest(".gif-embed-wrap");
+    if (!wrap) return;
+    try {
+      const w = gifEmbedA.offsetWidth || gifEmbedA.naturalWidth || 300;
+      const h = gifEmbedA.offsetHeight || gifEmbedA.naturalHeight || 200;
+      const canvas = document.createElement("canvas");
+      canvas.width = w; canvas.height = h;
+      canvas.className = "gif-freeze-canvas";
+      const ctx = canvas.getContext("2d");
+      ctx.drawImage(gifEmbedA, 0, 0, w, h);
+      gifEmbedA.dataset.origSrc = gifEmbedA.src;
+      gifEmbedA.dataset.frozen = "true";
+      gifEmbedA.src = "";
+      gifEmbedA.style.display = "none";
+      gifEmbedA.title = "";
+      const overlay = document.createElement("div");
+      overlay.className = "gif-freeze-overlay";
+      overlay.innerHTML = `<button class="gif-replay-btn" title="Replay GIF">
+        <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path fill="currentColor" d="M12 5V1L7 6l5 5V7c3.31 0 6 2.69 6 6s-2.69 6-6 6-6-2.69-6-6H4c0 4.42 3.58 8 8 8s8-3.58 8-8-3.58-8-8-8z"/></svg>
+        Replay
+      </button>`;
+      wrap.appendChild(canvas);
+      wrap.appendChild(overlay);
+    } catch (_) { /* cross-origin draw error — skip */ }
+    return;
+  }
+
   const mentionEl=e.target.closest(".msg-mention");
   if (mentionEl) {
     const uid=mentionEl.dataset.mentionUid;
@@ -2285,10 +2426,11 @@ async function sendCurrentMessage() {
       const chatId=state.activeChatId;
       localStorage.removeItem(`sc_draft_${chatId}`);
       try {
-        await addDoc(collection(db,"chats",chatId,"messages"),{
+        const cmdRef = await addDoc(collection(db,"chats",chatId,"messages"),{
           ...baseMsg, text:result, type:"command", commandResult:true, xpValue:0
         });
         await updateDoc(doc(db,"chats",chatId),{ lastMessage:result.slice(0,200), lastMessageAt:serverTimestamp(), lastSenderUid:state.user.uid });
+        _autoFlagCheck(text, cmdRef.id, chatId);
       } catch(err){ showToast("Send failed: "+err.message); composer.value=raw; }
       return;
     }
@@ -2299,8 +2441,10 @@ async function sendCurrentMessage() {
   const chatId=state.activeChatId;
   localStorage.removeItem(`sc_draft_${chatId}`);
   try {
-    await addDoc(collection(db,"chats",chatId,"messages"),{ ...baseMsg, text });
+    const msgRef = await addDoc(collection(db,"chats",chatId,"messages"),{ ...baseMsg, text });
     await updateDoc(doc(db,"chats",chatId),{ lastMessage:text.slice(0,200), lastMessageAt:serverTimestamp(), lastSenderUid:state.user.uid, lastMessageSilent:silent||false });
+    // Autoflag check — silent, does not affect message delivery
+    _autoFlagCheck(text, msgRef.id, chatId);
   } catch(err){ showToast("Send failed: "+err.message); composer.value=raw; updateSendBtn(); }
 }
 
@@ -2600,7 +2744,7 @@ let _settingsDirty = false;
 function _markSettingsDirty() { _settingsDirty = true; }
 
 // Wire dirty tracking to account form fields
-["settings-username-input","settings-bio-input","settings-photo-input"].forEach(id=>{
+["settings-username-input","settings-bio-input","settings-photo-input","settings-custom-status-input"].forEach(id=>{
   document.addEventListener("input", e=>{ if(e.target.id===id) _markSettingsDirty(); });
 });
 document.addEventListener("change", e=>{
@@ -2642,7 +2786,7 @@ document.addEventListener("click", e=>{
    ===================================================================== */
 let _pendingTheme=null, _pendingStatus=null, _pendingBannerColor=undefined, _pendingPrivate=null;
 
-$("#settings-btn").addEventListener("click", openSettingsModal);
+$("#settings-btn").addEventListener("click", () => openSettingsModal());
 
 let _lastSettingsPane="account";
 function switchSettingsPane(paneId) {
@@ -2652,6 +2796,8 @@ function switchSettingsPane(paneId) {
 }
 
 function openSettingsModal(pane) {
+  // Guard: if called with an Event object (from addEventListener), ignore it
+  if (typeof pane !== "string") pane = null;
   // Use last-opened pane if none specified
   if (!pane) pane=_lastSettingsPane||"account";
   // Remap removed panes to merged ones
@@ -2664,14 +2810,16 @@ function openSettingsModal(pane) {
   _pendingBannerColor=state.bannerColor;
   _pendingPrivate=state.isPrivate;
 
-  if($("#settings-username-input")) $("#settings-username-input").value=u.username||u.displayName||"";
-  if($("#settings-tag-display"))    $("#settings-tag-display").textContent=u.discriminator?`#${u.discriminator}`:"#????";
-  if($("#settings-bio-input"))      $("#settings-bio-input").value=u.bio||"";
-  if($("#settings-photo-input"))    $("#settings-photo-input").value=u.photoURL||"";
+  if($("#settings-username-input"))       $("#settings-username-input").value=u.username||u.displayName||"";
+  if($("#settings-tag-display"))          $("#settings-tag-display").textContent=u.discriminator?`#${u.discriminator}`:"#????";
+  if($("#settings-bio-input"))            $("#settings-bio-input").value=u.bio||"";
+  if($("#settings-photo-input"))          $("#settings-photo-input").value=u.photoURL||"";
+  if($("#settings-custom-status-input"))  $("#settings-custom-status-input").value=state.customStatus||"";
   if($("#settings-sound-toggle"))              $("#settings-sound-toggle").checked=state.soundEnabled;
   if($("#settings-hints-toggle"))              $("#settings-hints-toggle").checked=localStorage.getItem("sc_hints")!=="false";
   if($("#settings-autosend-gif-toggle"))       $("#settings-autosend-gif-toggle").checked=state.autoSendGif;
   if($("#settings-compact-toggle"))            $("#settings-compact-toggle").checked=state.compactMode;
+  $$(".text-size-btn").forEach(b=>b.classList.toggle("active", parseFloat(b.dataset.size)===state.textSize));
   if($("#settings-dblclick-react-toggle"))     $("#settings-dblclick-react-toggle").checked=state.dblClickReact;
   if($("#settings-dblclick-emoji"))            $("#settings-dblclick-emoji").value=state.dblClickEmoji;
   if($("#dblclick-emoji-preview"))             $("#dblclick-emoji-preview").textContent=state.dblClickEmoji;
@@ -2680,6 +2828,15 @@ function openSettingsModal(pane) {
   const dblRow=$("#dblclick-emoji-row"); if(dblRow) dblRow.style.display=state.dblClickReact?"":"none";
 
   $$(".theme-swatch").forEach(sw=>sw.classList.toggle("active",sw.dataset.theme===_pendingTheme));
+  // Show custom pickers if current theme is custom, and restore picker values
+  const customPickers=$("#theme-custom-pickers");
+  if (customPickers) {
+    customPickers.style.display=(_pendingTheme==="custom")?"":"none";
+    const tcBg=$("#tc-bg"), tcSb=$("#tc-sidebar"), tcAc=$("#tc-accent");
+    if(tcBg) tcBg.value=localStorage.getItem("sc_custom_bg")||"#1a1b1e";
+    if(tcSb) tcSb.value=localStorage.getItem("sc_custom_sidebar")||"#131416";
+    if(tcAc) tcAc.value=localStorage.getItem("sc_custom_accent")||"#4f7cff";
+  }
   $$(".status-row-option").forEach(opt=>opt.classList.toggle("active",opt.dataset.status===_pendingStatus));
   $$(".banner-swatch").forEach(sw=>sw.classList.toggle("active",(sw.dataset.color||"")===((_pendingBannerColor)||"")));
   // Init banner type toggle UI
@@ -2701,17 +2858,7 @@ function openSettingsModal(pane) {
     sinceEl.textContent=d.toLocaleDateString(undefined,{year:"numeric",month:"long",day:"numeric"});
   }
 
-  updateAvatarPreview("settings",u.username||u.displayName,u.photoURL);
-  // Populate preview banner
-  const previewBanner=$("#settings-preview-banner");
-  if (previewBanner&&_pendingBannerColor) {
-    const parts=_pendingBannerColor.split(",");
-    previewBanner.style.background=parts.length>=2?`linear-gradient(135deg,${parts[0]},${parts[1]})`:parts[0];
-  }
-  const pName=$("#settings-preview-name"); if(pName) pName.textContent=u.username||u.displayName||"";
-  const pTag=$("#settings-preview-tag"); if(pTag) pTag.textContent=u.discriminator?`#${u.discriminator}`:"";
-  const pBio2=$("#settings-preview-bio"); if(pBio2) pBio2.textContent=u.bio||"No bio set yet.";
-  const pBadges2=$("#settings-preview-badges"); if(pBadges2) pBadges2.innerHTML=renderBadges(state.userCache[u.uid]?.badges||[]);
+  _refreshSettingsPreview(u);
   switchSettingsPane(pane);
   // Clear settings search
   const settingsSearch=$("#settings-search-input");
@@ -2762,29 +2909,56 @@ document.addEventListener("click", e=>{
   }
 });
 
-// Live preview helpers for settings
-function _updateSettingsPreview() {
-  const name=$("#settings-username-input")?.value.trim()||state.user?.username||"";
-  const photo=$("#settings-photo-input")?.value.trim()||null;
-  const bio=$("#settings-bio-input")?.value.trim()||"";
-  updateAvatarPreview("settings",name,photo);
-  // Update name/tag/bio in preview card
-  const pName=$("#settings-preview-name"); if(pName) pName.textContent=name||"Username";
-  const pTag=$("#settings-preview-tag"); if(pTag) pTag.textContent=state.user?.discriminator?`#${state.user.discriminator}`:"";
-  const pBio=$("#settings-preview-bio"); if(pBio) pBio.textContent=bio||"No bio set yet.";
-  const pBadges=$("#settings-preview-badges");
-  if(pBadges) pBadges.innerHTML=renderBadges(state.userCache[state.user?.uid]?.badges||[]);
-  // Update banner if pending
-  const banner=$("#settings-preview-banner");
-  if(banner&&_pendingBannerColor){
-    const parts=_pendingBannerColor.split(",");
-    banner.style.background=parts.length>=2?`linear-gradient(135deg,${parts[0]},${parts[1]})`:parts[0];
+// Full settings preview refresh — used on open and on any field change
+function _refreshSettingsPreview(u) {
+  u = u || state.user;
+  const name       = $("#settings-username-input")?.value.trim()      || u?.username || u?.displayName || "";
+  const photo      = $("#settings-photo-input")?.value.trim()         || null;
+  const bio        = $("#settings-bio-input")?.value.trim()           || "";
+  const statusTxt  = $("#settings-custom-status-input")?.value.trim() || state.customStatus || "";
+
+  updateAvatarPreview("settings", name, photo);
+
+  const set = (id, val) => { const el=$("#"+id); if(el) el.textContent=val; };
+  set("settings-preview-name",   name || "Username");
+  set("settings-preview-tag",    u?.discriminator ? `#${u.discriminator}` : "");
+  set("settings-preview-bio",    bio  || "No bio set yet.");
+  set("settings-preview-custom-status", statusTxt);
+
+  // Status dot
+  const sDot = $("#settings-preview-status-dot");
+  if (sDot) sDot.dataset.status = resolveStatus(u) || "online";
+
+  // Badges
+  const pBadges = $("#settings-preview-badges");
+  if (pBadges) pBadges.innerHTML = renderBadges(state.userCache[u?.uid]?.badges || []);
+
+  // Member since
+  const sinceWrap = $("#settings-preview-since-wrap");
+  const sinceSpan = $("#settings-preview-since");
+  if (u?.createdAt && sinceWrap && sinceSpan) {
+    const d = u.createdAt.toDate ? u.createdAt.toDate() : new Date(u.createdAt);
+    sinceSpan.textContent = d.toLocaleDateString(undefined, {year:"numeric", month:"long"});
+    sinceWrap.style.display = "";
+  }
+
+  // Banner
+  const banner = $("#settings-preview-banner");
+  if (banner && _pendingBannerColor) {
+    const parts = _pendingBannerColor.split(",");
+    banner.style.background = parts.length >= 2
+      ? `linear-gradient(135deg,${parts[0]},${parts[1]})` : parts[0];
+  } else if (banner) {
+    banner.style.background = "linear-gradient(135deg,var(--c-input-2),var(--c-rail))";
   }
 }
 
-// Settings live preview
-["settings-photo-input","settings-username-input","settings-bio-input"].forEach(id=>{
-  document.addEventListener("input",e=>{ if(e.target.id===id) _updateSettingsPreview(); });
+// Keep legacy name so other call sites still work
+function _updateSettingsPreview() { _refreshSettingsPreview(); }
+
+// Settings live preview — update on any field change
+["settings-photo-input","settings-username-input","settings-bio-input","settings-custom-status-input"].forEach(id=>{
+  document.addEventListener("input",e=>{ if(e.target.id===id) _refreshSettingsPreview(); });
 });
 
 // Instant-apply: sound, hints, and auto-send GIF toggles take effect immediately
@@ -2806,6 +2980,17 @@ $("#settings-compact-toggle")?.addEventListener("change", e => {
   state.compactMode = e.target.checked;
   localStorage.setItem("sc_compact", e.target.checked ? "true" : "false");
   document.body.classList.toggle("compact-mode", e.target.checked);
+});
+// Text size buttons — instant-apply
+document.addEventListener("click", e => {
+  const btn = e.target.closest(".text-size-btn");
+  if (!btn) return;
+  const size = parseFloat(btn.dataset.size);
+  if (!size) return;
+  state.textSize = size;
+  localStorage.setItem("sc_text_size", size);
+  document.body.style.setProperty("--msg-font-size", size + "px");
+  $$(".text-size-btn").forEach(b => b.classList.toggle("active", b.dataset.size == btn.dataset.size));
 });
 $("#settings-dblclick-react-toggle")?.addEventListener("change", e => {
   state.dblClickReact = e.target.checked;
@@ -2829,7 +3014,11 @@ $("#settings-modal")?.addEventListener("click", e=>{
   if (themeSwatch) {
     _pendingTheme=themeSwatch.dataset.theme;
     $$(".theme-swatch").forEach(s=>s.classList.toggle("active",s.dataset.theme===_pendingTheme));
+    // Show/hide custom color pickers
+    const customPickers=$("#theme-custom-pickers");
+    if (customPickers) customPickers.style.display=(_pendingTheme==="custom")?"":"none";
     applyTheme(_pendingTheme); // live preview
+    if (_pendingTheme==="custom") _applyCustomThemeColors();
     return;
   }
   const statusOpt=e.target.closest(".status-row-option");
@@ -2898,6 +3087,7 @@ $("#settings-save-btn")?.addEventListener("click", async ()=>{
   const username=$("#settings-username-input")?.value.trim();
   const bio=$("#settings-bio-input")?.value.trim();
   const photoInput=$("#settings-photo-input")?.value.trim();
+  const newCustomStatus=($("#settings-custom-status-input")?.value.trim())||"";
   const soundOn=$("#settings-sound-toggle")?.checked??state.soundEnabled;
   const hintsOn=$("#settings-hints-toggle")?.checked??true;
   const privOn=$("#settings-privacy-toggle")?.checked??false;
@@ -2931,11 +3121,14 @@ $("#settings-save-btn")?.addEventListener("click", async ()=>{
   const btn=$("#settings-save-btn");
   btn.disabled=true; btn.textContent="Saving…";
   try {
+    // Save custom status
+    state.customStatus=newCustomStatus;
+    localStorage.setItem("sc_custom_status",newCustomStatus);
     await updateDoc(doc(db,"users",state.user.uid),{
       displayName:username, displayNameLower:username.toLowerCase(),
       username, bio:bio||"", photoURL:photoURL||null,
       status:state.status, bannerColor:state.bannerColor||null,
-      isPrivate:privOn
+      isPrivate:privOn, customStatus:newCustomStatus
     });
     state.user.username=username; state.user.displayName=username;
     state.user.bio=bio; state.user.photoURL=photoURL;
@@ -3504,10 +3697,17 @@ async function showProfileCard(uid, event) {
   const badgesEl=$("#profile-card-badges");
   if (badgesEl) badgesEl.innerHTML=renderBadges(profile.badges||[]);
 
-  // Name / bio
+  // Name / custom status / bio
   $("#profile-card-name").textContent=profile.username||profile.displayName||"User";
   $("#profile-card-tag").textContent=profile.discriminator?`#${profile.discriminator}`:"";
-  $("#profile-card-bio").textContent=isPrivate?"🔒 This profile is private.":(profile.bio||"No bio set yet.");
+  // Custom status phrase (shown below name/tag)
+  const pcCustomStatus=$("#profile-card-custom-status");
+  if (pcCustomStatus) {
+    const cs = isSelf ? state.customStatus : (profile.customStatus||"");
+    pcCustomStatus.textContent = cs;
+    pcCustomStatus.style.display = cs ? "" : "none";
+  }
+  $("#profile-card-bio").textContent=isPrivate?"This profile is private.":(profile.bio||"No bio set yet.");
 
   // Member since
   const sinceEl=$("#profile-card-since");
@@ -4038,18 +4238,22 @@ document.addEventListener("contextmenu", async e=>{
   }
 });
 
-// Right-click on inline GIF image in messages → save/remove from favorites
+// Right-click on inline GIF or image in messages → save/remove from favorites
 document.addEventListener("contextmenu", async e=>{
-  const img=e.target.closest(".msg-embed-img");
+  const img=e.target.closest(".msg-embed-img, .gif-freeze-canvas");
   if (!img) return;
-  const url=img.src||"";
-  // Only offer save for obvious GIF URLs
-  if (!url||!/\.gif(\?|$)/i.test(url)&&!url.includes("tenor.com")&&!url.includes("giphy.com")) return;
+  // For frozen GIFs, get the stored original URL
+  const wrap = img.closest(".gif-embed-wrap");
+  const gifLive = wrap?.querySelector(".gif-embed-live");
+  const url = (gifLive?.dataset.origSrc) || img.src || "";
+  // Use same CDN regex as the message formatter
+  const isGif=IMAGE_URL_RE.test(url)||GIF_CDN_RE.test(url);
+  if (!url||!isGif) return;
   e.preventDefault();
   if (!state.user) return;
   const isFav=!!state.favGifs[url];
   showCtxMenu(e.clientX, e.clientY, [
-    {label:isFav?"💔 Remove from Saved":"❤️ Save GIF", action:"ctx-fav-gif", data:{url, previewUrl:url, title:""}},
+    {label: isFav ? "Remove from Saved" : "Save GIF", action:"ctx-fav-gif", data:{url, previewUrl:url, title:""}},
   ]);
 });
 

@@ -40,7 +40,7 @@ export function buildUI() {
     <!-- Two-column card -->
     <div class="login-card">
 
-      <!-- Left: logo & brand panel -->
+      <!-- Left: logo & brand panel + feature highlights -->
       <div class="login-left">
         <div class="login-logo-area">
           <img class="login-logo-img" src="${LOGO}" alt="Static Chat"
@@ -51,10 +51,72 @@ export function buildUI() {
           <span class="login-beta-badge">BETA</span>
         </div>
         <p class="login-sub">A school-safe space to chat with friends</p>
+
+        <!-- Feature highlights -->
+        <div class="login-features">
+          <div class="login-feature-item">
+            <span class="login-feature-icon">
+              <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+                <path fill="currentColor" d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 14H6l-2 2V4h16v12z"/>
+              </svg>
+            </span>
+            <div class="login-feature-text">
+              <span class="login-feature-name">Direct Messages</span>
+              <span class="login-feature-desc">Private one-on-one chats</span>
+            </div>
+          </div>
+          <div class="login-feature-item">
+            <span class="login-feature-icon">
+              <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+                <path fill="currentColor" d="M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5c-1.66 0-3 1.34-3 3s1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5C6.34 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z"/>
+              </svg>
+            </span>
+            <div class="login-feature-text">
+              <span class="login-feature-name">Group Chats</span>
+              <span class="login-feature-desc">Hang with multiple friends</span>
+            </div>
+          </div>
+          <div class="login-feature-item">
+            <span class="login-feature-icon">
+              <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+                <path fill="currentColor" d="M11.5 2C6.81 2 3 5.81 3 10.5S6.81 19 11.5 19h.5v3c4.86-2.34 8-7 8-11.5C20 5.81 16.19 2 11.5 2zm1 14.5h-2v-2h2v2zm0-4h-2c0-3.25 3-3 3-5 0-1.1-.9-2-2-2s-2 .9-2 2h-2c0-2.21 1.79-4 4-4s4 1.79 4 4c0 2.5-3 2.75-3 5z"/>
+              </svg>
+            </span>
+            <div class="login-feature-text">
+              <span class="login-feature-name">GIFs &amp; Emojis</span>
+              <span class="login-feature-desc">Express yourself fully</span>
+            </div>
+          </div>
+          <div class="login-feature-item">
+            <span class="login-feature-icon">
+              <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+                <path fill="currentColor" d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4zm0 4l5 2.18V11c0 3.5-2.33 6.79-5 7.93-2.67-1.14-5-4.43-5-7.93V7.18L12 5z"/>
+              </svg>
+            </span>
+            <div class="login-feature-text">
+              <span class="login-feature-name">School-Safe</span>
+              <span class="login-feature-desc">Filtered &amp; respectful</span>
+            </div>
+          </div>
+          <div class="login-feature-item">
+            <span class="login-feature-icon">
+              <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+                <path fill="currentColor" d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/>
+              </svg>
+            </span>
+            <div class="login-feature-text">
+              <span class="login-feature-name">Custom Profiles</span>
+              <span class="login-feature-desc">Themes, status &amp; badges</span>
+            </div>
+          </div>
+        </div>
       </div>
 
       <!-- Right: sign-in panel -->
       <div class="login-right">
+        <h2 class="login-welcome">Welcome back.</h2>
+        <p class="login-welcome-sub">Sign in with your Google account to continue chatting.</p>
+
         <ul class="login-chips">
           <li>💬 DMs</li>
           <li>👥 Groups</li>
@@ -336,13 +398,16 @@ export function buildUI() {
               </svg>
             </button>
             <button class="icon-btn composer-gif-btn" id="gif-btn" title="Send a GIF">
-              <!-- GIF badge icon — rect outline + centered text -->
-              <svg viewBox="0 0 22 12" width="22" height="12" aria-hidden="true" style="overflow:visible">
-                <rect x="0.75" y="0.75" width="20.5" height="10.5" rx="2.5" ry="2.5"
-                  fill="none" stroke="currentColor" stroke-width="1.4"/>
-                <text x="11" y="8.4" text-anchor="middle"
-                  font-family="'Segoe UI',Helvetica,Arial,sans-serif"
-                  font-weight="800" font-size="7.5" fill="currentColor" letter-spacing="0.8">GIF</text>
+              <!-- GIF badge — rounded rect + G I F letterforms as paths for pixel-perfect render -->
+              <svg viewBox="0 0 36 20" width="36" height="20" aria-hidden="true" fill="currentColor">
+                <rect x="1" y="1" width="34" height="18" rx="4" ry="4"
+                  fill="none" stroke="currentColor" stroke-width="1.6"/>
+                <!-- G -->
+                <path d="M8.2 6.2a4 4 0 1 0 0 7.6h2.6V10H9.2v1.4h.8v1H8.2a2.4 2.4 0 1 1 0-4.8c.7 0 1.3.3 1.7.7l1-1A4 4 0 0 0 8.2 6.2Z"/>
+                <!-- I -->
+                <rect x="13.2" y="6.4" width="1.6" height="7.2"/>
+                <!-- F -->
+                <path d="M17.4 6.4h4.8V8h-3.2v1.6h2.8v1.6h-2.8v2.4h-1.6V6.4Z"/>
               </svg>
             </button>
             <button class="icon-btn composer-send-btn" id="send-btn" title="Send" data-active="false">
@@ -505,6 +570,12 @@ export function buildUI() {
                 <label class="modal-label">Bio <span class="label-optional">up to 200 chars</span></label>
                 <textarea id="settings-bio-input" maxlength="200" rows="3" placeholder="Tell people a bit about yourself…"></textarea>
               </div>
+              <div class="settings-field-group">
+                <label class="modal-label">Status Phrase <span class="label-optional">up to 60 chars</span></label>
+                <input type="text" id="settings-custom-status-input" maxlength="60"
+                  placeholder="Feeling good, working on something…" spellcheck="false" autocomplete="off" />
+                <p class="hint" style="margin:4px 0 0;font-size:11px;">Short message shown on your profile and in chat.</p>
+              </div>
 
               <!-- Banner section -->
               <div class="settings-section-title" style="margin-top:20px;margin-bottom:8px;">Banner</div>
@@ -572,17 +643,26 @@ export function buildUI() {
                 <div class="spp-banner" id="settings-preview-banner"></div>
                 <div class="spp-body">
                   <div class="spp-avatar-wrap">
-                    <div class="setup-avatar-preview" id="settings-avatar-preview" style="width:72px;height:72px;font-size:26px;">
+                    <div class="setup-avatar-preview spp-avatar-pos" id="settings-avatar-preview" style="width:72px;height:72px;font-size:26px;">
                       <span id="settings-avatar-initial">?</span>
                     </div>
+                    <span class="spp-status-dot" id="settings-preview-status-dot" data-status="online"></span>
                   </div>
-                  <div class="spp-name" id="settings-preview-name">Username</div>
-                  <div class="spp-tag" id="settings-preview-tag">#0000</div>
+                  <div class="spp-name-row">
+                    <span class="spp-name" id="settings-preview-name">Username</span>
+                    <span class="spp-tag" id="settings-preview-tag">#0000</span>
+                  </div>
+                  <div class="spp-custom-status" id="settings-preview-custom-status"></div>
                   <div class="spp-preview-badges" id="settings-preview-badges"></div>
+                  <div class="spp-divider"></div>
+                  <div class="spp-section-label">About Me</div>
+                  <div class="spp-bio" id="settings-preview-bio"></div>
+                  <div class="spp-section-label spp-since-label" id="settings-preview-since-wrap" style="display:none">
+                    Member Since <span id="settings-preview-since"></span>
+                  </div>
                 </div>
               </div>
-              <div id="settings-preview-bio" style="font-size:12px;color:var(--t-muted);padding:0 14px 10px;line-height:1.4;"></div>
-              <p class="hint" style="margin-top:4px;font-size:11px;text-align:center;">Live preview — as others see you</p>
+              <p class="hint" style="margin-top:6px;font-size:11px;text-align:center;">Live preview — as others see you</p>
             </div>
 
           </div><!-- /.settings-account-cols -->
@@ -597,10 +677,29 @@ export function buildUI() {
             <button class="theme-swatch" data-theme="oled">OLED</button>
             <button class="theme-swatch" data-theme="dark">Dark</button>
             <button class="theme-swatch" data-theme="midnight">Midnight</button>
-            <button class="theme-swatch" data-theme="cloud">Cloud</button>
             <button class="theme-swatch" data-theme="warm">Warm</button>
+            <button class="theme-swatch" data-theme="forest">Forest</button>
+            <button class="theme-swatch" data-theme="rose">Rose</button>
+            <button class="theme-swatch" data-theme="slate">Slate</button>
+            <button class="theme-swatch" data-theme="cloud">Cloud</button>
             <button class="theme-swatch" data-theme="daylight">Daylight</button>
             <button class="theme-swatch" data-theme="light">Light</button>
+            <button class="theme-swatch theme-swatch-custom" data-theme="custom" id="theme-swatch-custom">Custom</button>
+          </div>
+          <!-- Custom theme color pickers (shown when Custom is selected) -->
+          <div id="theme-custom-pickers" style="display:none;margin-top:10px;">
+            <div class="theme-custom-row">
+              <label class="theme-custom-label">Background</label>
+              <input type="color" id="tc-bg" value="#1a1b1e" />
+            </div>
+            <div class="theme-custom-row">
+              <label class="theme-custom-label">Sidebar</label>
+              <input type="color" id="tc-sidebar" value="#131416" />
+            </div>
+            <div class="theme-custom-row">
+              <label class="theme-custom-label">Accent</label>
+              <input type="color" id="tc-accent" value="#4f7cff" />
+            </div>
           </div>
 
           <div style="margin-top:24px;">
@@ -658,6 +757,16 @@ export function buildUI() {
 
           <div style="margin-top:24px;">
             <div class="settings-section-title" style="margin-bottom:10px;">Messages</div>
+            <div class="settings-field-group" style="margin-bottom:16px;">
+              <label class="modal-label">Text Size</label>
+              <div class="text-size-row" id="text-size-options">
+                <button class="text-size-btn" data-size="12">Small</button>
+                <button class="text-size-btn" data-size="15">Default</button>
+                <button class="text-size-btn" data-size="17">Medium</button>
+                <button class="text-size-btn" data-size="19">Large</button>
+              </div>
+              <p class="hint" style="margin:4px 0 0;font-size:11px;">Controls the size of chat message text.</p>
+            </div>
             <label class="settings-toggle-row">
               <div class="settings-toggle-info">
                 <div class="settings-toggle-label">Compact message mode</div>
@@ -860,6 +969,7 @@ export function buildUI() {
       </div>
       <div class="profile-card-name" id="profile-card-name"></div>
       <div class="profile-card-tag" id="profile-card-tag"></div>
+      <div class="profile-card-custom-status" id="profile-card-custom-status" style="display:none"></div>
       <div class="profile-card-badges" id="profile-card-badges"></div>
       <div class="profile-card-since" id="profile-card-since"></div>
       <div class="profile-card-divider"></div>
