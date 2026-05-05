@@ -566,6 +566,7 @@ async function _autoFlagCheck(text, msgId, chatId, senderUid, senderName) {
           chatId: chatId || null,
           senderUid: senderUid || state.user.uid,
           senderName: senderName || state.user.displayName || null,
+          flaggedBy: state.user.uid,   // always the observer creating the document
           text,
           matchedCategory: category,
           flaggedAt: serverTimestamp(),
