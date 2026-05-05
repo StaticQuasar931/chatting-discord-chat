@@ -400,15 +400,19 @@ const state = {
   typingNames: [],
   lastReadMarker: {},    // chatId → timestamp ms (from localStorage on open)
   chatScrolledInitial: new Set(), // chatIds that have had their initial scroll done
-  silentTyping: localStorage.getItem("sc_silent_typing") === "true",
-  autoSendGif:  localStorage.getItem("sc_autosend_gif") === "true",
+  silentTyping:      localStorage.getItem("sc_silent_typing") === "true",
+  autoSendGif:       localStorage.getItem("sc_autosend_gif") === "true",
+  dblClickReact:     localStorage.getItem("sc_dblclick_react") === "true",
+  dblClickEmoji:     localStorage.getItem("sc_dblclick_emoji") || "👍",
+  compactMode:       localStorage.getItem("sc_compact") === "true",
   favGifs: {},   // gifUrl → { url, previewUrl, title }
   favEmojis: {}, // emojiName → { name, char }
 };
 
-// Apply theme before anything renders
+// Apply theme + compact mode before anything renders
 (function initTheme() {
   document.body.dataset.theme = state.theme;
+  if (state.compactMode) document.body.classList.add("compact-mode");
 })();
 
 function applyTheme(t) {
@@ -689,8 +693,10 @@ function playSound(type="message") {
 })();
 
 $("#signout-btn").addEventListener("click", async ()=>{
-  cleanupAllSubscriptions();
-  await signOut(auth);
+  showConfirm("You'll need to sign in again to use Static Chat.", async ()=>{
+    cleanupAllSubscriptions();
+    await signOut(auth);
+  }, {title:"Sign out?", yesLabel:"Sign Out", danger:true});
 });
 
 onAuthStateChanged(auth, async firebaseUser => {
@@ -1047,7 +1053,7 @@ function bootSubscriptions() {
     if (data.bannerColor!==undefined) state.bannerColor=data.bannerColor||null;
     if (data.isPrivate!==undefined) state.isPrivate=!!data.isPrivate;
     if (data.createdAt) state.user.createdAt=data.createdAt;
-    state.userCache[uid] = { ...state.user, ...data };
+    state.userCache[uid] = _augmentBadges({ ...state.user, ...data });
     applyBlockedFromProfile(data);
     updateUserPanel();
   }, err=>console.error("ownProfile:",err));
@@ -1135,11 +1141,24 @@ function bootSubscriptions() {
 /* =====================================================================
    USER PROFILE FETCH (cached)
    ===================================================================== */
+// Inject auto-earned badges (OG etc.) client-side without requiring a write
+// so display always shows correct badges even before a Firestore update occurs
+function _augmentBadges(profile) {
+  if (!profile) return profile;
+  const badges=[...(profile.badges||[])];
+  const created=profile.createdAt?.toDate?profile.createdAt.toDate():profile.createdAt?new Date(profile.createdAt):null;
+  if (created&&created.getTime()<OG_CUTOFF_MS&&!badges.includes("og")) badges.push("og");
+  return {...profile, badges};
+}
+
 async function fetchUserProfile(uid) {
   if (state.userCache[uid]) return state.userCache[uid];
   try {
     const d = await getDoc(doc(db,"users",uid));
-    if (d.exists()) { state.userCache[uid]=d.data(); return state.userCache[uid]; }
+    if (d.exists()) {
+      state.userCache[uid]=_augmentBadges(d.data());
+      return state.userCache[uid];
+    }
   } catch(e){ console.error("fetchUserProfile:",e); }
   return null;
 }
@@ -1370,14 +1389,16 @@ async function acceptRequest(requestId) {
 /* =====================================================================
    RENDER — Sidebar lists + rail
    ===================================================================== */
-function chatHasUnread(c) {
-  if (!c||state.activeChatId===c.id) return false;
-  // If the current user sent the last message, it can't be "unread" for them
-  if (c.lastSenderUid && c.lastSenderUid===state.user?.uid) return false;
+function chatUnreadCount(c) {
+  if (!c||state.activeChatId===c.id) return 0;
+  if (c.lastSenderUid && c.lastSenderUid===state.user?.uid) return 0;
   const readAt=parseInt(localStorage.getItem(`sc_read_${c.id}`)||"0",10);
   const lastMsg=c.lastMessageAt?.toMillis?.()||0;
-  return lastMsg>readAt && readAt>0;
+  if (!(lastMsg>readAt && readAt>0)) return 0;
+  // If we have a count stored, use it; otherwise just show 1
+  return c.unreadCount||1;
 }
+function chatHasUnread(c) { return chatUnreadCount(c)>0; }
 
 function renderChatLists() {
   const filterText=state.filters.sidebar.toLowerCase();
@@ -1391,7 +1412,8 @@ function renderChatLists() {
     const photo=profile?.photoURL||null;
     if (filterText&&!name.toLowerCase().includes(filterText)) return "";
     const active=state.activeChatId===c.id?"active":"";
-    const unread=chatHasUnread(c)?`<span class="side-item-unread" title="New messages">●</span>`:"";
+    const unreadN=chatUnreadCount(c);
+    const unread=unreadN>0?`<span class="side-item-unread" title="${unreadN} new message${unreadN===1?"":"s"}">${unreadN>99?"99+":unreadN}</span>`:"";
     const onlineStatus=resolveStatus(profile);
     const dmAvatar=`<div class="side-row-avatar-wrap">
       ${avatarMarkup(name,photo,"side-row-avatar","side-row-fallback")}
@@ -1412,7 +1434,8 @@ function renderChatLists() {
     const name=c.name||"Group";
     if (filterText&&!name.toLowerCase().includes(filterText)) return "";
     const active=state.activeChatId===c.id?"active":"";
-    const unread=chatHasUnread(c)?`<span class="side-item-unread" title="New messages">●</span>`:"";
+    const unreadN2=chatUnreadCount(c);
+    const unread=unreadN2>0?`<span class="side-item-unread" title="${unreadN2} new">${unreadN2>99?"99+":unreadN2}</span>`:"";
     return `
       <div class="side-row ${active}" data-chat-id="${escapeHtml(c.id)}" data-type="group">
         <div class="side-row-fallback">${escapeHtml(groupInitials(name))}</div>
@@ -1647,17 +1670,41 @@ const SVG_REPORT = `<svg viewBox="0 0 24 24" width="15" height="15"><path fill="
 const SVG_REPLY  = `<svg viewBox="0 0 24 24" width="15" height="15"><path fill="currentColor" d="M10 9V5l-7 7 7 7v-4.1c5 0 8.5 1.6 11 5.1-1-5-4-10-11-11z"/></svg>`;
 const QUICK_REACTS = ["👍","❤️","😂","😮","😢"];
 
+// OG cutoff — any account created before this timestamp gets an OG badge automatically
+const OG_CUTOFF_MS = new Date("2026-05-04T00:00:00Z").getTime();
+
 const BADGE_DEFS = {
-  og:           { label:"OG",           color:"#ffd700", bg:"rgba(255,215,0,.15)",  title:"Original member" },
-  helper:       { label:"Helper",       color:"#23a55a", bg:"rgba(35,165,90,.15)",  title:"Community helper" },
-  bug_reporter: { label:"Bug Reporter", color:"#eb459e", bg:"rgba(235,69,158,.15)", title:"Reported a bug" },
-  early_tester: { label:"Early Tester", color:"#58a6ff", bg:"rgba(88,166,255,.15)", title:"Early tester" },
+  // ── Founding / Longevity ────────────────────────────────────────────
+  og:           { label:"⭐ OG",          color:"#ffd700", bg:"rgba(255,215,0,.18)",   border:"rgba(255,215,0,.3)",  title:"Original member — joined before May 4th 2026" },
+  og_og:        { label:"🌟 Day One",      color:"#ffaa00", bg:"rgba(255,170,0,.18)",   border:"rgba(255,170,0,.3)",  title:"Day One — one of the very first users" },
+  early_tester: { label:"🧪 Early Tester", color:"#58a6ff", bg:"rgba(88,166,255,.16)", border:"rgba(88,166,255,.3)", title:"Helped test before public launch" },
+
+  // ── Community ───────────────────────────────────────────────────────
+  helper:       { label:"🤝 Helper",       color:"#23a55a", bg:"rgba(35,165,90,.16)",  border:"rgba(35,165,90,.3)",  title:"Goes out of their way to help others" },
+  active:       { label:"💬 Active",        color:"#4f7cff", bg:"rgba(79,124,255,.14)", border:"rgba(79,124,255,.3)", title:"Super active member of the community" },
+  friendly:     { label:"💛 Friendly",      color:"#f0b232", bg:"rgba(240,178,50,.16)", border:"rgba(240,178,50,.3)", title:"Known for being kind and welcoming" },
+
+  // ── Contributions ──────────────────────────────────────────────────
+  bug_reporter: { label:"🐛 Bug Reporter",  color:"#eb459e", bg:"rgba(235,69,158,.15)", border:"rgba(235,69,158,.3)", title:"Found and reported bugs to improve the app" },
+  suggester:    { label:"💡 Suggester",     color:"#7c3aed", bg:"rgba(124,58,237,.15)", border:"rgba(124,58,237,.3)", title:"Suggested features that made it in" },
+
+  // ── Special / Staff-adjacent ───────────────────────────────────────
+  trusted:      { label:"🔵 Trusted",       color:"#5bc4fc", bg:"rgba(91,196,252,.14)", border:"rgba(91,196,252,.3)", title:"A trusted and respected community member" },
+  creator:      { label:"👑 Creator",       color:"#ff8c42", bg:"rgba(255,140,66,.16)", border:"rgba(255,140,66,.3)", title:"Made Static Chat" },
+  partner:      { label:"🤖 Partner",       color:"#9c84ec", bg:"rgba(156,132,236,.15)",border:"rgba(156,132,236,.3)",title:"Official partner" },
+
+  // ── Fun / Achievement ──────────────────────────────────────────────
+  gif_master:   { label:"🎭 GIF Master",   color:"#f23f43", bg:"rgba(242,63,67,.14)",  border:"rgba(242,63,67,.3)",  title:"Sent an absurd number of GIFs" },
+  emoji_lord:   { label:"😄 Emoji Lord",   color:"#f0b232", bg:"rgba(240,178,50,.14)", border:"rgba(240,178,50,.3)", title:"Reaction royalty" },
+  night_owl:    { label:"🦉 Night Owl",    color:"#6b7cce", bg:"rgba(107,124,206,.14)",border:"rgba(107,124,206,.3)",title:"Always online at night" },
 };
 
 function renderBadges(badges=[]) {
+  if (!badges||!badges.length) return "";
   return badges.map(b=>{
     const d=BADGE_DEFS[b]; if(!d) return "";
-    return `<span class="badge-chip" title="${escapeHtml(d.title)}" style="color:${d.color};background:${d.bg};">${escapeHtml(d.label)}</span>`;
+    const borderStyle=d.border?`border-color:${d.border};`:"";
+    return `<span class="badge-chip" title="${escapeHtml(d.title)}" style="color:${d.color};background:${d.bg};${borderStyle}">${escapeHtml(d.label)}</span>`;
   }).join("");
 }
 
@@ -1842,6 +1889,20 @@ $("#messages").addEventListener("click", e=>{
   }
 });
 
+// Double-click to react
+$("#messages").addEventListener("dblclick", async e=>{
+  if (!state.dblClickReact) return;
+  if (e.target.closest(".msg-action-btn,.reaction-pill,.quick-react-btn,.reply-preview")) return;
+  const group=e.target.closest(".message-group,.msg-followup");
+  if (!group) return;
+  const msgId=group.dataset.msgId; if (!msgId) return;
+  const emoji=state.dblClickEmoji||"👍";
+  await toggleReaction(msgId, emoji);
+  // Brief visual flash
+  group.classList.add("dbl-react-flash");
+  setTimeout(()=>group.classList.remove("dbl-react-flash"), 400);
+});
+
 // Message area delegation
 $("#messages").addEventListener("click", async e=>{
   // Click on a reply-preview → jump to the original message
@@ -1900,9 +1961,18 @@ composer.addEventListener("input",()=>{
   composer.style.height=Math.min(composer.scrollHeight,200)+"px";
   updateSendBtn();
   updateEmojiAutocomplete();
+  updateCmdAutocomplete();
 });
 
 composer.addEventListener("keydown", e=>{
+  // Slash command autocomplete navigation (check first — takes priority)
+  const cmdAc=$("#cmd-autocomplete");
+  if (cmdAc&&!cmdAc.classList.contains("hidden")&&_cmdAcItems.length) {
+    if (e.key==="ArrowDown") { e.preventDefault(); _cmdAcIndex=(_cmdAcIndex+1)%_cmdAcItems.length; updateCmdAcHighlight(); return; }
+    if (e.key==="ArrowUp")   { e.preventDefault(); _cmdAcIndex=(_cmdAcIndex-1+_cmdAcItems.length)%_cmdAcItems.length; updateCmdAcHighlight(); return; }
+    if (e.key==="Enter"||e.key==="Tab") { e.preventDefault(); insertCmdAcItem(_cmdAcIndex); return; }
+    if (e.key==="Escape") { hideCmdAc(); return; }
+  }
   // Emoji autocomplete navigation
   const ac=$("#emoji-autocomplete");
   if (ac&&!ac.classList.contains("hidden")&&acItems.length) {
@@ -2256,13 +2326,42 @@ function closeModal(id) { const m=document.getElementById(id); if(m) m.classList
 $$("[data-close]").forEach(b=>b.addEventListener("click",()=>closeModal(b.dataset.close)));
 $$(".modal").forEach(m=>m.addEventListener("click",e=>{ if(e.target===m) m.classList.add("hidden"); }));
 
+// Track whether account-pane fields have unsaved changes
+let _settingsDirty = false;
+function _markSettingsDirty() { _settingsDirty = true; }
+
+// Wire dirty tracking to account form fields
+["settings-username-input","settings-bio-input","settings-photo-input"].forEach(id=>{
+  document.addEventListener("input", e=>{ if(e.target.id===id) _markSettingsDirty(); });
+});
+document.addEventListener("change", e=>{
+  if(e.target.id==="settings-privacy-toggle") _markSettingsDirty();
+});
+
 // Settings modal — revert theme preview on backdrop/X close
-function onSettingsClose() {
+function onSettingsClose(force=false) {
+  if (!force && _settingsDirty) {
+    showConfirm("You have unsaved changes. Discard them?", ()=>{
+      _settingsDirty=false;
+      if (_pendingTheme!==null && _pendingTheme!==state.theme) applyTheme(state.theme);
+      closeModal("settings-modal");
+    }, {title:"Unsaved changes", yesLabel:"Discard", danger:true});
+    return;
+  }
   if (_pendingTheme!==null && _pendingTheme!==state.theme) applyTheme(state.theme);
 }
-// Revert pending theme on any settings close (X, Cancel, backdrop)
+// Intercept close attempts for settings-modal
 document.addEventListener("click", e=>{
-  if (e.target.closest("[data-close='settings-modal']")||e.target===$("#settings-modal")) onSettingsClose();
+  const closer=e.target.closest("[data-close='settings-modal']");
+  const isBdrop=e.target===$("#settings-modal");
+  if (closer||isBdrop) {
+    if (_settingsDirty) {
+      e.stopImmediatePropagation();
+      onSettingsClose();
+    } else {
+      onSettingsClose(true);
+    }
+  }
 });
 
 
@@ -2285,6 +2384,7 @@ function openSettingsModal(pane="account") {
   // Remap removed panes to merged ones
   if (pane==="profile")       pane="account";
   if (pane==="notifications")  pane="appearance";
+  _settingsDirty = false; // reset dirty flag each open
   const u=state.user;
   _pendingTheme=state.theme;
   _pendingStatus=state.status;
@@ -2295,9 +2395,16 @@ function openSettingsModal(pane="account") {
   if($("#settings-tag-display"))    $("#settings-tag-display").textContent=u.discriminator?`#${u.discriminator}`:"#????";
   if($("#settings-bio-input"))      $("#settings-bio-input").value=u.bio||"";
   if($("#settings-photo-input"))    $("#settings-photo-input").value=u.photoURL||"";
-  if($("#settings-sound-toggle"))          $("#settings-sound-toggle").checked=state.soundEnabled;
-  if($("#settings-hints-toggle"))          $("#settings-hints-toggle").checked=localStorage.getItem("sc_hints")!=="false";
-  if($("#settings-autosend-gif-toggle"))   $("#settings-autosend-gif-toggle").checked=state.autoSendGif;
+  if($("#settings-sound-toggle"))              $("#settings-sound-toggle").checked=state.soundEnabled;
+  if($("#settings-hints-toggle"))              $("#settings-hints-toggle").checked=localStorage.getItem("sc_hints")!=="false";
+  if($("#settings-autosend-gif-toggle"))       $("#settings-autosend-gif-toggle").checked=state.autoSendGif;
+  if($("#settings-compact-toggle"))            $("#settings-compact-toggle").checked=state.compactMode;
+  if($("#settings-dblclick-react-toggle"))     $("#settings-dblclick-react-toggle").checked=state.dblClickReact;
+  if($("#settings-dblclick-emoji"))            $("#settings-dblclick-emoji").value=state.dblClickEmoji;
+  if($("#dblclick-emoji-preview"))             $("#dblclick-emoji-preview").textContent=state.dblClickEmoji;
+  if($("#settings-silent-typing-toggle"))      $("#settings-silent-typing-toggle").checked=state.silentTyping;
+  // Show/hide dblclick emoji row
+  const dblRow=$("#dblclick-emoji-row"); if(dblRow) dblRow.style.display=state.dblClickReact?"":"none";
 
   $$(".theme-swatch").forEach(sw=>sw.classList.toggle("active",sw.dataset.theme===_pendingTheme));
   $$(".status-row-option").forEach(opt=>opt.classList.toggle("active",opt.dataset.status===_pendingStatus));
@@ -2330,6 +2437,8 @@ function openSettingsModal(pane="account") {
   }
   const pName=$("#settings-preview-name"); if(pName) pName.textContent=u.username||u.displayName||"";
   const pTag=$("#settings-preview-tag"); if(pTag) pTag.textContent=u.discriminator?`#${u.discriminator}`:"";
+  const pBio2=$("#settings-preview-bio"); if(pBio2) pBio2.textContent=u.bio||"No bio set yet.";
+  const pBadges2=$("#settings-preview-badges"); if(pBadges2) pBadges2.innerHTML=renderBadges(state.userCache[u.uid]?.badges||[]);
   switchSettingsPane(pane);
   openModal("settings-modal");
 }
@@ -2345,7 +2454,12 @@ document.addEventListener("click", e=>{
   if (e.target.closest("#settings-save-btn-2")) $("#settings-save-btn")?.click();
   if (e.target.closest("#settings-signout-btn")) {
     closeModal("settings-modal");
-    setTimeout(()=>signOut(auth).catch(()=>{}), 150);
+    setTimeout(()=>{
+      showConfirmModal("Sign out?", "You'll need to sign in again to use Static Chat.", "Sign Out", async ()=>{
+        cleanupAllSubscriptions();
+        await signOut(auth).catch(()=>{});
+      });
+    }, 150);
   }
 });
 
@@ -2353,10 +2467,14 @@ document.addEventListener("click", e=>{
 function _updateSettingsPreview() {
   const name=$("#settings-username-input")?.value.trim()||state.user?.username||"";
   const photo=$("#settings-photo-input")?.value.trim()||null;
+  const bio=$("#settings-bio-input")?.value.trim()||"";
   updateAvatarPreview("settings",name,photo);
-  // Update name/tag in preview card
+  // Update name/tag/bio in preview card
   const pName=$("#settings-preview-name"); if(pName) pName.textContent=name||"Username";
   const pTag=$("#settings-preview-tag"); if(pTag) pTag.textContent=state.user?.discriminator?`#${state.user.discriminator}`:"";
+  const pBio=$("#settings-preview-bio"); if(pBio) pBio.textContent=bio||"No bio set yet.";
+  const pBadges=$("#settings-preview-badges");
+  if(pBadges) pBadges.innerHTML=renderBadges(state.userCache[state.user?.uid]?.badges||[]);
   // Update banner if pending
   const banner=$("#settings-preview-banner");
   if(banner&&_pendingBannerColor){
@@ -2366,8 +2484,9 @@ function _updateSettingsPreview() {
 }
 
 // Settings live preview
-$("#settings-photo-input")?.addEventListener("input",_updateSettingsPreview);
-$("#settings-username-input")?.addEventListener("input",_updateSettingsPreview);
+["settings-photo-input","settings-username-input","settings-bio-input"].forEach(id=>{
+  document.addEventListener("input",e=>{ if(e.target.id===id) _updateSettingsPreview(); });
+});
 
 // Instant-apply: sound, hints, and auto-send GIF toggles take effect immediately
 $("#settings-sound-toggle")?.addEventListener("change", e => {
@@ -2383,6 +2502,26 @@ $("#settings-hints-toggle")?.addEventListener("change", e => {
 $("#settings-autosend-gif-toggle")?.addEventListener("change", e => {
   state.autoSendGif = e.target.checked;
   localStorage.setItem("sc_autosend_gif", e.target.checked ? "true" : "false");
+});
+$("#settings-compact-toggle")?.addEventListener("change", e => {
+  state.compactMode = e.target.checked;
+  localStorage.setItem("sc_compact", e.target.checked ? "true" : "false");
+  document.body.classList.toggle("compact-mode", e.target.checked);
+});
+$("#settings-dblclick-react-toggle")?.addEventListener("change", e => {
+  state.dblClickReact = e.target.checked;
+  localStorage.setItem("sc_dblclick_react", e.target.checked ? "true" : "false");
+  const row=$("#dblclick-emoji-row"); if(row) row.style.display=e.target.checked?"":"none";
+});
+$("#settings-dblclick-emoji")?.addEventListener("input", e => {
+  const v=e.target.value.trim()||"👍";
+  state.dblClickEmoji=v;
+  localStorage.setItem("sc_dblclick_emoji", v);
+  const prev=$("#dblclick-emoji-preview"); if(prev) prev.textContent=v;
+});
+$("#settings-silent-typing-toggle")?.addEventListener("change", e => {
+  state.silentTyping = e.target.checked;
+  localStorage.setItem("sc_silent_typing", e.target.checked ? "true" : "false");
 });
 
 // Settings modal interactions (theme/status/banner)
@@ -2510,6 +2649,7 @@ $("#settings-save-btn")?.addEventListener("click", async ()=>{
       badges:state.userCache[state.user.uid]?.badges||[]
     };
     updateUserPanel();
+    _settingsDirty=false;
     closeModal("settings-modal"); showToast("Settings saved ✓");
   } catch(err){ showToast("Save failed: "+err.message); }
   finally { btn.disabled=false; btn.textContent="Save Changes"; }
@@ -2634,6 +2774,11 @@ document.addEventListener("click",e=>{
   emojiPicker?.classList.add("hidden"); emojiOpen=false;
 });
 
+document.addEventListener("click",e=>{
+  if (e.target.closest("#cmd-autocomplete")||e.target.closest("#composer-input")) return;
+  hideCmdAc();
+});
+
 
 /* =====================================================================
    EMOJI AUTOCOMPLETE  (inline :word: dropdown)
@@ -2694,6 +2839,76 @@ document.addEventListener("click",e=>{
   if (!item) return;
   const idx=+item.dataset.index;
   insertAcItem(idx);
+});
+
+
+/* =====================================================================
+   SLASH COMMAND AUTOCOMPLETE
+   ===================================================================== */
+const SLASH_CMD_LIST = [
+  { name:"8ball",    aliases:["8b"],                desc:"Ask the magic 8-ball a question" },
+  { name:"tod",      aliases:["truthordare"],        desc:"Truth or dare!" },
+  { name:"truth",    aliases:["t"],                  desc:"Get a truth question" },
+  { name:"dare",     aliases:["d"],                  desc:"Get a dare" },
+  { name:"joke",     aliases:["j"],                  desc:"Tell a random joke" },
+  { name:"fortune",  aliases:["f"],                  desc:"Get a fortune" },
+  { name:"advice",   aliases:["a"],                  desc:"Random piece of advice" },
+  { name:"coinflip", aliases:["cf","flip"],          desc:"Flip a coin" },
+  { name:"roll",     aliases:["r","dice"],           desc:"Roll dice — e.g. /roll 2d6" },
+  { name:"ship",     aliases:["s"],                  desc:"Ship two names — /ship a b" },
+  { name:"tip",      aliases:["loadingtip"],         desc:"Show a random tip" },
+  { name:"quote",    aliases:["q"],                  desc:"Show a random quote" },
+  { name:"shrug",    aliases:[],                     desc:"Send a shrug ¯\\_(ツ)_/¯" },
+  { name:"help",     aliases:["h"],                  desc:"List all commands" },
+];
+
+let _cmdAcItems=[], _cmdAcIndex=-1;
+
+function updateCmdAutocomplete() {
+  const ac=$("#cmd-autocomplete"); if (!ac) return;
+  const val=composer.value;
+  const pos=composer.selectionStart;
+  if (pos!==val.length) { hideCmdAc(); return; } // only show if cursor at end
+  const match=val.match(/^\/([a-zA-Z0-9_]*)$/);
+  if (!match) { hideCmdAc(); return; }
+  const q=match[1].toLowerCase();
+  _cmdAcItems=SLASH_CMD_LIST.filter(c=>
+    c.name.startsWith(q)||c.aliases.some(a=>a.startsWith(q))
+  ).slice(0,8);
+  if (!_cmdAcItems.length) { hideCmdAc(); return; }
+  _cmdAcIndex=0;
+  ac.innerHTML=_cmdAcItems.map((c,i)=>`
+    <div class="cmd-ac-item${i===0?" active":""}" data-cmd-index="${i}">
+      <span class="cmd-ac-slash">/</span>
+      <span class="cmd-ac-name">${escapeHtml(c.name)}</span>
+      <span class="cmd-ac-desc">${escapeHtml(c.desc)}</span>
+    </div>`).join("");
+  ac.classList.remove("hidden");
+}
+
+function hideCmdAc() {
+  const ac=$("#cmd-autocomplete"); if(ac) ac.classList.add("hidden");
+  _cmdAcItems=[]; _cmdAcIndex=-1;
+}
+
+function insertCmdAcItem(idx) {
+  if (idx<0||idx>=_cmdAcItems.length) return;
+  const cmd=_cmdAcItems[idx];
+  composer.value="/"+cmd.name+" ";
+  composer.selectionStart=composer.selectionEnd=composer.value.length;
+  hideCmdAc(); updateSendBtn(); composer.focus();
+}
+
+function updateCmdAcHighlight() {
+  $$(".cmd-ac-item").forEach((el,i)=>el.classList.toggle("active",i===_cmdAcIndex));
+  document.querySelector(".cmd-ac-item.active")?.scrollIntoView({block:"nearest"});
+}
+
+// Click on cmd autocomplete
+document.addEventListener("click",e=>{
+  const item=e.target.closest(".cmd-ac-item");
+  if (!item) return;
+  insertCmdAcItem(+item.dataset.cmdIndex);
 });
 
 
@@ -2770,12 +2985,18 @@ async function showProfileCard(uid, event) {
   let actionsHtml="";
   if (isSelf) {
     actionsHtml=`<button class="btn-ghost" data-pc-action="edit-profile">Edit Profile</button>`;
+  } else if (isPrivate) {
+    // Private account: only show Add Friend (no message button until friended)
+    if (!hasPendingOut)
+      actionsHtml=`<button class="btn-primary" data-pc-action="add-friend" data-pc-uid="${escapeHtml(uid)}">Add Friend</button>`;
+    else
+      actionsHtml=`<span style="font-size:12px;color:var(--t-muted);">Request sent — profile visible once accepted</span>`;
   } else {
     if (!isFriend&&!hasPendingOut)
       actionsHtml+=`<button class="btn-primary" data-pc-action="add-friend" data-pc-uid="${escapeHtml(uid)}">Add Friend</button>`;
     else if (hasPendingOut)
       actionsHtml+=`<span style="font-size:12px;color:var(--t-muted);">Request sent</span>`;
-    actionsHtml+=`<button class="btn-ghost" data-pc-action="message" data-pc-uid="${escapeHtml(uid)}">Message</button>`;
+    if (isFriend) actionsHtml+=`<button class="btn-ghost" data-pc-action="message" data-pc-uid="${escapeHtml(uid)}">Message</button>`;
   }
   $("#profile-card-actions").innerHTML=actionsHtml;
 
@@ -3221,6 +3442,38 @@ function showCtxMenu(x, y, items) {
 
 function removeCtxMenu() { document.getElementById("ctx-menu")?.remove(); }
 
+// Right-click on GIF cell to favorite/unfavorite
+document.addEventListener("contextmenu", async e=>{
+  const gifCell=e.target.closest(".gif-cell");
+  if (gifCell&&!e.target.closest(".gif-fav-btn")) {
+    e.preventDefault();
+    const url=gifCell.dataset.gifUrl;
+    const previewUrl=gifCell.dataset.gifPreview||url;
+    const title=gifCell.dataset.gifTitle||"";
+    if (!url||!state.user) return;
+    const isFav=!!state.favGifs[url];
+    showCtxMenu(e.clientX, e.clientY, [
+      {label:isFav?"💔 Remove from Saved":"❤️ Save GIF", action:"ctx-fav-gif", data:{url,previewUrl,title}},
+    ]);
+    return;
+  }
+});
+
+// Right-click on emoji item to favorite
+document.addEventListener("contextmenu", e=>{
+  const emojiCell=e.target.closest(".emoji-cell");
+  if (emojiCell&&!e.target.closest(".emoji-fav-btn")) {
+    const name=emojiCell.title?.replace(/^:|:$/g,"")||"";
+    const char=emojiCell.dataset.insert||"";
+    if (!name||!state.user) return;
+    e.preventDefault();
+    const isFav=!!state.favEmojis[name];
+    showCtxMenu(e.clientX, e.clientY, [
+      {label:isFav?"💔 Remove from Favourites":"⭐ Favourite Emoji", action:"ctx-fav-emoji", data:{name,char}},
+    ]);
+  }
+});
+
 document.addEventListener("contextmenu", e=>{
   // User right-click (avatar or name)
   const userEl=e.target.closest("[data-profile-uid]");
@@ -3327,6 +3580,34 @@ document.addEventListener("click", async e=>{
   else if (action==="ctx-edit")   { startEditMessage(msgId); }
   else if (action==="ctx-delete") { await deleteMessage(msgId); }
   else if (action==="ctx-report") { openReportModal(uid, name, msgId); }
+  else if (action==="ctx-fav-gif") {
+    const url=item.dataset.url, previewUrl=item.dataset.previewurl||item.dataset.url, title=item.dataset.title||"";
+    if (!url||!state.user) return;
+    if (state.favGifs[url]) {
+      delete state.favGifs[url];
+      const docId=btoa(url).replace(/[^a-zA-Z0-9]/g,"").slice(0,80);
+      await deleteDoc(doc(db,"users",state.user.uid,"favGifs",docId)).catch(()=>{});
+      showToast("💔 Removed from saved GIFs");
+    } else {
+      state.favGifs[url]={url, previewUrl, title};
+      const docId=btoa(url).replace(/[^a-zA-Z0-9]/g,"").slice(0,80);
+      await setDoc(doc(db,"users",state.user.uid,"favGifs",docId),{url,previewUrl,title,addedAt:serverTimestamp()});
+      showToast("❤️ GIF saved!");
+    }
+  }
+  else if (action==="ctx-fav-emoji") {
+    const name=item.dataset.name, char=item.dataset.char||"";
+    if (!name||!state.user) return;
+    if (state.favEmojis[name]) {
+      delete state.favEmojis[name];
+      await deleteDoc(doc(db,"users",state.user.uid,"favEmojis",name)).catch(()=>{});
+      showToast("💔 Removed from favourites");
+    } else {
+      state.favEmojis[name]={name,char};
+      await setDoc(doc(db,"users",state.user.uid,"favEmojis",name),{name,char,addedAt:serverTimestamp()});
+      showToast("⭐ Emoji saved!");
+    }
+  }
 });
 
 

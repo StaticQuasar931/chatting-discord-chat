@@ -82,9 +82,12 @@ export function buildUI() {
         <svg viewBox="0 0 24 24" width="12" height="12" style="flex-shrink:0;opacity:.5"><path fill="currentColor" d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg>
         <span id="login-tip-text">Tip: Right-click any message for quick actions.</span>
       </span>
-      <a class="login-plug-link"
-         href="https://sites.google.com/view/staticquasar931/static-gmes/wheres-epstein"
-         target="_blank" rel="noopener noreferrer">🕵️ Where's Epstein?</a>
+      <div class="login-plug-wrap">
+        <span class="login-plug-by">By the creator of</span>
+        <a class="login-plug-link"
+           href="https://sites.google.com/view/staticquasar931/static-gmes/wheres-epstein"
+           target="_blank" rel="noopener noreferrer">🕵️ Where's Epstein?</a>
+      </div>
     </div>
   </div>
 
@@ -319,6 +322,9 @@ export function buildUI() {
           <!-- Emoji autocomplete (inside .composer for correct absolute positioning) -->
           <div id="emoji-autocomplete" class="emoji-autocomplete hidden" role="listbox"></div>
 
+          <!-- Slash command autocomplete -->
+          <div id="cmd-autocomplete" class="hidden" role="listbox"></div>
+
           <div class="composer-inner">
             <div class="composer-input-wrap">
               <textarea id="composer-input" placeholder="Message… or /help for commands" rows="1"></textarea>
@@ -340,10 +346,10 @@ export function buildUI() {
               </svg>
             </button>
             <button class="icon-btn composer-gif-btn" id="gif-btn" title="Send a GIF">
-              <!-- GIF icon: rounded rect with letters punched out via evenodd -->
-              <svg viewBox="0 0 24 24" width="20" height="20" fill="none" aria-hidden="true">
-                <path fill="currentColor" fill-rule="evenodd" clip-rule="evenodd"
-                  d="M2 5a3 3 0 0 1 3-3h14a3 3 0 0 1 3 3v14a3 3 0 0 1-3 3H5a3 3 0 0 1-3-3V5Zm6.5 4.5h-3A2.5 2.5 0 0 0 3 12v.5a2.5 2.5 0 0 0 2.5 2.5h1a.5.5 0 0 0 .5-.5v-2a.5.5 0 0 0-.5-.5H6a.5.5 0 0 0 0 1h.5v1H5.5A1.5 1.5 0 0 1 4 12.5V12a1.5 1.5 0 0 1 1.5-1.5h3a.5.5 0 0 0 0-1ZM10 9.5a.5.5 0 0 0-1 0v6a.5.5 0 0 0 1 0v-6Zm1.5 0a.5.5 0 0 1 .5-.5h3a.5.5 0 0 1 0 1H12.5v1.5H14a.5.5 0 0 1 0 1h-1.5V15.5a.5.5 0 0 1-1 0v-6Z"/>
+              <!-- GIF badge icon -->
+              <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+                <rect x="2" y="5" width="20" height="14" rx="3" ry="3" fill="none" stroke="currentColor" stroke-width="1.6"/>
+                <text x="12" y="15.5" text-anchor="middle" font-family="inherit" font-weight="700" font-size="8.5" fill="currentColor" letter-spacing="0.5">GIF</text>
               </svg>
             </button>
             <button class="icon-btn composer-send-btn" id="send-btn" title="Send" data-active="false">
@@ -568,9 +574,11 @@ export function buildUI() {
                   </div>
                   <div class="spp-name" id="settings-preview-name">Username</div>
                   <div class="spp-tag" id="settings-preview-tag">#0000</div>
+                  <div class="spp-preview-badges" id="settings-preview-badges"></div>
                 </div>
               </div>
-              <p class="hint" style="margin-top:10px;font-size:11px;text-align:center;">Live preview updates as you type</p>
+              <div id="settings-preview-bio" style="font-size:12px;color:var(--t-muted);padding:0 14px 10px;line-height:1.4;"></div>
+              <p class="hint" style="margin-top:4px;font-size:11px;text-align:center;">Live preview — as others see you</p>
             </div>
 
           </div><!-- /.settings-account-cols -->
@@ -586,6 +594,7 @@ export function buildUI() {
             <button class="theme-swatch" data-theme="oled">OLED</button>
             <button class="theme-swatch" data-theme="midnight">Midnight</button>
             <button class="theme-swatch" data-theme="light">Light</button>
+            <button class="theme-swatch" data-theme="cloud">☁️ Cloud</button>
             <button class="theme-swatch" data-theme="warm">Warm</button>
             <button class="theme-swatch" data-theme="daylight">Daylight</button>
           </div>
@@ -642,6 +651,49 @@ export function buildUI() {
                 <span class="toggle-track"></span>
               </span>
             </label>
+
+          <div style="margin-top:24px;">
+            <div class="settings-section-title" style="margin-bottom:10px;">Messages</div>
+            <label class="settings-toggle-row">
+              <div class="settings-toggle-info">
+                <div class="settings-toggle-label">Compact message mode</div>
+                <div class="settings-toggle-sub">Show messages closer together with smaller avatars</div>
+              </div>
+              <span class="toggle-switch">
+                <input type="checkbox" id="settings-compact-toggle" />
+                <span class="toggle-track"></span>
+              </span>
+            </label>
+            <label class="settings-toggle-row" style="margin-top:12px;">
+              <div class="settings-toggle-info">
+                <div class="settings-toggle-label">Double-click to react</div>
+                <div class="settings-toggle-sub">Double-click any message to react with your chosen emoji</div>
+              </div>
+              <span class="toggle-switch">
+                <input type="checkbox" id="settings-dblclick-react-toggle" />
+                <span class="toggle-track"></span>
+              </span>
+            </label>
+            <div class="settings-field-group" style="margin-top:12px;" id="dblclick-emoji-row">
+              <label class="modal-label">Double-click react emoji</label>
+              <div style="display:flex;align-items:center;gap:8px;">
+                <span id="dblclick-emoji-preview" style="font-size:22px;cursor:pointer;" title="Click to change">👍</span>
+                <input type="text" id="settings-dblclick-emoji" placeholder="👍" maxlength="4"
+                  style="width:60px;text-align:center;font-size:18px;" />
+                <span class="hint">Any emoji character or shortcode</span>
+              </div>
+            </div>
+            <label class="settings-toggle-row" style="margin-top:12px;">
+              <div class="settings-toggle-info">
+                <div class="settings-toggle-label">Silent typing indicator</div>
+                <div class="settings-toggle-sub">Don't show others that you're typing</div>
+              </div>
+              <span class="toggle-switch">
+                <input type="checkbox" id="settings-silent-typing-toggle" />
+                <span class="toggle-track"></span>
+              </span>
+            </label>
+          </div>
 
           <p class="hint" style="margin-top:20px;text-align:center;">All appearance &amp; preference changes apply instantly.</p>
         </div>
