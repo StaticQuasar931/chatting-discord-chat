@@ -594,13 +594,13 @@ export function buildUI() {
 
           <div class="settings-section-title" style="margin-bottom:10px;">Theme</div>
           <div class="theme-swatches" id="theme-swatches">
-            <button class="theme-swatch" data-theme="dark">Dark</button>
             <button class="theme-swatch" data-theme="oled">OLED</button>
+            <button class="theme-swatch" data-theme="dark">Dark</button>
             <button class="theme-swatch" data-theme="midnight">Midnight</button>
-            <button class="theme-swatch" data-theme="light">Light</button>
-            <button class="theme-swatch" data-theme="cloud">☁️ Cloud</button>
+            <button class="theme-swatch" data-theme="cloud">Cloud</button>
             <button class="theme-swatch" data-theme="warm">Warm</button>
             <button class="theme-swatch" data-theme="daylight">Daylight</button>
+            <button class="theme-swatch" data-theme="light">Light</button>
           </div>
 
           <div style="margin-top:24px;">

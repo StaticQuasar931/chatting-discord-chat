@@ -467,6 +467,22 @@ function showToast(msg, ms = 2400) {
   t._timer = setTimeout(() => t.classList.add("hidden"), ms);
 }
 
+// Resolve a @mention username → uid by scanning known users (self, friends, userCache).
+// Returns uid string, or null if no match found.
+function _resolveUsername(name) {
+  const lc = name.toLowerCase();
+  // Check self
+  if (state.user && (state.user.username||"").toLowerCase() === lc) return state.user.uid;
+  // Check friends list (displayName stores the username)
+  const friend = state.friends.find(f=>(f.displayName||"").toLowerCase()===lc);
+  if (friend) return friend.uid;
+  // Check userCache (for group-chat participants not in friends list)
+  for (const [uid, profile] of Object.entries(state.userCache)) {
+    if ((profile.username||profile.displayName||"").toLowerCase()===lc) return uid;
+  }
+  return null;
+}
+
 function escapeHtml(text) {
   return String(text)
     .replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")
@@ -607,9 +623,14 @@ function formatMessage(raw) {
   text = text.replace(/\x01CB(\d+)\x01/g,(_,i)=>`<pre class="code-block"><code>${codeBlocks[+i]}</code></pre>`);
 
   // @mentions — MUST run before URL pass so @ inside href attributes is never touched
+  // Only wrap in a span if the username maps to a real known user.
+  // @silent is a command prefix, never rendered as a highlight.
   text = text.replace(/@(\w+)/g, (match, name) => {
-    const isMe = name.toLowerCase() === (state.user?.username||"").toLowerCase();
-    return `<span class="msg-mention${isMe?" msg-mention-me":""}" data-mention="${escapeHtml(name)}">@${escapeHtml(name)}</span>`;
+    if (name.toLowerCase()==="silent") return `<span class="msg-silent-badge">@silent</span>`;
+    const uid = _resolveUsername(name);
+    if (!uid) return `@${escapeHtml(name)}`; // not a known user — plain text
+    const isMe = uid === state.user?.uid;
+    return `<span class="msg-mention${isMe?" msg-mention-me":""}" data-mention="${escapeHtml(name)}" data-mention-uid="${escapeHtml(uid)}">@${escapeHtml(name)}</span>`;
   });
 
   // URLs → embeds or plain links.  Run safeUrl() so malformed strings never
@@ -1189,7 +1210,7 @@ function bootSubscriptions() {
           const prev=_prevChatTimes[c.id]||0;
           const cur=c.lastMessageAt?.toMillis?.()||0;
           const sentByMe=c.lastSenderUid===uid;
-          if (cur>prev && c.id!==state.activeChatId && !sentByMe && !isChatMuted(c.id)) {
+          if (cur>prev && c.id!==state.activeChatId && !sentByMe && !isChatMuted(c.id) && !c.lastMessageSilent) {
             playSound("message"); break;
           }
         }
@@ -1658,7 +1679,7 @@ async function openChat(chatId) {
       const isNew=hadMessages&&state.messages.length>prevLen;
       if (isNew) {
         const newest=state.messages[state.messages.length-1];
-        if (newest&&newest.senderUid!==state.user.uid&&!isChatMuted(chatId)) playSound("message");
+        if (newest&&newest.senderUid!==state.user.uid&&!isChatMuted(chatId)&&!newest.silent) playSound("message");
       }
       state.chatInitialized.add(chatId);
       renderMessages();
@@ -1705,6 +1726,7 @@ async function renderChatHeader() {
     avatarWrap.dataset.profileUid=otherUid||"";
     if(addBtn) addBtn.hidden=true; if(leaveBtn) leaveBtn.hidden=true;
     if(codeBadge) codeBadge.hidden=true;
+    const si=$("#chat-search-input"); if(si) si.placeholder=`Search ${name}`;
   } else {
     const isLeader=Array.isArray(c.leaders)&&c.leaders.includes(state.user.uid);
     const nameEl2=$("#chat-header-name");
@@ -1718,6 +1740,7 @@ async function renderChatHeader() {
       if (c.joinCode) { codeBadge.textContent=c.joinCode; codeBadge.hidden=false; codeBadge.title="Click to copy join code"; }
       else codeBadge.hidden=true;
     }
+    const si2=$("#chat-search-input"); if(si2) si2.placeholder=`Search ${c.name||"Group"}`;
   }
   updateChatMuteBtn();
 }
@@ -2116,6 +2139,13 @@ $("#messages").addEventListener("click", async e=>{
     return;
   }
 
+  // Clicking a @mention span → open that user's profile
+  const mentionEl=e.target.closest(".msg-mention");
+  if (mentionEl) {
+    const uid=mentionEl.dataset.mentionUid;
+    if (uid) { showProfileCard(uid, e); return; }
+  }
+
   const profileTrigger=e.target.closest("[data-profile-uid]");
   if (profileTrigger&&!e.target.closest(".msg-action-btn")) { showProfileCard(profileTrigger.dataset.profileUid,e); return; }
 
@@ -2218,8 +2248,17 @@ const CMD_ALIASES = {
 
 async function sendCurrentMessage() {
   const raw=composer.value;
-  const text=raw.trim();
+  let text=raw.trim();
   if (!text||!state.activeChatId) return;
+
+  // @silent prefix — send without triggering notification sound for recipients
+  let silent=false;
+  if (/^@silent\b/i.test(text)) {
+    silent=true;
+    text=text.replace(/^@silent\s*/i,"").trim();
+    if (!text) return; // don't send empty silent message
+  }
+
   if (text.length>2000) { showToast("Message too long (2000 char max)"); return; }
 
   const baseMsg = {
@@ -2230,7 +2269,8 @@ async function sendCurrentMessage() {
     replyToSenderName:state.replyTo?.senderName||null,
     replyToTextPreview:state.replyTo?.textPreview||null,
     // Future-proof scoring fields
-    xpValue:1, activityType:"message", rewardFlags:[]
+    xpValue:1, activityType:"message", rewardFlags:[],
+    ...(silent ? {silent:true} : {})
   };
 
   // Check for /command
@@ -2260,7 +2300,7 @@ async function sendCurrentMessage() {
   localStorage.removeItem(`sc_draft_${chatId}`);
   try {
     await addDoc(collection(db,"chats",chatId,"messages"),{ ...baseMsg, text });
-    await updateDoc(doc(db,"chats",chatId),{ lastMessage:text.slice(0,200), lastMessageAt:serverTimestamp(), lastSenderUid:state.user.uid });
+    await updateDoc(doc(db,"chats",chatId),{ lastMessage:text.slice(0,200), lastMessageAt:serverTimestamp(), lastSenderUid:state.user.uid, lastMessageSilent:silent||false });
   } catch(err){ showToast("Send failed: "+err.message); composer.value=raw; updateSendBtn(); }
 }
 
@@ -2339,7 +2379,11 @@ function startEditMessage(msgId) {
   </div>`;
   const newMsgEl=document.querySelector(`[data-msg-id="${CSS.escape(msgId)}"]`);
   const ta=newMsgEl?.querySelector("textarea");
-  if (ta) { ta.focus(); ta.selectionStart=ta.selectionEnd=ta.value.length; }
+  if (ta) {
+    ta.focus(); ta.selectionStart=ta.selectionEnd=ta.value.length;
+    // Scroll the edit area into view so it's not hidden below the fold
+    newMsgEl?.scrollIntoView({block:"nearest", behavior:"smooth"});
+  }
 
   // Enter to save, esc to cancel inside textarea
   ta?.addEventListener("keydown", async e=>{
@@ -2350,11 +2394,18 @@ function startEditMessage(msgId) {
 
 async function editMessage(msgId, newText) {
   const chatId=state.activeChatId; if (!chatId) return;
+  // If nothing actually changed, silently cancel — don't mark as edited
+  const existing=state.messages.find(m=>m.id===msgId);
+  if (existing && newText === (existing.text||"")) { renderMessages(); return; }
   if (!newText) {
-    // Empty edit = offer to delete
+    // Empty edit = offer to delete — call deleteDoc directly to avoid a second showConfirm from deleteMessage()
     renderMessages(); // restore normal view first
-    showConfirm("Saving an empty message will delete it permanently.", async ()=>{ await deleteMessage(msgId); },
-      {title:"Delete this message?", yesLabel:"Delete", danger:true});
+    showConfirm("Saving an empty message will delete it permanently.", async ()=>{
+      try {
+        await deleteDoc(doc(db,"chats",chatId,"messages",msgId));
+        showToast("Message deleted.");
+      } catch(err){ showToast("Delete failed: "+err.message); }
+    }, {title:"Delete this message?", yesLabel:"Delete", danger:true});
     return;
   }
   try {
@@ -2703,10 +2754,10 @@ document.addEventListener("click", e=>{
   if (e.target.closest("#settings-signout-btn")) {
     closeModal("settings-modal");
     setTimeout(()=>{
-      showConfirmModal("Sign out?", "You'll need to sign in again to use Static Chat.", "Sign Out", async ()=>{
+      showConfirm("You'll need to sign in again to use Static Chat.", async ()=>{
         cleanupAllSubscriptions();
         await signOut(auth).catch(()=>{});
-      });
+      }, {title:"Sign out?", yesLabel:"Sign Out", danger:true});
     }, 150);
   }
 });
@@ -3728,13 +3779,14 @@ async function fetchGifs(query, isTrending=false, nextPos="") {
 
 function _gifCellHtml(insertUrl, previewUrl, title) {
   const isFav = !!state.favGifs[insertUrl];
-  return `<button class="gif-cell" data-gif-url="${escapeHtml(insertUrl)}"
+  // Use <div> wrapper to avoid invalid <button><button> nesting (causes browser to break DOM structure)
+  return `<div class="gif-cell" role="button" tabindex="0" data-gif-url="${escapeHtml(insertUrl)}"
     data-gif-preview="${escapeHtml(previewUrl)}" data-gif-title="${escapeHtml(title)}"
     title="${escapeHtml(title)}">
     <img src="${escapeHtml(previewUrl)}" alt="${escapeHtml(title||"GIF")}" loading="lazy" />
-    <button class="gif-fav-btn${isFav?" active":""}" data-fav-url="${escapeHtml(insertUrl)}"
-      title="${isFav?"Remove from saved":"Save GIF"}">♥</button>
-  </button>`;
+    <span class="gif-fav-btn${isFav?" active":""}" data-fav-url="${escapeHtml(insertUrl)}"
+      title="${isFav?"Remove from saved":"Save GIF"}" role="button" tabindex="-1">♥</span>
+  </div>`;
 }
 
 function renderGifGrid(results, append=false) {
@@ -3787,11 +3839,10 @@ function initGifCategoryTabs() {
   });
 }
 
-// GIF infinite scroll — load more when user scrolls near bottom
-document.addEventListener("scroll", async e=>{
-  const grid=e.target.closest?.("#gif-grid");
-  if (!grid) return;
-  const near=grid.scrollHeight-grid.scrollTop-grid.clientHeight<120;
+// GIF infinite scroll — attached directly to #gif-grid on first picker open (see openGifPicker)
+async function _gifGridScrollHandler() {
+  const grid=document.getElementById("gif-grid"); if (!grid) return;
+  const near=grid.scrollHeight-grid.scrollTop-grid.clientHeight<160;
   if (!near||_gifLoadingMore||!_gifNextPos||_gifActiveCat==="favorites") return;
   _gifLoadingMore=true;
   const loader=document.createElement("p");
@@ -3803,10 +3854,11 @@ document.addEventListener("scroll", async e=>{
   _gifNextPos=next;
   renderGifGrid(results, true);
   _gifLoadingMore=false;
-}, {capture:true, passive:true});
+}
 
 // GIF picker toggle
 let gifOpen=false;
+let _gifScrollListenerAttached=false;
 $("#gif-btn")?.addEventListener("click", async ()=>{
   const picker=$("#gif-picker");
   if (!picker) return;
@@ -3815,8 +3867,13 @@ $("#gif-btn")?.addEventListener("click", async ()=>{
     picker.classList.remove("hidden");
     $("#emoji-picker")?.classList.add("hidden"); emojiOpen=false;
     initGifCategoryTabs();
-    // Load trending only if grid is empty / has placeholder
+    // Attach scroll listener directly to the grid element once
     const grid=$("#gif-grid");
+    if (grid && !_gifScrollListenerAttached) {
+      grid.addEventListener("scroll", _gifGridScrollHandler, {passive:true});
+      _gifScrollListenerAttached=true;
+    }
+    // Load trending only if grid is empty / has placeholder
     if (!grid||grid.querySelector(".gif-hint")||!grid.children.length) {
       await loadGifCategory("trending");
     }
@@ -3843,6 +3900,13 @@ $("#gif-search-input")?.addEventListener("input", ()=>{
 });
 $("#gif-search-input")?.addEventListener("keydown", e=>{ if(e.key==="Enter"){ clearTimeout(_gifSearchTimer); doGifSearch(); } });
 $("#gif-search-btn")?.addEventListener("click", ()=>{ clearTimeout(_gifSearchTimer); doGifSearch(); });
+
+// Keyboard activation for gif-cell divs (Enter/Space)
+document.addEventListener("keydown", e=>{
+  if (e.key!=="Enter"&&e.key!==" ") return;
+  const cell=e.target.closest(".gif-cell");
+  if (cell && !e.target.closest(".gif-fav-btn")) cell.click();
+});
 
 // Click a GIF cell → insert URL or auto-send
 document.addEventListener("click", e=>{
@@ -3872,7 +3936,8 @@ document.addEventListener("click", e=>{
 // Close GIF picker on outside click
 document.addEventListener("click", e=>{
   if (!gifOpen) return;
-  if (e.target.closest("#gif-picker")||e.target.closest("#gif-btn")) return;
+  // .ctx-item check handles context-menu clicks (element may be detached but closest() still walks its own tree)
+  if (e.target.closest("#gif-picker")||e.target.closest("#gif-btn")||e.target.closest(".ctx-item")) return;
   $("#gif-picker")?.classList.add("hidden"); gifOpen=false;
 });
 
@@ -3971,6 +4036,21 @@ document.addEventListener("contextmenu", async e=>{
     ]);
     return;
   }
+});
+
+// Right-click on inline GIF image in messages → save/remove from favorites
+document.addEventListener("contextmenu", async e=>{
+  const img=e.target.closest(".msg-embed-img");
+  if (!img) return;
+  const url=img.src||"";
+  // Only offer save for obvious GIF URLs
+  if (!url||!/\.gif(\?|$)/i.test(url)&&!url.includes("tenor.com")&&!url.includes("giphy.com")) return;
+  e.preventDefault();
+  if (!state.user) return;
+  const isFav=!!state.favGifs[url];
+  showCtxMenu(e.clientX, e.clientY, [
+    {label:isFav?"💔 Remove from Saved":"❤️ Save GIF", action:"ctx-fav-gif", data:{url, previewUrl:url, title:""}},
+  ]);
 });
 
 // Right-click on emoji item to favorite

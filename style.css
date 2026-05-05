@@ -687,21 +687,19 @@ input, textarea { font-family: inherit; font-size: inherit; color: var(--t-prima
 .header-search-wrap {
   display: flex; align-items: center; gap: 4px;
   background: var(--c-input-2); border-radius: var(--radius-pill);
-  padding: 0 10px; height: 28px; min-width: 36px;
-  border: 1.5px solid transparent; transition: min-width .2s, border-color .15s, background .15s;
+  padding: 0 10px; height: 28px; width: 200px;
+  border: 1.5px solid transparent; transition: border-color .15s, background .15s;
   cursor: text; flex-shrink: 0;
 }
 .header-search-wrap:focus-within {
-  min-width: 200px; border-color: var(--c-accent);
+  border-color: var(--c-accent);
   background: var(--c-overlay);
 }
 .header-search-icon { flex-shrink: 0; color: var(--t-muted); }
 .header-search-wrap input {
   flex: 1; background: none; border: none; outline: none; min-width: 0;
-  color: var(--t-primary); font-size: 13px; width: 0;
-  transition: width .2s;
+  color: var(--t-primary); font-size: 13px;
 }
-.header-search-wrap:focus-within input { width: auto; }
 .header-search-wrap input::placeholder { color: var(--t-muted); font-size: 12px; }
 .chat-search-count {
   font-size: 11px; color: var(--t-muted); white-space: nowrap; flex-shrink: 0;
@@ -828,6 +826,14 @@ body.compact-mode .msg-head { gap: 4px; }
 .msg-mention-me {
   color: var(--c-accent); background: rgba(79,124,255,.2);
   font-weight: 600;
+}
+/* @silent badge — subtle indicator that the message was sent silently */
+.msg-silent-badge {
+  display: inline-block;
+  font-size: 11px; font-weight: 600; color: var(--t-muted);
+  background: var(--c-input-2); border: 1px solid var(--c-border-2);
+  border-radius: 3px; padding: 0 4px; vertical-align: middle;
+  user-select: none;
 }
 /* Whole message highlight when you're mentioned */
 .message-group.mentioned-me,
@@ -1307,18 +1313,23 @@ body[data-theme="daylight"] .msg-followup:hover { background: rgba(0,0,50,.05); 
   margin-top: 4px;
 }
 .reaction-pill {
-  display: inline-flex; align-items: center; gap: 4px;
-  background: var(--c-input-2); border: 1px solid var(--c-border-2);
-  border-radius: var(--radius-pill); padding: 2px 8px;
-  font-size: 14px; cursor: pointer; color: var(--t-secondary);
-  transition: background .1s, border-color .1s, color .1s;
+  display: inline-flex; align-items: center; gap: 5px;
+  background: var(--c-input-2); border: 1.5px solid var(--c-border-2);
+  border-radius: var(--radius-pill); padding: 3px 10px;
+  font-size: 15px; cursor: pointer; color: var(--t-secondary);
+  transition: background .12s, border-color .12s, color .12s, transform .1s;
+  user-select: none;
 }
-.reaction-pill:hover { background: var(--c-input); color: var(--t-primary); }
+.reaction-pill:hover {
+  background: var(--c-input); color: var(--t-primary);
+  transform: scale(1.07);
+}
 .reaction-pill.active {
-  background: var(--c-accent-soft); border-color: var(--c-accent);
-  color: var(--c-accent);
+  background: rgba(88,101,242,.18); border-color: var(--c-accent);
+  color: var(--c-accent); font-weight: 600;
 }
-.reaction-pill span { font-size: 12px; font-weight: 600; }
+.reaction-pill.active:hover { background: rgba(88,101,242,.28); }
+.reaction-pill span { font-size: 13px; font-weight: 700; }
 
 /* =================================================
    BADGE CHIPS (messages + profile card)
@@ -1950,24 +1961,22 @@ body[data-theme="daylight"] .msg-followup:hover { background: rgba(0,0,50,.05); 
   background:white; border-radius:2px;
 }
 
-/* Offline: hollow gray ring (transparent center) */
+/* Offline: solid Discord gray (no hollow ring, matches Discord exactly) */
 .side-status-dot[data-status="offline"],
 .friend-status-dot[data-status="offline"],
 .header-status-dot[data-status="offline"],
 .chat-header-status-dot[data-status="offline"]  {
-  background: transparent;
-  border: 2px solid var(--c-invisible);
-  box-sizing: border-box;
+  background: var(--c-invisible);
+  border: none;
 }
 
-/* Invisible (own view): hollow ring, same as offline */
+/* Invisible (own view): hollow gray ring — only the owner sees themselves as invisible */
 .side-status-dot[data-status="invisible"],
 .friend-status-dot[data-status="invisible"],
 .header-status-dot[data-status="invisible"],
 .chat-header-status-dot[data-status="invisible"] {
   background: transparent;
   border: 2px solid var(--c-invisible);
-  border-style: solid;
   box-sizing: border-box;
 }
 
@@ -2128,7 +2137,7 @@ body[data-theme="daylight"] .msg-followup:hover { background: rgba(0,0,50,.05); 
 .gif-cat-btn:hover { background: var(--c-input-2); color: var(--t-primary); }
 .gif-cat-btn.active { background: var(--c-accent); color: #fff; border-color: var(--c-accent); }
 .gif-grid {
-  flex: 1; overflow-y: auto; overflow-x: hidden;
+  flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden;
   padding: 4px 8px 8px;
   columns: 2; column-gap: 4px;
 }
