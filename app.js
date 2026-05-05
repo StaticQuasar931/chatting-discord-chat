@@ -405,6 +405,7 @@ const state = {
   dblClickReact:     localStorage.getItem("sc_dblclick_react") === "true",
   dblClickEmoji:     localStorage.getItem("sc_dblclick_emoji") || "👍",
   compactMode:       localStorage.getItem("sc_compact") === "true",
+  customStatus:      localStorage.getItem("sc_custom_status")||"",
   favGifs: {},   // gifUrl → { url, previewUrl, title }
   favEmojis: {}, // emojiName → { name, char }
 };
@@ -604,6 +605,12 @@ function formatMessage(raw) {
   // Restore code blocks BEFORE URL pass so code isn't turned into a link
   text = text.replace(/\x01IC(\d+)\x01/g,(_,i)=>`<code class="inline-code">${inlineCodes[+i]}</code>`);
   text = text.replace(/\x01CB(\d+)\x01/g,(_,i)=>`<pre class="code-block"><code>${codeBlocks[+i]}</code></pre>`);
+
+  // @mentions — MUST run before URL pass so @ inside href attributes is never touched
+  text = text.replace(/@(\w+)/g, (match, name) => {
+    const isMe = name.toLowerCase() === (state.user?.username||"").toLowerCase();
+    return `<span class="msg-mention${isMe?" msg-mention-me":""}" data-mention="${escapeHtml(name)}">@${escapeHtml(name)}</span>`;
+  });
 
   // URLs → embeds or plain links.  Run safeUrl() so malformed strings never
   // produce broken href= attributes that GitHub Pages misroutes.
@@ -905,7 +912,14 @@ function updateUserPanel() {
   const u = state.user;
   if (!u) return;
   $("#user-panel-name").textContent = u.username||u.displayName||"User";
-  $("#user-panel-tag").textContent  = u.discriminator ? `#${u.discriminator}` : "";
+  const tagEl = $("#user-panel-tag");
+  if (tagEl) {
+    if (state.customStatus) {
+      tagEl.innerHTML = `<span class="user-panel-custom-status">${escapeHtml(state.customStatus)}</span>`;
+    } else {
+      tagEl.textContent = u.discriminator ? `#${u.discriminator}` : "";
+    }
+  }
   $("#user-panel-avatar-wrap").innerHTML = avatarMarkup(
     u.username||u.displayName, u.photoURL,
     "user-panel-avatar","user-panel-avatar-fallback"
@@ -989,6 +1003,12 @@ function toggleStatusPicker(anchor) {
         ${s===state.status?`<svg class="sp-check" viewBox="0 0 24 24" width="14" height="14"><path fill="currentColor" d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>`:""}
       </button>`).join("")}
     <div class="sp-divider"></div>
+    <div class="sp-custom-status-wrap">
+      <input type="text" id="sp-custom-status-input" class="sp-custom-status-input"
+        placeholder="Set a custom status…" maxlength="60"
+        value="${escapeHtml(state.customStatus||"")}"/>
+    </div>
+    <div class="sp-divider"></div>
     <button class="sp-option sp-settings" id="sp-open-settings">
       <svg viewBox="0 0 24 24" width="15" height="15" style="flex-shrink:0"><path fill="currentColor" d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/></svg>
       <span>User Settings</span>
@@ -1003,6 +1023,7 @@ function toggleStatusPicker(anchor) {
 
   picker.addEventListener("click", async e2=>{
     if (e2.target.closest("#sp-open-settings")) { picker.remove(); openSettingsModal(); return; }
+    if (e2.target.closest("#sp-custom-status-input")) return; // don't close on input click
     const opt = e2.target.closest("[data-status]");
     if (!opt) return;
     const ns = opt.dataset.status;
@@ -1012,6 +1033,31 @@ function toggleStatusPicker(anchor) {
     picker.remove();
     try { await updateDoc(doc(db,"users",state.user.uid),{status:ns}); } catch(_){}
   });
+
+  const csInput=picker.querySelector("#sp-custom-status-input");
+  if (csInput) {
+    csInput.addEventListener("keydown", async e=>{
+      if (e.key==="Enter") {
+        e.preventDefault();
+        const val=csInput.value.trim();
+        state.customStatus=val;
+        localStorage.setItem("sc_custom_status",val);
+        try { await updateDoc(doc(db,"users",state.user.uid),{customStatus:val}); } catch(_){}
+        showToast(val?"Status set":"Status cleared");
+        picker.remove();
+        updateUserPanel();
+      }
+    });
+    csInput.addEventListener("blur", async ()=>{
+      const val=csInput.value.trim();
+      if (val !== (state.customStatus||"")) {
+        state.customStatus=val;
+        localStorage.setItem("sc_custom_status",val);
+        try { await updateDoc(doc(db,"users",state.user.uid),{customStatus:val}); } catch(_){}
+        updateUserPanel();
+      }
+    });
+  }
 
   setTimeout(()=>{
     document.addEventListener("click", ev=>{
@@ -1050,6 +1096,7 @@ function bootSubscriptions() {
     state.user.bio = data.bio||"";
     if (data.photoURL!==undefined) state.user.photoURL=data.photoURL;
     if (data.status) { state.status=data.status; localStorage.setItem("sc_status",data.status); }
+    if (data.customStatus!==undefined) { state.customStatus=data.customStatus||""; localStorage.setItem("sc_custom_status",state.customStatus); }
     if (data.bannerColor!==undefined) state.bannerColor=data.bannerColor||null;
     if (data.isPrivate!==undefined) state.isPrivate=!!data.isPrivate;
     if (data.createdAt) state.user.createdAt=data.createdAt;
@@ -1091,6 +1138,7 @@ function bootSubscriptions() {
             if (!pSnap.exists()) return;
             state.userCache[otherUid]=_augmentBadges({...pSnap.data(), uid:otherUid});
             renderFriendsList();
+            renderChatLists(); // update sidebar status dots live
             if (state.activeChat?.type==="dm" &&
                 state.activeChat.members?.includes(otherUid)) renderChatHeader();
           }, ()=>{});
@@ -1874,7 +1922,8 @@ function buildReactionBar(reactions={}, msgId) {
   if (!entries.length) return "";
   const pills=entries.map(([emoji,uids])=>{
     const mine=uids.includes(state.user?.uid);
-    return `<button class="reaction-pill${mine?" active":""}" data-react-emoji="${escapeHtml(emoji)}" data-react-msg="${escapeHtml(msgId)}">${emoji} <span>${uids.length}</span></button>`;
+    const countHtml=uids.length>1?` <span>${uids.length}</span>`:"";
+    return `<button class="reaction-pill${mine?" active":""}" data-react-emoji="${escapeHtml(emoji)}" data-react-msg="${escapeHtml(msgId)}">${emoji}${countHtml}</button>`;
   }).join("");
   return `<div class="reactions-row">${pills}</div>`;
 }
@@ -1990,6 +2039,17 @@ function renderMessages() {
 
   wrap.innerHTML=html.join("");
 
+  // Highlight messages that mention the current user
+  const myName=state.user?.username||"";
+  if (myName) {
+    wrap.querySelectorAll("[data-msg-id]").forEach(el=>{
+      const body=el.querySelector(".msg-body");
+      if (body?.querySelector(`.msg-mention[data-mention="${myName}"]`)) {
+        el.classList.add("mentioned-me");
+      }
+    });
+  }
+
   const cid=state.activeChatId;
   const alreadyScrolled=state.chatScrolledInitial.has(cid);
   if (!alreadyScrolled) {
@@ -2002,9 +2062,12 @@ function renderMessages() {
       wrap.scrollTop=wrap.scrollHeight;
     }
   } else {
-    // Subsequent renders (live updates): only auto-scroll if user was already at the bottom
-    if (wasAtBottom) wrap.scrollTop=wrap.scrollHeight;
-    // else: user is reading history — don't jump
+    if (wasAtBottom) {
+      wrap.scrollTop=wrap.scrollHeight;
+    } else {
+      // Preserve exact scroll position — adjust for any height change (new messages above)
+      wrap.scrollTop = prevScrollTop + (wrap.scrollHeight - prevScrollHeight);
+    }
   }
   // Store unread count so jump button can show it
   state._unreadDisplayCount = unreadCount;
@@ -2096,6 +2159,7 @@ composer.addEventListener("input",()=>{
   updateSendBtn();
   updateEmojiAutocomplete();
   updateCmdAutocomplete();
+  updateMentionAutocomplete();
 });
 
 composer.addEventListener("keydown", e=>{
@@ -2107,6 +2171,13 @@ composer.addEventListener("keydown", e=>{
     if (e.key==="Enter"||e.key==="Tab") { e.preventDefault(); insertCmdAcItem(_cmdAcIndex); return; }
     if (e.key==="Escape") { hideCmdAc(); return; }
   }
+  // Mention autocomplete navigation
+  if (_mentionAcOpen && _mentionAcItems.length) {
+    if (e.key==="ArrowDown") { e.preventDefault(); _mentionAcIndex=(_mentionAcIndex+1)%_mentionAcItems.length; updateMentionAcHighlight(); return; }
+    if (e.key==="ArrowUp")   { e.preventDefault(); _mentionAcIndex=(_mentionAcIndex-1+_mentionAcItems.length)%_mentionAcItems.length; updateMentionAcHighlight(); return; }
+    if (e.key==="Enter"||e.key==="Tab") { e.preventDefault(); insertMentionAcItem(_mentionAcIndex); return; }
+    if (e.key==="Escape") { hideMentionAc(); return; }
+  }
   // Emoji autocomplete navigation
   const ac=$("#emoji-autocomplete");
   if (ac&&!ac.classList.contains("hidden")&&acItems.length) {
@@ -2116,6 +2187,13 @@ composer.addEventListener("keydown", e=>{
     if (e.key==="Escape") { hideEmojiAc(); return; }
   }
   if (e.key==="Enter"&&!e.shiftKey) { e.preventDefault(); sendCurrentMessage(); }
+  // Up arrow with empty composer → edit last own message (Discord behaviour)
+  if (e.key==="ArrowUp" && composer.value==="") {
+    e.preventDefault();
+    const myMsgs=state.messages.filter(m=>m.senderUid===state.user?.uid&&!m.deleted);
+    const last=myMsgs[myMsgs.length-1];
+    if (last) startEditMessage(last.id, last.text||"");
+  }
 });
 
 function updateSendBtn() {
@@ -2271,8 +2349,14 @@ function startEditMessage(msgId) {
 }
 
 async function editMessage(msgId, newText) {
-  if (!newText) { showToast("Message can't be empty"); renderMessages(); return; }
   const chatId=state.activeChatId; if (!chatId) return;
+  if (!newText) {
+    // Empty edit = offer to delete
+    renderMessages(); // restore normal view first
+    showConfirm("Saving an empty message will delete it permanently.", async ()=>{ await deleteMessage(msgId); },
+      {title:"Delete this message?", yesLabel:"Delete", danger:true});
+    return;
+  }
   try {
     await updateDoc(doc(db,"chats",chatId,"messages",msgId),{ text:newText, edited:true });
   } catch(err){ showToast("Edit failed: "+err.message); renderMessages(); }
@@ -2509,12 +2593,16 @@ let _pendingTheme=null, _pendingStatus=null, _pendingBannerColor=undefined, _pen
 
 $("#settings-btn").addEventListener("click", openSettingsModal);
 
+let _lastSettingsPane="account";
 function switchSettingsPane(paneId) {
+  _lastSettingsPane=paneId;
   $$(".settings-pane").forEach(p=>p.classList.toggle("hidden",p.dataset.pane!==paneId));
   $$(".settings-discord-nav-item[data-pane]").forEach(n=>n.classList.toggle("active",n.dataset.pane===paneId));
 }
 
-function openSettingsModal(pane="account") {
+function openSettingsModal(pane) {
+  // Use last-opened pane if none specified
+  if (!pane) pane=_lastSettingsPane||"account";
   // Remap removed panes to merged ones
   if (pane==="profile")       pane="account";
   if (pane==="notifications")  pane="appearance";
@@ -3119,6 +3207,71 @@ document.addEventListener("click",e=>{
    ===================================================================== */
 let acItems=[], acTriggerStart=-1;
 
+// @mention autocomplete
+let _mentionAcOpen=false, _mentionAcItems=[], _mentionAcIndex=0;
+
+function updateMentionAutocomplete() {
+  const val=composer.value;
+  const curPos=composer.selectionStart;
+  // Find @ before cursor
+  const before=val.slice(0,curPos);
+  const match=before.match(/@(\w*)$/);
+  if (!match) { hideMentionAc(); return; }
+  const query=match[1].toLowerCase();
+  const allUsers=[...state.friends.map(f=>({uid:f.uid,name:f.displayName,photo:f.photoURL}))];
+  // In group chats, also include group members
+  if (state.activeChat?.type==="group") {
+    state.activeChat.members?.forEach(uid=>{
+      if (!allUsers.find(u=>u.uid===uid)) {
+        const p=state.userCache[uid];
+        if (p) allUsers.push({uid, name:p.username||p.displayName||uid, photo:p.photoURL});
+      }
+    });
+  }
+  _mentionAcItems=allUsers.filter(u=>!query||u.name.toLowerCase().startsWith(query)).slice(0,8);
+  if (!_mentionAcItems.length) { hideMentionAc(); return; }
+  _mentionAcOpen=true;
+  const ac=$("#mention-autocomplete"); if(!ac) return;
+  ac.innerHTML=_mentionAcItems.map((u,i)=>`
+    <button class="emoji-ac-item${i===_mentionAcIndex?" active":""}" data-idx="${i}" role="option">
+      <span class="emoji-ac-char">${u.photo?`<img src="${u.photo}" style="width:20px;height:20px;border-radius:50%;object-fit:cover;" alt=""/>`:u.name[0]?.toUpperCase()}</span>
+      <span class="emoji-ac-name">@${u.name}</span>
+    </button>`).join("");
+  ac.classList.remove("hidden");
+}
+
+function hideMentionAc() {
+  _mentionAcOpen=false; _mentionAcIndex=0; _mentionAcItems=[];
+  $("#mention-autocomplete")?.classList.add("hidden");
+}
+
+function insertMentionAcItem(idx) {
+  const u=_mentionAcItems[idx]; if (!u) return;
+  const val=composer.value, pos=composer.selectionStart;
+  const before=val.slice(0,pos);
+  const match=before.match(/@(\w*)$/);
+  if (!match) return;
+  const start=pos-match[0].length;
+  const after=val.slice(pos);
+  composer.value=before.slice(0,start)+`@${u.name} `+after;
+  const newPos=start+u.name.length+2;
+  composer.setSelectionRange(newPos,newPos);
+  hideMentionAc();
+  composer.dispatchEvent(new Event("input"));
+}
+
+function updateMentionAcHighlight() {
+  document.querySelectorAll("#mention-autocomplete .emoji-ac-item").forEach((el,i)=>{
+    el.classList.toggle("active", i===_mentionAcIndex);
+  });
+}
+
+document.addEventListener("click", e=>{
+  const item=e.target.closest("#mention-autocomplete .emoji-ac-item");
+  if (item) { insertMentionAcItem(parseInt(item.dataset.idx)); return; }
+  if (!e.target.closest("#mention-autocomplete")&&!e.target.closest("#composer-input")) hideMentionAc();
+});
+
 function updateEmojiAutocomplete() {
   const ac=$("#emoji-autocomplete"); if (!ac) return;
   const val=composer.value;
@@ -3559,16 +3712,18 @@ const GIF_CATEGORIES=[
   {id:"love",       label:"Love"},
 ];
 let _gifActiveCat="trending";
+let _gifNextPos="", _gifLoadingMore=false, _gifCurrentQuery="";
 
-async function fetchGifs(query, isTrending=false) {
+async function fetchGifs(query, isTrending=false, nextPos="") {
   try {
+    const pos=nextPos?`&pos=${encodeURIComponent(nextPos)}`:"";
     const base=isTrending
-      ? `https://api.tenor.com/v1/trending?key=${TENOR_KEY}&limit=30&contentfilter=high`
-      : `https://api.tenor.com/v1/search?q=${encodeURIComponent(query)}&key=${TENOR_KEY}&limit=30&contentfilter=high`;
+      ? `https://api.tenor.com/v1/trending?key=${TENOR_KEY}&limit=30&contentfilter=high${pos}`
+      : `https://api.tenor.com/v1/search?q=${encodeURIComponent(query)}&key=${TENOR_KEY}&limit=30&contentfilter=high${pos}`;
     const r=await fetch(base);
     const d=await r.json();
-    return d.results||[];
-  } catch(e){ console.error("GIF:",e); return []; }
+    return {results:d.results||[], next:d.next||""};
+  } catch(e){ console.error("GIF:",e); return {results:[], next:""}; }
 }
 
 function _gifCellHtml(insertUrl, previewUrl, title) {
@@ -3582,16 +3737,21 @@ function _gifCellHtml(insertUrl, previewUrl, title) {
   </button>`;
 }
 
-function renderGifGrid(results) {
+function renderGifGrid(results, append=false) {
   const grid=$("#gif-grid"); if (!grid) return;
-  if (!results.length) { grid.innerHTML=`<p class="gif-hint">No GIFs found — try a different search.</p>`; return; }
-  grid.innerHTML=results.map(r=>{
+  if (!results.length && !append) { grid.innerHTML=`<p class="gif-hint">No GIFs found — try a different search.</p>`; return; }
+  const cells=results.map(r=>{
     const media=r.media?.[0];
     const previewUrl=media?.tinygif?.url||media?.gif?.url||"";
     const insertUrl =media?.gif?.url||media?.tinygif?.url||"";
     if (!previewUrl) return "";
     return _gifCellHtml(insertUrl, previewUrl, r.title||"");
   }).filter(Boolean).join("");
+  if (append) {
+    grid.insertAdjacentHTML("beforeend", cells);
+  } else {
+    grid.innerHTML=cells;
+  }
 }
 
 function renderFavGifGrid() {
@@ -3602,13 +3762,14 @@ function renderFavGifGrid() {
 }
 
 async function loadGifCategory(cat) {
-  _gifActiveCat=cat;
+  _gifActiveCat=cat; _gifNextPos=""; _gifCurrentQuery=cat==="trending"?"":cat;
   $$(".gif-cat-btn").forEach(b=>b.classList.toggle("active",b.dataset.cat===cat));
   const grid=$("#gif-grid");
   if (cat==="favorites") { renderFavGifGrid(); return; }
   if (grid) grid.innerHTML=`<p class="gif-hint">Loading…</p>`;
   const q=cat==="trending"?"":cat;
-  const results=await fetchGifs(q, cat==="trending");
+  const {results, next}=await fetchGifs(q, cat==="trending");
+  _gifNextPos=next;
   renderGifGrid(results);
 }
 
@@ -3625,6 +3786,24 @@ function initGifCategoryTabs() {
     loadGifCategory(btn.dataset.cat);
   });
 }
+
+// GIF infinite scroll — load more when user scrolls near bottom
+document.addEventListener("scroll", async e=>{
+  const grid=e.target.closest?.("#gif-grid");
+  if (!grid) return;
+  const near=grid.scrollHeight-grid.scrollTop-grid.clientHeight<120;
+  if (!near||_gifLoadingMore||!_gifNextPos||_gifActiveCat==="favorites") return;
+  _gifLoadingMore=true;
+  const loader=document.createElement("p");
+  loader.className="gif-hint"; loader.id="gif-load-more"; loader.textContent="Loading…";
+  grid.appendChild(loader);
+  const isTrending=_gifActiveCat==="trending";
+  const {results, next}=await fetchGifs(_gifCurrentQuery, isTrending, _gifNextPos);
+  document.getElementById("gif-load-more")?.remove();
+  _gifNextPos=next;
+  renderGifGrid(results, true);
+  _gifLoadingMore=false;
+}, {capture:true, passive:true});
 
 // GIF picker toggle
 let gifOpen=false;
@@ -3652,10 +3831,11 @@ let _gifSearchTimer=null;
 function doGifSearch() {
   const q=$("#gif-search-input")?.value.trim();
   if (!q) { loadGifCategory(_gifActiveCat); return; }
+  _gifNextPos=""; _gifCurrentQuery=q;
   $$(".gif-cat-btn").forEach(b=>b.classList.remove("active"));
   const grid=$("#gif-grid");
   if (grid) grid.innerHTML=`<p class="gif-hint">Searching…</p>`;
-  fetchGifs(q).then(renderGifGrid);
+  fetchGifs(q).then(({results, next})=>{ _gifNextPos=next; renderGifGrid(results); });
 }
 $("#gif-search-input")?.addEventListener("input", ()=>{
   clearTimeout(_gifSearchTimer);
@@ -3993,18 +4173,19 @@ function applyBlockedFromProfile(data) {
 let _chatSearchMatches=[], _chatSearchIdx=0;
 
 function openChatSearch() {
-  const bar=$("#chat-search-bar"); if (!bar) return;
-  bar.classList.remove("hidden");
   const inp=$("#chat-search-input");
   if (inp) { inp.focus(); inp.select(); }
 }
 
 function closeChatSearch() {
-  const bar=$("#chat-search-bar"); if (!bar) return;
-  bar.classList.add("hidden");
+  const inp=$("#chat-search-input");
+  if (inp) { inp.value=""; inp.blur(); }
   $$(".msg-search-match").forEach(el=>el.classList.remove("msg-search-match","msg-search-focus"));
   _chatSearchMatches=[]; _chatSearchIdx=0;
-  const count=$("#chat-search-count"); if (count) count.textContent="";
+  const countEl=$("#chat-search-count"); if(countEl) countEl.textContent="";
+  const prevBtn=$("#chat-search-prev"); if(prevBtn) prevBtn.classList.add("hidden");
+  const nextBtn=$("#chat-search-next"); if(nextBtn) nextBtn.classList.add("hidden");
+  const clearBtn=$("#chat-search-close"); if(clearBtn) clearBtn.classList.add("hidden");
 }
 
 function runChatSearch(q) {
@@ -4043,9 +4224,16 @@ document.addEventListener("keydown", e=>{
   }
 });
 
-$("#chat-search-btn")?.addEventListener("click", openChatSearch);
 $("#chat-search-close")?.addEventListener("click", closeChatSearch);
-$("#chat-search-input")?.addEventListener("input", e=>runChatSearch(e.target.value));
+$("#chat-search-input")?.addEventListener("input", e=>{
+  const q=e.target.value;
+  runChatSearch(q);
+  const hasText = q.length > 0;
+  $("#chat-search-prev")?.classList.toggle("hidden", !hasText || _chatSearchMatches.length === 0);
+  $("#chat-search-next")?.classList.toggle("hidden", !hasText || _chatSearchMatches.length === 0);
+  $("#chat-search-close")?.classList.toggle("hidden", !hasText);
+  if (!hasText) { _chatSearchMatches=[]; _chatSearchIdx=0; }
+});
 $("#chat-search-input")?.addEventListener("keydown", e=>{
   if (e.key==="Enter") {
     e.preventDefault();
@@ -4378,9 +4566,9 @@ document.addEventListener("keydown", e => {
   if (profileCard && !profileCard.classList.contains("hidden")) {
     profileCard.classList.add("hidden"); closed = true;
   }
-  // In-chat search
-  const searchBar = $("#chat-search-bar");
-  if (searchBar && !searchBar.classList.contains("hidden")) {
+  // In-chat search — clear if input has text
+  const searchInp = $("#chat-search-input");
+  if (searchInp && searchInp.value) {
     closeChatSearch(); closed = true;
   }
   // Modals (close top-most open modal)

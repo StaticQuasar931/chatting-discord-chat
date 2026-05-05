@@ -231,22 +231,15 @@ export function buildUI() {
           </div>
           <div class="chat-header-actions">
             <div class="join-code-badge hidden" id="chat-join-code-badge"></div>
-            <button class="icon-btn" id="chat-search-btn" title="Search messages (Ctrl+F)">
-              <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
-                <path fill="currentColor" d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/>
-              </svg>
-            </button>
             <button class="icon-btn" id="chat-pins-btn" title="Pinned messages">
               <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
                 <path fill="currentColor" d="M16 12V4h1V2H7v2h1v8l-2 2v2h5.2v6h1.6v-6H18v-2l-2-2z"/>
               </svg>
             </button>
             <button class="icon-btn" id="chat-mute-btn" title="Mute notifications">
-              <!-- Bell icon -->
               <svg class="mute-bell-icon" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
                 <path fill="currentColor" d="M12 22c1.1 0 2-.9 2-2h-4c0 1.1.9 2 2 2zm6-6v-5c0-3.07-1.64-5.64-4.5-6.32V4c0-.83-.67-1.5-1.5-1.5s-1.5.67-1.5 1.5v.68C7.63 5.36 6 7.92 6 11v5l-2 2v1h16v-1l-2-2z"/>
               </svg>
-              <!-- Bell-slash overlay (shown when muted) -->
               <svg class="mute-slash-icon hidden" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
                 <path fill="currentColor" d="M20 18.69L7.84 6.14 6.43 4.73 5.02 3.32 3.61 4.73l2.39 2.39C5.37 8.23 5 9.58 5 11v5l-2 2v1h14.73l2 2 1.41-1.41L20 18.69zm-8 3.31c1.1 0 2-.9 2-2h-4c0 1.1.9 2 2 2zm7-7.62V11c0-3.07-1.63-5.64-4.5-6.32V4c0-.83-.67-1.5-1.5-1.5s-1.5.67-1.5 1.5v.68c-.99.23-1.87.68-2.62 1.27L19 19.08V14.38z"/>
               </svg>
@@ -256,33 +249,27 @@ export function buildUI() {
                 <path fill="currentColor" d="M15 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm-9-2V7H4v3H1v2h3v3h2v-3h3v-2H6zm9 4c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/>
               </svg>
             </button>
-            <button class="icon-btn" id="chat-leave-btn" title="Leave chat" hidden>
-              <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
-                <path fill="currentColor" d="M17 7l-1.41 1.41L18.17 11H8v2h10.17l-2.58 2.58L17 17l5-5-5-5zM4 5h8V3H4c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h8v-2H4V5z"/>
+            <!-- Divider line before search -->
+            <div class="header-divider"></div>
+            <!-- Always-visible compact search — expands on focus -->
+            <div class="header-search-wrap" id="header-search-wrap">
+              <svg viewBox="0 0 24 24" width="15" height="15" class="header-search-icon" aria-hidden="true">
+                <path fill="currentColor" d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/>
               </svg>
-            </button>
+              <input type="text" id="chat-search-input" placeholder="Search" autocomplete="off" aria-label="Search messages" />
+              <span id="chat-search-count" class="chat-search-count"></span>
+              <button class="icon-btn chat-search-nav hidden" id="chat-search-prev" title="Previous (Shift+Enter)">
+                <svg viewBox="0 0 24 24" width="13" height="13"><path fill="currentColor" d="M7.41 15.41L12 10.83l4.59 4.58L18 14l-6-6-6 6z"/></svg>
+              </button>
+              <button class="icon-btn chat-search-nav hidden" id="chat-search-next" title="Next (Enter)">
+                <svg viewBox="0 0 24 24" width="13" height="13"><path fill="currentColor" d="M7.41 8.59L12 13.17l4.59-4.58L18 10l-6 6-6-6z"/></svg>
+              </button>
+              <button class="icon-btn header-search-clear hidden" id="chat-search-close" title="Clear (Esc)">
+                <svg viewBox="0 0 24 24" width="13" height="13"><path fill="currentColor" d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+              </button>
+            </div>
           </div>
         </header>
-
-        <!-- In-chat message search bar -->
-        <div id="chat-search-bar" class="chat-search-bar hidden">
-          <div class="chat-search-inner">
-            <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true" style="flex-shrink:0;color:var(--t-muted)">
-              <path fill="currentColor" d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/>
-            </svg>
-            <input type="text" id="chat-search-input" placeholder="Search messages…" autocomplete="off" />
-            <span id="chat-search-count" class="chat-search-count"></span>
-            <button class="icon-btn chat-search-nav" id="chat-search-prev" title="Previous (Shift+Enter)">
-              <svg viewBox="0 0 24 24" width="14" height="14"><path fill="currentColor" d="M7.41 15.41L12 10.83l4.59 4.58L18 14l-6-6-6 6z"/></svg>
-            </button>
-            <button class="icon-btn chat-search-nav" id="chat-search-next" title="Next (Enter)">
-              <svg viewBox="0 0 24 24" width="14" height="14"><path fill="currentColor" d="M7.41 8.59L12 13.17l4.59-4.58L18 10l-6 6-6-6z"/></svg>
-            </button>
-            <button class="icon-btn" id="chat-search-close" title="Close (Esc)">
-              <svg viewBox="0 0 24 24" width="14" height="14"><path fill="currentColor" d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
-            </button>
-          </div>
-        </div>
 
         <div class="messages" id="messages"></div>
 
@@ -321,6 +308,9 @@ export function buildUI() {
 
           <!-- Emoji autocomplete (inside .composer for correct absolute positioning) -->
           <div id="emoji-autocomplete" class="emoji-autocomplete hidden" role="listbox"></div>
+
+          <!-- @mention autocomplete -->
+          <div id="mention-autocomplete" class="emoji-autocomplete hidden" role="listbox"></div>
 
           <!-- Slash command autocomplete -->
           <div id="cmd-autocomplete" class="hidden" role="listbox"></div>
@@ -699,8 +689,8 @@ export function buildUI() {
             </div>
             <label class="settings-toggle-row" style="margin-top:12px;">
               <div class="settings-toggle-info">
-                <div class="settings-toggle-label">Silent typing indicator</div>
-                <div class="settings-toggle-sub">Don't show others that you're typing</div>
+                <div class="settings-toggle-label">Hide Typing Indicator</div>
+                <div class="settings-toggle-sub">Don't show when you're typing to others</div>
               </div>
               <span class="toggle-switch">
                 <input type="checkbox" id="settings-silent-typing-toggle" />

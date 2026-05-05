@@ -678,6 +678,37 @@ input, textarea { font-family: inherit; font-size: inherit; color: var(--t-prima
 .chat-header-name { font-weight: 600; font-size: 16px; color: var(--t-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .chat-header-sub { font-size: 12px; color: var(--t-muted); }
 .chat-header-actions { display: flex; gap: 6px; align-items: center; }
+
+/* Always-visible header search */
+.header-divider {
+  width: 1px; height: 20px; background: var(--c-border-2);
+  margin: 0 4px; flex-shrink: 0;
+}
+.header-search-wrap {
+  display: flex; align-items: center; gap: 4px;
+  background: var(--c-input-2); border-radius: var(--radius-pill);
+  padding: 0 10px; height: 28px; min-width: 36px;
+  border: 1.5px solid transparent; transition: min-width .2s, border-color .15s, background .15s;
+  cursor: text; flex-shrink: 0;
+}
+.header-search-wrap:focus-within {
+  min-width: 200px; border-color: var(--c-accent);
+  background: var(--c-overlay);
+}
+.header-search-icon { flex-shrink: 0; color: var(--t-muted); }
+.header-search-wrap input {
+  flex: 1; background: none; border: none; outline: none; min-width: 0;
+  color: var(--t-primary); font-size: 13px; width: 0;
+  transition: width .2s;
+}
+.header-search-wrap:focus-within input { width: auto; }
+.header-search-wrap input::placeholder { color: var(--t-muted); font-size: 12px; }
+.chat-search-count {
+  font-size: 11px; color: var(--t-muted); white-space: nowrap; flex-shrink: 0;
+}
+.header-search-clear { color: var(--t-muted); }
+.chat-search-nav { color: var(--t-muted); }
+
 .join-code-badge {
   font-size: 11px; font-weight: 700; letter-spacing: 0.1em; color: var(--t-muted);
   background: var(--c-input-2); border: 1px solid var(--c-border-2);
@@ -787,6 +818,23 @@ body.compact-mode .msg-head { gap: 4px; }
 }
 .msg-body pre.code-block code { font-family: inherit; font-size: inherit; }
 .msg-body img.msg-emoji { width: 22px; height: 22px; vertical-align: -5px; object-fit: contain; display: inline-block; }
+
+/* @mention styles */
+.msg-mention {
+  color: #7289da; background: rgba(114,137,218,.1);
+  border-radius: 3px; padding: 0 2px; font-weight: 500;
+  cursor: pointer;
+}
+.msg-mention-me {
+  color: var(--c-accent); background: rgba(79,124,255,.2);
+  font-weight: 600;
+}
+/* Whole message highlight when you're mentioned */
+.message-group.mentioned-me,
+.msg-followup.mentioned-me {
+  background: rgba(250,168,26,.04) !important;
+  border-left: 2px solid var(--c-warn) !important;
+}
 
 /* Leader badge */
 .leader-badge {
@@ -1383,8 +1431,8 @@ body[data-theme="daylight"] .msg-followup:hover { background: rgba(0,0,50,.05); 
   color: var(--t-muted); border-radius: var(--radius-sm);
   transition: background .12s, color .12s;
 }
-/* raise SVG 4px so it sits at same optical height as other toolbar icons */
-.composer-gif-btn svg { transform: translateY(-4px); }
+/* raise SVG 3px so it sits at same optical height as other toolbar icons */
+.composer-gif-btn svg { transform: translateY(-3px); }
 .composer-gif-btn:hover { background: rgba(255,255,255,.08); color: var(--t-primary); }
 
 /* =================================================
@@ -1532,40 +1580,7 @@ body[data-theme="daylight"] .msg-followup:hover { background: rgba(0,0,50,.05); 
   border-radius: 2px;
 }
 
-/* =================================================
-   IN-CHAT SEARCH BAR
-   ================================================= */
-.chat-search-bar {
-  flex-shrink: 0;
-  background: var(--c-main);
-  border-bottom: 1px solid var(--c-border-2);
-  padding: 5px 16px;
-  animation: fadeSlideDown .15s ease both;
-}
-@keyframes fadeSlideDown {
-  from { opacity: 0; transform: translateY(-4px); }
-  to   { opacity: 1; transform: translateY(0); }
-}
-.chat-search-bar.hidden { display: none; }
-.chat-search-inner {
-  display: flex; align-items: center; gap: 6px;
-  background: var(--c-input-2); border: 1px solid var(--c-border-2);
-  border-radius: var(--radius-md); padding: 4px 10px;
-  max-width: 500px; margin: 0 auto;
-  transition: border-color .12s;
-}
-.chat-search-inner:focus-within { border-color: var(--c-accent); }
-#chat-search-input {
-  flex: 1; background: transparent; border: none; outline: none;
-  color: var(--t-primary); font-size: 13px; padding: 2px 0;
-  caret-color: var(--c-accent);
-}
-#chat-search-input::placeholder { color: var(--t-muted); }
-.chat-search-count {
-  font-size: 11px; color: var(--t-muted); white-space: nowrap;
-  min-width: 54px; text-align: center;
-}
-.chat-search-nav { width: 22px; height: 22px; }
+/* .chat-search-bar — removed; search is now inline in the header */
 
 /* =================================================
    PINNED MESSAGES PANEL
@@ -1875,6 +1890,7 @@ body[data-theme="daylight"] .msg-followup:hover { background: rgba(0,0,50,.05); 
 .header-status-dot, .chat-header-status-dot {
   display: inline-block; border-radius: 50%;
   flex-shrink: 0; pointer-events: none;
+  position: relative; /* needed for DND ::after */
 }
 /* DM sidebar dot */
 .side-status-dot {
@@ -1902,30 +1918,57 @@ body[data-theme="daylight"] .msg-followup:hover { background: rgba(0,0,50,.05); 
   width: 12px; height: 12px;
   border: 2.5px solid var(--c-main);
 }
-/* Color rules for all status dots */
+/* ── Color + shape rules ── */
+/* Online: solid filled circle */
 .side-status-dot[data-status="online"],
 .friend-status-dot[data-status="online"],
 .header-status-dot[data-status="online"],
 .chat-header-status-dot[data-status="online"]   { background: var(--c-online); }
+
+/* Idle: crescent moon via inset box-shadow */
 .side-status-dot[data-status="idle"],
 .friend-status-dot[data-status="idle"],
 .header-status-dot[data-status="idle"],
-.chat-header-status-dot[data-status="idle"]     { background: var(--c-idle); }
+.chat-header-status-dot[data-status="idle"]     {
+  background: transparent;
+  box-shadow: inset -3px 2px 0 1.5px var(--c-idle);
+}
+
+/* DND: red circle with white/bg-colored horizontal bar */
 .side-status-dot[data-status="dnd"],
 .friend-status-dot[data-status="dnd"],
 .header-status-dot[data-status="dnd"],
-.chat-header-status-dot[data-status="dnd"]      { background: var(--c-dnd); }
+.chat-header-status-dot[data-status="dnd"]      { background: var(--c-dnd); overflow: hidden; }
+.side-status-dot[data-status="dnd"]::after,
+.friend-status-dot[data-status="dnd"]::after,
+.header-status-dot[data-status="dnd"]::after,
+.chat-header-status-dot[data-status="dnd"]::after {
+  content:""; display:block;
+  position:absolute; top:50%; left:50%;
+  transform:translate(-50%,-50%);
+  width:60%; height:25%;
+  background:white; border-radius:2px;
+}
+
+/* Offline: hollow gray ring (transparent center) */
 .side-status-dot[data-status="offline"],
 .friend-status-dot[data-status="offline"],
 .header-status-dot[data-status="offline"],
-.chat-header-status-dot[data-status="offline"]  { background: var(--c-invisible); }
-/* invisible = show hollow ring */
+.chat-header-status-dot[data-status="offline"]  {
+  background: transparent;
+  border: 2px solid var(--c-invisible);
+  box-sizing: border-box;
+}
+
+/* Invisible (own view): hollow ring, same as offline */
 .side-status-dot[data-status="invisible"],
 .friend-status-dot[data-status="invisible"],
 .header-status-dot[data-status="invisible"],
 .chat-header-status-dot[data-status="invisible"] {
-  background: transparent; border-color: var(--c-invisible);
+  background: transparent;
+  border: 2px solid var(--c-invisible);
   border-style: solid;
+  box-sizing: border-box;
 }
 
 /* =================================================
@@ -2035,6 +2078,22 @@ body[data-theme="daylight"] .msg-followup:hover { background: rgba(0,0,50,.05); 
 .sp-settings { color: var(--t-muted); font-size: 13px; gap: 8px; }
 .sp-settings span { font-weight: 500; }
 .sp-settings:hover { color: var(--t-primary); }
+.sp-custom-status-wrap {
+  padding: 6px 12px 8px;
+}
+.sp-custom-status-input {
+  width: 100%; background: var(--c-input-2); border: 1px solid var(--c-border-2);
+  border-radius: var(--radius-sm); padding: 6px 8px; font-size: 12px;
+  color: var(--t-primary); outline: none; box-sizing: border-box;
+  transition: border-color .12s;
+}
+.sp-custom-status-input:focus { border-color: var(--c-accent); }
+.sp-custom-status-input::placeholder { color: var(--t-muted); }
+.user-panel-custom-status {
+  font-size: 11px; color: var(--t-muted); margin-top: 1px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  max-width: 140px;
+}
 
 /* =================================================
    GIF PICKER — improved
