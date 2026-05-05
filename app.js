@@ -1061,18 +1061,44 @@ function bootSubscriptions() {
   // Start presence heartbeat
   startPresenceHeartbeat();
 
+  // Live profile listeners for friends — key = uid, value = unsubscribe fn
+  const _friendProfileUnsubs = {};
+  // Register cleanup with main unsubscribers so sign-out tears them down
+  state.unsubscribers.friendProfiles = ()=>{
+    for (const fn of Object.values(_friendProfileUnsubs)) { try{fn();}catch(_){} }
+    Object.keys(_friendProfileUnsubs).forEach(k=>delete _friendProfileUnsubs[k]);
+  };
+
   state.unsubscribers.friendships = onSnapshot(
     query(collection(db,"friendships"),where("users","array-contains",uid)),
     async snap=>{
       const list=[];
+      const seenUids=new Set();
       for (const d of snap.docs) {
         const data=d.data();
         const otherUid=data.users.find(u=>u!==uid);
         if (!otherUid) continue;
+        seenUids.add(otherUid);
+        // Fresh fetch (bypass cache) so status is always current
+        delete state.userCache[otherUid];
         const profile=await fetchUserProfile(otherUid);
         list.push({ friendshipId:d.id, uid:otherUid,
           displayName:profile?.username||profile?.displayName||"Unknown",
           discriminator:profile?.discriminator||null, photoURL:profile?.photoURL||null });
+        // Set up live listener for this friend's profile if not already listening
+        if (!_friendProfileUnsubs[otherUid]) {
+          _friendProfileUnsubs[otherUid] = onSnapshot(doc(db,"users",otherUid), pSnap=>{
+            if (!pSnap.exists()) return;
+            state.userCache[otherUid]=_augmentBadges({...pSnap.data(), uid:otherUid});
+            renderFriendsList();
+            if (state.activeChat?.type==="dm" &&
+                state.activeChat.members?.includes(otherUid)) renderChatHeader();
+          }, ()=>{});
+        }
+      }
+      // Remove listeners for removed friends
+      for (const fid of Object.keys(_friendProfileUnsubs)) {
+        if (!seenUids.has(fid)) { _friendProfileUnsubs[fid](); delete _friendProfileUnsubs[fid]; }
       }
       list.sort((a,b)=>a.displayName.localeCompare(b.displayName));
       state.friends=list;
@@ -1556,6 +1582,21 @@ async function openChat(chatId) {
 
   // Start typing listener for this chat
   startTypingListener(chatId);
+
+  // Live profile listener for DM partner — keeps status/avatar/name fresh
+  if (state.unsubscribers.dmPartnerProfile) { state.unsubscribers.dmPartnerProfile(); state.unsubscribers.dmPartnerProfile=null; }
+  if (state.activeChat?.type==="dm") {
+    const partnerUid=state.activeChat.members?.find(m=>m!==state.user?.uid);
+    if (partnerUid) {
+      state.unsubscribers.dmPartnerProfile = onSnapshot(doc(db,"users",partnerUid), snap=>{
+        if (!snap.exists()) return;
+        state.userCache[partnerUid]=_augmentBadges({...snap.data(), uid:partnerUid});
+        renderChatHeader();
+        renderFriendsList();
+      }, ()=>{});
+    }
+  }
+
   if (state.unsubscribers.messages) { state.unsubscribers.messages(); state.unsubscribers.messages=null; }
   state.messages=[];
   $("#messages").innerHTML=`<div class="empty" style="margin:24px;">Loading messages…</div>`;
@@ -1673,72 +1714,121 @@ const QUICK_REACTS = ["👍","❤️","😂","😮","😢"];
 // OG cutoff — any account created before this timestamp gets an OG badge automatically
 const OG_CUTOFF_MS = new Date("2026-05-04T00:00:00Z").getTime();
 
-/* Each badge: bg color, icon SVG path (24×24), tooltip title */
+/* Badge tiers: 1=Official/Rare, 2=Notable, 3=Achievement, 4=Activity
+   how: shown as subtitle in tooltip; grant: how to give it (for admin reference) */
 const BADGE_DEFS = {
-  og: {
-    bg:"#f59e0b", title:"OG — Joined before May 4th 2026",
-    icon:`<path fill="currentColor" d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/>`
+  // ── Tier 1 — Official (admin-granted, rarest) ──────────────────────
+  creator: {
+    tier:1, bg:"#ff6b35",
+    title:"Creator",
+    desc:"Built Static Chat from the ground up. Only one person has this.",
+    icon:`<path fill="currentColor" d="M5 16L3 5l5.5 5L12 4l3.5 6L21 5l-2 11H5zm14 3c0 .6-.4 1-1 1H6c-.6 0-1-.4-1-1v-1h14v1z"/>`
+  },
+  staff: {
+    tier:1, bg:"#e91e8c",
+    title:"Staff",
+    desc:"Official Static Chat team member.",
+    icon:`<path fill="currentColor" d="M22.7 19l-9.1-9.1c.9-2.3.4-5-1.5-6.9-2-2-5-2.4-7.4-1.3L9 6 6 9 1.6 4.7C.4 7.1.9 10.1 2.9 12.1c1.9 1.9 4.6 2.4 6.9 1.5l9.1 9.1c.4.4 1 .4 1.4 0l2.3-2.3c.5-.4.5-1.1.1-1.4z"/>`
+  },
+  dev: {
+    tier:1, bg:"#00bcd4",
+    title:"Developer",
+    desc:"Contributed code to Static Chat.",
+    icon:`<path fill="currentColor" d="M9.4 16.6L4.8 12l4.6-4.6L8 6l-6 6 6 6 1.4-1.4zm5.2 0l4.6-4.6-4.6-4.6L16 6l6 6-6 6-1.4-1.4z"/>`
   },
   og_og: {
-    bg:"#f97316", title:"Day One — One of the very first users ever",
-    icon:`<path fill="currentColor" d="M12 1l2.753 5.58 6.157.895-4.455 4.342 1.051 6.128L12 15l-5.506 2.945 1.051-6.128L3.09 7.475l6.157-.895z"/><circle cx="12" cy="12" r="3.5" fill="none" stroke="currentColor" stroke-width="1.5"/>`
+    tier:1, bg:"#f97316",
+    title:"Day One",
+    desc:"One of the very first 5 users ever. A true original.",
+    icon:`<path fill="currentColor" d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z"/><path fill="none" stroke="currentColor" stroke-width="1" d="M12 6 l1.5 3 3.5.5-2.5 2.5.6 3.5L12 14l-3.1 1.5.6-3.5L7 9.5l3.5-.5z"/>`
+  },
+
+  // ── Tier 2 — Notable ────────────────────────────────────────────────
+  og: {
+    tier:2, bg:"#f59e0b",
+    title:"OG",
+    desc:"Joined before May 4th, 2026. One of the early ones.",
+    icon:`<path fill="currentColor" d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/>`
   },
   early_tester: {
-    bg:"#3b82f6", title:"Early Tester — Helped test before launch",
-    icon:`<path fill="currentColor" d="M9 3v8L5.5 17A2 2 0 0 0 7.36 20h9.28a2 2 0 0 0 1.86-3L15 11V3H9zm0 0h6M10 3h4"/><path fill="none" stroke="currentColor" stroke-width="1.5" d="M9 3v8L5.5 17A2 2 0 0 0 7.36 20h9.28a2 2 0 0 0 1.86-3L15 11V3"/><line x1="9" y1="3" x2="15" y2="3" stroke="currentColor" stroke-width="1.5"/><circle cx="9.5" cy="15" r="1" fill="currentColor"/>`
+    tier:2, bg:"#3b82f6",
+    title:"Early Tester",
+    desc:"Helped test Static Chat before public launch.",
+    icon:`<path fill="currentColor" d="M7 2v2h1v14a4 4 0 0 0 8 0V4h1V2H7zm6 14a2 2 0 0 1-4 0v-5h4v5zm0-7H9V4h4v5z"/>`
   },
-  helper: {
-    bg:"#10b981", title:"Helper — Goes out of their way to help others",
-    icon:`<path fill="currentColor" d="M11.5 2C9 2 7 4 7 6.5c0 1.7.9 3.2 2.2 4l-.7 4h6L13.8 10.5c1.3-.8 2.2-2.3 2.2-4C16 4 14 2 11.5 2zm.5 13v5h-2v-5h2z"/>`
+  mod: {
+    tier:2, bg:"#10b981",
+    title:"Moderator",
+    desc:"Keeps Static Chat safe and welcoming.",
+    icon:`<path fill="currentColor" d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4zm0 4l5 2.18V11c0 3.5-2.33 6.79-5 7.93-2.67-1.14-5-4.43-5-7.93V7.18L12 5z"/>`
   },
-  active: {
-    bg:"#4f7cff", title:"Active — Super active member of the community",
-    icon:`<path fill="currentColor" d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 14.5v-9l6 4.5-6 4.5z"/>`
+  verified: {
+    tier:2, bg:"#1d9bf0",
+    title:"Verified",
+    desc:"Verified notable person.",
+    icon:`<path fill="currentColor" d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41L9 16.17z"/>`
   },
-  friendly: {
-    bg:"#eab308", title:"Friendly — Known for being kind and welcoming",
-    icon:`<path fill="currentColor" d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/>`
-  },
+
+  // ── Tier 3 — Achievement ─────────────────────────────────────────────
   bug_reporter: {
-    bg:"#ec4899", title:"Bug Reporter — Found and reported bugs to improve the app",
+    tier:3, bg:"#ec4899",
+    title:"Bug Reporter",
+    desc:"Found and reported a real bug that got fixed.",
     icon:`<path fill="currentColor" d="M20 8h-2.81c-.45-.78-1.07-1.45-1.82-1.96L17 4.41 15.59 3l-2.17 2.17a6.003 6.003 0 0 0-2.83 0L8.41 3 7 4.41l1.62 1.63C7.88 6.55 7.26 7.22 6.81 8H4v2h2.09c-.05.33-.09.66-.09 1v1H4v2h2v1c0 .34.04.67.09 1H4v2h2.81c1.04 1.79 2.97 3 5.19 3s4.15-1.21 5.19-3H20v-2h-2.09c.05-.33.09-.66.09-1v-1h2v-2h-2v-1c0-.34-.04-.67-.09-1H20V8zm-6 8h-4v-2h4v2zm0-4h-4v-2h4v2z"/>`
   },
   suggester: {
-    bg:"#8b5cf6", title:"Suggester — Suggested features that made it in",
+    tier:3, bg:"#8b5cf6",
+    title:"Suggester",
+    desc:"Suggested a feature that actually made it into the app.",
     icon:`<path fill="currentColor" d="M12 2C8.13 2 5 5.13 5 9c0 2.38 1.19 4.47 3 5.74V17c0 .55.45 1 1 1h6c.55 0 1-.45 1-1v-2.26c1.81-1.27 3-3.36 3-5.74 0-3.87-3.13-7-7-7zm3 10.5l-1 .67V16h-4v-2.83l-1-.67C7.72 11.67 7 10.39 7 9c0-2.76 2.24-5 5-5s5 2.24 5 5c0 1.39-.72 2.67-2 3.5z"/>`
   },
-  trusted: {
-    bg:"#06b6d4", title:"Trusted — A trusted and respected member",
-    icon:`<path fill="currentColor" d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4zm-2 16l-4-4 1.41-1.41L10 14.17l6.59-6.59L18 9l-8 8z"/>`
-  },
-  creator: {
-    bg:"#f97316", title:"Creator — Made Static Chat",
-    icon:`<path fill="currentColor" d="M5 16L3 5l5.5 5L12 4l3.5 6L21 5l-2 11H5zm14 3c0 .6-.4 1-1 1H6c-.6 0-1-.4-1-1v-1h14v1z"/>`
-  },
-  partner: {
-    bg:"#7c3aed", title:"Partner — Official Static Chat partner",
-    icon:`<path fill="currentColor" d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/>`
-  },
   gif_master: {
-    bg:"#ef4444", title:"GIF Master — Sent an absurd number of GIFs",
+    tier:3, bg:"#ef4444",
+    title:"GIF Master",
+    desc:"Sent an absolutely absurd number of GIFs.",
     icon:`<path fill="currentColor" d="M12 3c-4.97 0-9 4.03-9 9s4.03 9 9 9c.83 0 1.5-.67 1.5-1.5 0-.39-.15-.74-.39-1.01-.23-.26-.38-.61-.38-.99 0-.83.67-1.5 1.5-1.5H16c2.76 0 5-2.24 5-5 0-4.42-4.03-8-9-8zm-5.5 9c-.83 0-1.5-.67-1.5-1.5S5.67 9 6.5 9 8 9.67 8 10.5 7.33 12 6.5 12zm3-4C8.67 8 8 7.33 8 6.5S8.67 5 9.5 5s1.5.67 1.5 1.5S10.33 8 9.5 8zm5 0c-.83 0-1.5-.67-1.5-1.5S13.67 5 14.5 5s1.5.67 1.5 1.5S15.33 8 14.5 8zm3 4c-.83 0-1.5-.67-1.5-1.5S16.67 9 17.5 9s1.5.67 1.5 1.5-.67 1.5-1.5 1.5z"/>`
   },
   emoji_lord: {
-    bg:"#f59e0b", title:"Emoji Lord — Reaction royalty",
+    tier:3, bg:"#f59e0b",
+    title:"Emoji Lord",
+    desc:"Reaction royalty. Uses emojis more than words.",
     icon:`<path fill="currentColor" d="M11.99 2C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2zM12 20c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8zm3.5-9c.83 0 1.5-.67 1.5-1.5S16.33 8 15.5 8 14 8.67 14 9.5s.67 1.5 1.5 1.5zm-7 0c.83 0 1.5-.67 1.5-1.5S9.33 8 8.5 8 7 8.67 7 9.5 7.67 11 8.5 11zm3.5 6.5c2.33 0 4.31-1.46 5.11-3.5H6.89c.8 2.04 2.78 3.5 5.11 3.5z"/>`
   },
   night_owl: {
-    bg:"#6366f1", title:"Night Owl — Always online at night",
+    tier:3, bg:"#6366f1",
+    title:"Night Owl",
+    desc:"Always chatting way too late at night.",
     icon:`<path fill="currentColor" d="M12 3a9 9 0 1 0 9 9c0-.46-.04-.92-.1-1.36a5.389 5.389 0 0 1-4.4 2.26 5.403 5.403 0 0 1-3.14-9.8c-.44-.06-.9-.1-1.36-.1z"/>`
+  },
+
+  // ── Tier 4 — Activity (more achievable) ─────────────────────────────
+  helper: {
+    tier:4, bg:"#059669",
+    title:"Helper",
+    desc:"Goes out of their way to help other users.",
+    icon:`<path fill="currentColor" d="M12 2C8.13 2 5 5.13 5 9c0 2.38 1.19 4.47 3 5.74V17c0 .55.45 1 1 1h6c.55 0 1-.45 1-1v-2.26c1.81-1.27 3-3.36 3-5.74 0-3.87-3.13-7-7-7zm0 2c2.76 0 5 2.24 5 5 0 1.64-.79 3.1-2 4.03V16h-6v-2.97C7.79 12.1 7 10.64 7 9c0-2.76 2.24-5 5-5zm-1 14h2v2h-2z"/>`
+  },
+  active: {
+    tier:4, bg:"#4f7cff",
+    title:"Active",
+    desc:"Consistently one of the most active members.",
+    icon:`<path fill="currentColor" d="M13 2.05v2.02c3.95.49 7 3.85 7 7.93 0 3.21-1.81 6-4.72 7.28L13 17v5l5-3-1.22-1.22C19.91 16.03 22 13.07 22 12c0-5.18-3.94-9.45-9-9.95zM11 2.05C5.95 2.55 2 6.82 2 12c0 3.07 2.09 6.03 5.22 7.78L6 21l5 3v-5l-2.28 2.28C6.81 18 5 15.21 5 12c0-4.08 3.05-7.44 7-7.93V2.05z"/>`
   },
 };
 
 // Render a row of compact icon-only badges for profile display
 function renderBadges(badges=[]) {
   if (!badges||!badges.length) return "";
-  return badges.map(b=>{
+  // Sort by tier (lowest tier number = most prestigious = show first)
+  const sorted=[...badges].sort((a,b)=>{
+    const ta=(BADGE_DEFS[a]?.tier||9), tb=(BADGE_DEFS[b]?.tier||9);
+    return ta-tb;
+  });
+  return sorted.map(b=>{
     const d=BADGE_DEFS[b]; if(!d) return "";
-    return `<span class="badge-icon-wrap" title="${escapeHtml(d.title)}" style="background:${d.bg}">
+    const tierClass=`badge-t${d.tier||4}`;
+    const tooltipTitle=`${d.title}${d.desc?" — "+d.desc:""}`;
+    return `<span class="badge-icon-wrap ${tierClass}" title="${escapeHtml(tooltipTitle)}" style="background:${d.bg}">
       <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true" style="color:#fff">${d.icon}</svg>
     </span>`;
   }).join("");
@@ -2484,6 +2574,10 @@ function openSettingsModal(pane="account") {
   const pBio2=$("#settings-preview-bio"); if(pBio2) pBio2.textContent=u.bio||"No bio set yet.";
   const pBadges2=$("#settings-preview-badges"); if(pBadges2) pBadges2.innerHTML=renderBadges(state.userCache[u.uid]?.badges||[]);
   switchSettingsPane(pane);
+  // Clear settings search
+  const settingsSearch=$("#settings-search-input");
+  if (settingsSearch) { settingsSearch.value=""; }
+  $$(".settings-field-group, .settings-toggle-row, .settings-section-title").forEach(f=>{ f.style.display=""; f.style.opacity=""; });
   openModal("settings-modal");
 }
 
@@ -2491,6 +2585,28 @@ function openSettingsModal(pane="account") {
 document.addEventListener("click", e=>{
   const navItem=e.target.closest(".settings-discord-nav-item[data-pane]");
   if (navItem) switchSettingsPane(navItem.dataset.pane);
+});
+
+// Settings search
+document.addEventListener("input", e=>{
+  if (e.target.id !== "settings-search-input") return;
+  const q=e.target.value.trim().toLowerCase();
+  const allPanes=$$(".settings-pane");
+  const allFields=$$(".settings-field-group, .settings-toggle-row, .settings-section-title");
+  if (!q) {
+    // Restore normal view — just show current pane
+    allFields.forEach(f=>{ f.style.display=""; f.style.opacity=""; });
+    return;
+  }
+  // Show ALL panes during search
+  allPanes.forEach(p=>p.classList.remove("hidden"));
+  // Highlight matching fields
+  allFields.forEach(f=>{
+    const text=f.textContent.toLowerCase();
+    const match=text.includes(q);
+    f.style.display=match?"":"none";
+    f.style.opacity=match?"1":"";
+  });
 });
 
 // Second Save Changes button (in Profile pane) delegates to main one
@@ -2699,6 +2815,180 @@ $("#settings-save-btn")?.addEventListener("click", async ()=>{
   finally { btn.disabled=false; btn.textContent="Save Changes"; }
 });
 
+
+/* =====================================================================
+   AVATAR CROP MODAL
+   ===================================================================== */
+let _cropImg=null, _cropOffX=0, _cropOffY=0, _cropZoom=1;
+let _cropDragging=false, _cropDragStart={x:0,y:0}, _cropDragOff={x:0,y:0};
+const CROP_CANVAS_SIZE=280, CROP_OUTPUT_SIZE=160;
+
+function _initCrop(src) {
+  const canvas=document.getElementById("avatar-crop-canvas");
+  if (!canvas) return;
+  canvas.width=CROP_CANVAS_SIZE; canvas.height=CROP_CANVAS_SIZE;
+  _cropImg=new Image();
+  _cropImg.crossOrigin="anonymous";
+  _cropImg.onload=()=>{
+    const fitZoom=Math.max(CROP_CANVAS_SIZE/_cropImg.naturalWidth, CROP_CANVAS_SIZE/_cropImg.naturalHeight);
+    _cropZoom=fitZoom;
+    _cropOffX=(_cropImg.naturalWidth*_cropZoom-CROP_CANVAS_SIZE)/2;
+    _cropOffY=(_cropImg.naturalHeight*_cropZoom-CROP_CANVAS_SIZE)/2;
+    const sl=document.getElementById("crop-zoom-slider");
+    if (sl) { sl.min=fitZoom*0.5; sl.max=fitZoom*5; sl.step=fitZoom*0.01; sl.value=_cropZoom; }
+    _drawCrop();
+  };
+  _cropImg.onerror=()=>showToast("Could not load image. Try a direct image URL.");
+  _cropImg.src=src;
+  openModal("avatar-crop-modal");
+}
+
+function _drawCrop() {
+  const canvas=document.getElementById("avatar-crop-canvas");
+  if (!canvas||!_cropImg) return;
+  const ctx=canvas.getContext("2d");
+  const W=CROP_CANVAS_SIZE, cx=W/2, cy=W/2, r=W/2-3;
+  // Draw image
+  ctx.clearRect(0,0,W,W);
+  ctx.drawImage(_cropImg,-_cropOffX,-_cropOffY,_cropImg.naturalWidth*_cropZoom,_cropImg.naturalHeight*_cropZoom);
+  // Dark vignette OUTSIDE circle — use even-odd rule: rect with inner circle = donut shape
+  ctx.save();
+  ctx.fillStyle="rgba(0,0,0,.55)";
+  ctx.beginPath();
+  ctx.rect(0,0,W,W);                          // outer boundary (clockwise)
+  ctx.arc(cx,cy,r,0,Math.PI*2,true);          // inner circle cut-out (counter-clockwise)
+  ctx.fill("evenodd");
+  ctx.restore();
+  // Circle guide border
+  ctx.save();
+  ctx.strokeStyle="rgba(255,255,255,.65)";
+  ctx.lineWidth=2;
+  ctx.beginPath();
+  ctx.arc(cx,cy,r,0,Math.PI*2);
+  ctx.stroke();
+  ctx.restore();
+}
+
+function _clampCropOffset() {
+  if (!_cropImg) return;
+  const iw=_cropImg.naturalWidth*_cropZoom, ih=_cropImg.naturalHeight*_cropZoom;
+  const W=CROP_CANVAS_SIZE;
+  _cropOffX=Math.max(0,Math.min(iw-W,_cropOffX));
+  _cropOffY=Math.max(0,Math.min(ih-W,_cropOffY));
+}
+
+function _getCroppedDataUrl() {
+  if (!_cropImg) return null;
+  const off=document.createElement("canvas");
+  off.width=CROP_OUTPUT_SIZE; off.height=CROP_OUTPUT_SIZE;
+  const ctx=off.getContext("2d");
+  const S=CROP_OUTPUT_SIZE, r=S/2;
+  // Clip to circle so output is transparent outside
+  ctx.beginPath(); ctx.arc(r,r,r,0,Math.PI*2); ctx.clip();
+  const scale=CROP_OUTPUT_SIZE/CROP_CANVAS_SIZE;
+  ctx.drawImage(_cropImg,-_cropOffX*scale,-_cropOffY*scale,
+    _cropImg.naturalWidth*_cropZoom*scale,
+    _cropImg.naturalHeight*_cropZoom*scale);
+  // Use PNG for transparency, JPEG loses the alpha channel
+  return off.toDataURL("image/png");
+}
+
+// Wire up crop canvas events
+document.addEventListener("DOMContentLoaded", ()=>{}, {once:true});
+(function(){
+  let canvasWired=false;
+  function wireCropCanvas() {
+    if (canvasWired) return;
+    const canvas=document.getElementById("avatar-crop-canvas");
+    if (!canvas) return;
+    canvasWired=true;
+    canvas.addEventListener("mousedown",e=>{
+      _cropDragging=true;
+      _cropDragStart={x:e.clientX,y:e.clientY};
+      _cropDragOff={x:_cropOffX,y:_cropOffY};
+      canvas.style.cursor="grabbing";
+      e.preventDefault();
+    });
+    document.addEventListener("mousemove",e=>{
+      if (!_cropDragging) return;
+      _cropOffX=_cropDragOff.x-(e.clientX-_cropDragStart.x);
+      _cropOffY=_cropDragOff.y-(e.clientY-_cropDragStart.y);
+      _clampCropOffset(); _drawCrop();
+    });
+    document.addEventListener("mouseup",()=>{ _cropDragging=false; if(canvas) canvas.style.cursor="grab"; });
+    // Touch
+    canvas.addEventListener("touchstart",e=>{
+      if(e.touches.length!==1) return;
+      const t=e.touches[0];
+      _cropDragging=true;
+      _cropDragStart={x:t.clientX,y:t.clientY};
+      _cropDragOff={x:_cropOffX,y:_cropOffY};
+      e.preventDefault();
+    },{passive:false});
+    canvas.addEventListener("touchmove",e=>{
+      if(!_cropDragging||e.touches.length!==1) return;
+      const t=e.touches[0];
+      _cropOffX=_cropDragOff.x-(t.clientX-_cropDragStart.x);
+      _cropOffY=_cropDragOff.y-(t.clientY-_cropDragStart.y);
+      _clampCropOffset(); _drawCrop(); e.preventDefault();
+    },{passive:false});
+    canvas.addEventListener("touchend",()=>{ _cropDragging=false; });
+    // Wheel zoom
+    canvas.addEventListener("wheel",e=>{
+      e.preventDefault();
+      const delta=e.deltaY>0?-0.05:0.05;
+      const newZoom=Math.max(parseFloat(document.getElementById("crop-zoom-slider")?.min||0.1), _cropZoom+delta);
+      const oldZoom=_cropZoom; _cropZoom=newZoom;
+      // Keep center fixed
+      const W=CROP_CANVAS_SIZE;
+      _cropOffX=(_cropOffX+W/2)*(_cropZoom/oldZoom)-W/2;
+      _cropOffY=(_cropOffY+W/2)*(_cropZoom/oldZoom)-W/2;
+      _clampCropOffset();
+      const sl=document.getElementById("crop-zoom-slider");
+      if(sl) sl.value=_cropZoom;
+      _drawCrop();
+    },{passive:false});
+    canvas.style.cursor="grab";
+  }
+  // Wire after modal first opens
+  const observer=new MutationObserver(()=>wireCropCanvas());
+  observer.observe(document.body, {childList:true, subtree:true});
+})();
+
+// Zoom slider
+document.addEventListener("input",e=>{
+  if(e.target.id!=="crop-zoom-slider") return;
+  const newZoom=parseFloat(e.target.value);
+  if(!_cropImg) return;
+  const oldZoom=_cropZoom; _cropZoom=newZoom;
+  const W=CROP_CANVAS_SIZE;
+  _cropOffX=(_cropOffX+W/2)*(_cropZoom/oldZoom)-W/2;
+  _cropOffY=(_cropOffY+W/2)*(_cropZoom/oldZoom)-W/2;
+  _clampCropOffset(); _drawCrop();
+});
+
+// File input → open crop
+document.addEventListener("change",e=>{
+  if(e.target.id!=="settings-photo-file") return;
+  const file=e.target.files?.[0]; if(!file) return;
+  const reader=new FileReader();
+  reader.onload=ev=>_initCrop(ev.target.result);
+  reader.readAsDataURL(file);
+  e.target.value=""; // reset so same file can be re-selected
+});
+
+// "Use This Photo" confirm
+document.addEventListener("click",e=>{
+  if(!e.target.closest("#crop-confirm-btn")) return;
+  const dataUrl=_getCroppedDataUrl();
+  if (!dataUrl) { showToast("No image loaded"); return; }
+  // Put into the URL input so save-settings uses it
+  const photoInput=document.getElementById("settings-photo-input");
+  if (photoInput) { photoInput.value=dataUrl; }
+  closeModal("avatar-crop-modal");
+  _updateSettingsPreview();
+  showToast("Photo cropped! Hit Save Changes to apply.");
+});
 
 /* =====================================================================
    EMOJI PICKER  (with category tabs)

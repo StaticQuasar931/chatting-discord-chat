@@ -473,6 +473,9 @@ export function buildUI() {
       <!-- Left nav -->
       <nav class="settings-discord-nav">
         <div class="settings-discord-nav-label">User Settings</div>
+        <div class="settings-search-wrap">
+          <input type="text" id="settings-search-input" placeholder="Search settings…" autocomplete="off" />
+        </div>
         <button class="settings-discord-nav-item active" data-pane="account">Account &amp; Profile</button>
         <button class="settings-discord-nav-item" data-pane="appearance">Appearance</button>
         <div class="settings-discord-nav-divider"></div>
@@ -492,8 +495,16 @@ export function buildUI() {
             <div class="settings-account-form">
 
               <div class="settings-field-group">
-                <label class="modal-label">Profile Photo URL</label>
-                <input type="text" id="settings-photo-input" placeholder="https://… (leave blank to use Google photo)" autocomplete="off" />
+                <label class="modal-label">Profile Photo</label>
+                <div class="avatar-upload-row">
+                  <input type="text" id="settings-photo-input" placeholder="Paste image URL, or upload below…" autocomplete="off" />
+                  <label class="btn-secondary avatar-upload-label" title="Upload a photo from your device">
+                    <svg viewBox="0 0 24 24" width="14" height="14" style="flex-shrink:0"><path fill="currentColor" d="M9 16h6v-6h4l-7-7-7 7h4v6zm-4 2h14v2H5v-2z"/></svg>
+                    Upload
+                    <input type="file" id="settings-photo-file" accept="image/*" style="display:none" />
+                  </label>
+                </div>
+                <p class="hint" style="margin:4px 0 0;font-size:11px;">Upload will let you crop to a circle. URL input also works.</p>
               </div>
               <div class="settings-field-group">
                 <label class="modal-label">Username</label>
@@ -707,6 +718,33 @@ export function buildUI() {
       <button class="settings-discord-close-btn" data-close="settings-modal" title="Close (Esc)">
         <svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
       </button>
+    </div>
+  </div>
+
+  <!-- Avatar Crop Modal -->
+  <div class="modal hidden" id="avatar-crop-modal">
+    <div class="modal-card" style="max-width:360px;width:calc(100% - 32px);">
+      <div class="modal-head">
+        <h2>Crop Profile Picture</h2>
+        <button class="icon-btn modal-close" data-close="avatar-crop-modal">
+          <svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </div>
+      <div class="modal-body" style="padding-top:0;">
+        <div class="crop-canvas-wrap">
+          <canvas id="avatar-crop-canvas" width="280" height="280"></canvas>
+        </div>
+        <div class="crop-zoom-row">
+          <svg viewBox="0 0 24 24" width="14" height="14" style="flex-shrink:0;color:var(--t-muted)"><path fill="currentColor" d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg>
+          <input type="range" id="crop-zoom-slider" min="0.5" max="4" step="0.01" value="1" style="flex:1;" />
+          <svg viewBox="0 0 24 24" width="18" height="18" style="flex-shrink:0;color:var(--t-muted)"><path fill="currentColor" d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg>
+        </div>
+        <p class="hint" style="text-align:center;margin:6px 0 0;font-size:11px;">Drag to pan · Scroll or slider to zoom</p>
+      </div>
+      <div class="modal-foot">
+        <button class="btn-secondary" data-close="avatar-crop-modal">Cancel</button>
+        <button class="btn-primary" id="crop-confirm-btn">Use This Photo</button>
+      </div>
     </div>
   </div>
 

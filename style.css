@@ -1294,15 +1294,42 @@ body[data-theme="daylight"] .msg-followup:hover { background: rgba(0,0,50,.05); 
   width: 22px; height: 22px; border-radius: 6px;
   vertical-align: middle; cursor: default; user-select: none;
   box-shadow: 0 1px 4px rgba(0,0,0,0.35);
-  transition: transform .12s, box-shadow .12s;
-  flex-shrink: 0;
+  transition: transform .15s, box-shadow .15s;
+  flex-shrink: 0; position: relative;
 }
 .badge-icon-wrap:hover {
-  transform: translateY(-2px) scale(1.12);
-  box-shadow: 0 4px 10px rgba(0,0,0,0.45);
+  transform: translateY(-3px) scale(1.15);
+  box-shadow: 0 6px 14px rgba(0,0,0,0.5);
+  z-index: 2;
 }
-.profile-card-badges .badge-icon-wrap { width: 26px; height: 26px; border-radius: 7px; }
-.spp-preview-badges .badge-icon-wrap  { width: 24px; height: 24px; border-radius: 6px; }
+/* Tier 1 — glow + larger + subtle animation */
+.badge-icon-wrap.badge-t1 {
+  width: 26px; height: 26px; border-radius: 8px;
+  box-shadow: 0 0 0 2px rgba(255,255,255,.15), 0 2px 8px rgba(0,0,0,.5);
+  animation: badge-t1-pulse 3s ease-in-out infinite;
+}
+.badge-icon-wrap.badge-t1 svg { width: 16px; height: 16px; }
+@keyframes badge-t1-pulse {
+  0%,100% { box-shadow: 0 0 0 2px rgba(255,255,255,.12), 0 2px 8px rgba(0,0,0,.5); }
+  50%      { box-shadow: 0 0 0 3px rgba(255,255,255,.25), 0 4px 14px rgba(0,0,0,.6); }
+}
+/* Tier 2 — subtle border */
+.badge-icon-wrap.badge-t2 {
+  width: 24px; height: 24px; border-radius: 7px;
+  box-shadow: 0 0 0 1px rgba(255,255,255,.12), 0 2px 6px rgba(0,0,0,.4);
+}
+.badge-icon-wrap.badge-t2 svg { width: 14px; height: 14px; }
+/* Tier 3 — normal */
+.badge-icon-wrap.badge-t3 { box-shadow: 0 1px 5px rgba(0,0,0,.4); }
+/* Tier 4 — slightly muted */
+.badge-icon-wrap.badge-t4 { opacity: .9; }
+/* Profile card / settings preview overrides */
+.profile-card-badges .badge-icon-wrap      { width: 26px; height: 26px; border-radius: 7px; }
+.profile-card-badges .badge-icon-wrap.badge-t1 { width: 30px; height: 30px; border-radius: 9px; }
+.profile-card-badges .badge-icon-wrap.badge-t1 svg { width: 18px; height: 18px; }
+.profile-card-badges .badge-icon-wrap.badge-t2 { width: 28px; height: 28px; }
+.spp-preview-badges .badge-icon-wrap       { width: 24px; height: 24px; border-radius: 6px; }
+.spp-preview-badges .badge-icon-wrap.badge-t1 { width: 28px; height: 28px; }
 
 /* =================================================
    SLASH COMMAND AUTOCOMPLETE
@@ -1343,29 +1370,9 @@ body[data-theme="daylight"] .msg-followup:hover { background: rgba(0,0,50,.05); 
 .ctx-divider { height: 1px; background: var(--c-border-2); margin: 4px 0; }
 
 /* =================================================
-   GIF PICKER
+   GIF PICKER — (superseded by improved section below)
    ================================================= */
-.gif-picker {
-  position: absolute; bottom: 88px; right: 16px;
-  width: 360px; max-width: calc(100% - 32px); max-height: 420px;
-  background: var(--c-sidebar); border: 1px solid var(--c-border);
-  border-radius: var(--radius-lg); box-shadow: var(--shadow-2);
-  z-index: 20; display: flex; flex-direction: column; overflow: hidden;
-}
-.gif-picker-header {
-  display: flex; gap: 6px; padding: 8px 8px 0;
-}
-.gif-picker-header input {
-  flex: 1; background: var(--c-input-2); outline: none; border: 1px solid transparent;
-  padding: 7px 10px; border-radius: var(--radius-sm); font-size: 13px;
-  color: var(--t-primary); transition: border-color .12s;
-}
-.gif-picker-header input:focus { border-color: var(--c-accent); }
-.gif-footer {
-  padding: 4px 8px; border-top: 1px solid var(--c-border-2); text-align: right;
-}
-/* gif-grid and gif-cell styles are defined in the GIF PICKER — improved section below */
-.gif-hint { text-align: center; color: var(--t-muted); font-size: 13px; padding: 24px; }
+/* All GIF picker styles are in the "GIF PICKER — improved" section */
 
 /* =================================================
    GIF BUTTON IN COMPOSER
@@ -1376,8 +1383,8 @@ body[data-theme="daylight"] .msg-followup:hover { background: rgba(0,0,50,.05); 
   color: var(--t-muted); border-radius: var(--radius-sm);
   transition: background .12s, color .12s;
 }
-/* raise SVG badge 2px so it sits at same optical height as other icons */
-.composer-gif-btn svg { transform: translateY(-2px); }
+/* raise SVG 4px so it sits at same optical height as other toolbar icons */
+.composer-gif-btn svg { transform: translateY(-4px); }
 .composer-gif-btn:hover { background: rgba(255,255,255,.08); color: var(--t-primary); }
 
 /* =================================================
@@ -1725,6 +1732,17 @@ body[data-theme="daylight"] .msg-followup:hover { background: rgba(0,0,50,.05); 
   padding: 36px 8px 16px; display: flex; flex-direction: column;
   gap: 2px; overflow-y: auto; border-right: 1px solid var(--c-border-2);
 }
+.settings-search-wrap {
+  padding: 8px 12px 4px;
+}
+.settings-search-wrap input {
+  width: 100%; background: var(--c-input-2); border: 1px solid var(--c-border-2);
+  border-radius: var(--radius-sm); padding: 6px 10px; font-size: 12px;
+  color: var(--t-primary); outline: none; transition: border-color .12s;
+  box-sizing: border-box;
+}
+.settings-search-wrap input:focus { border-color: var(--c-accent); }
+.settings-search-wrap input::placeholder { color: var(--t-muted); }
 .settings-discord-nav-label {
   font-size: 11px; font-weight: 700; text-transform: uppercase;
   letter-spacing: 0.05em; color: var(--t-muted);
@@ -2023,7 +2041,7 @@ body[data-theme="daylight"] .msg-followup:hover { background: rgba(0,0,50,.05); 
    ================================================= */
 .gif-picker {
   position: absolute; bottom: 88px; right: 16px;
-  width: 380px; max-width: calc(100% - 32px); max-height: 480px;
+  width: 420px; max-width: calc(100% - 32px); max-height: 500px;
   background: var(--c-overlay); border: 1px solid var(--c-border);
   border-radius: var(--radius-lg); box-shadow: var(--shadow-2);
   display: flex; flex-direction: column; overflow: hidden;
@@ -2041,7 +2059,15 @@ body[data-theme="daylight"] .msg-followup:hover { background: rgba(0,0,50,.05); 
   font-size: 14px; outline: none; min-width: 0;
 }
 .gif-search-wrap input::placeholder { color: var(--t-muted); }
-.gif-cats { padding: 6px 8px; }
+.gif-cats { padding: 6px 8px; display: flex; flex-wrap: wrap; gap: 4px; }
+.gif-cat-btn {
+  font-size: 11px; padding: 3px 8px; border-radius: var(--radius-pill);
+  background: var(--c-input); color: var(--t-secondary);
+  border: 1px solid var(--c-border-2); cursor: pointer; transition: background .1s, color .1s;
+  white-space: nowrap;
+}
+.gif-cat-btn:hover { background: var(--c-input-2); color: var(--t-primary); }
+.gif-cat-btn.active { background: var(--c-accent); color: #fff; border-color: var(--c-accent); }
 .gif-grid {
   flex: 1; overflow-y: auto; overflow-x: hidden;
   padding: 4px 8px 8px;
@@ -2095,6 +2121,38 @@ body[data-theme="daylight"] .msg-followup:hover { background: rgba(0,0,50,.05); 
 .spp-name { font-size: 16px; font-weight: 700; color: var(--t-primary); }
 .spp-tag  { font-size: 12px; color: var(--t-muted); }
 .spp-preview-badges { display: flex; flex-wrap: wrap; gap: 3px; margin: 4px 0 0; min-height: 0; }
+
+/* =================================================
+   AVATAR UPLOAD ROW + CROP MODAL
+   ================================================= */
+.avatar-upload-row {
+  display: flex; gap: 8px; align-items: center;
+}
+.avatar-upload-row input[type="text"] { flex: 1; min-width: 0; }
+.avatar-upload-label {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-size: 12px; padding: 7px 12px; flex-shrink: 0;
+  cursor: pointer; border-radius: var(--radius-sm);
+  border: 1px solid var(--c-border-2); color: var(--t-secondary);
+  background: var(--c-input); transition: background .12s, border-color .12s;
+  user-select: none; white-space: nowrap;
+}
+.avatar-upload-label:hover { background: var(--c-input-2); border-color: var(--c-accent); color: var(--t-primary); }
+.crop-canvas-wrap {
+  display: flex; justify-content: center; padding: 12px 0 4px;
+}
+#avatar-crop-canvas {
+  border-radius: 50%; cursor: grab; display: block;
+  max-width: 100%; background: var(--c-input-2);
+}
+#avatar-crop-canvas:active { cursor: grabbing; }
+.crop-zoom-row {
+  display: flex; align-items: center; gap: 8px; padding: 10px 4px 0;
+}
+.crop-zoom-row input[type="range"] {
+  flex: 1; accent-color: var(--c-accent); height: 4px; cursor: pointer;
+}
+
 .settings-field-group { margin-bottom: 20px; }
 .settings-field-group:last-of-type { margin-bottom: 0; }
 /* Hex input in banner custom section */
