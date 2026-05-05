@@ -1673,38 +1673,83 @@ const QUICK_REACTS = ["👍","❤️","😂","😮","😢"];
 // OG cutoff — any account created before this timestamp gets an OG badge automatically
 const OG_CUTOFF_MS = new Date("2026-05-04T00:00:00Z").getTime();
 
+/* Each badge: bg color, icon SVG path (24×24), tooltip title */
 const BADGE_DEFS = {
-  // ── Founding / Longevity ────────────────────────────────────────────
-  og:           { label:"⭐ OG",          color:"#ffd700", bg:"rgba(255,215,0,.18)",   border:"rgba(255,215,0,.3)",  title:"Original member — joined before May 4th 2026" },
-  og_og:        { label:"🌟 Day One",      color:"#ffaa00", bg:"rgba(255,170,0,.18)",   border:"rgba(255,170,0,.3)",  title:"Day One — one of the very first users" },
-  early_tester: { label:"🧪 Early Tester", color:"#58a6ff", bg:"rgba(88,166,255,.16)", border:"rgba(88,166,255,.3)", title:"Helped test before public launch" },
-
-  // ── Community ───────────────────────────────────────────────────────
-  helper:       { label:"🤝 Helper",       color:"#23a55a", bg:"rgba(35,165,90,.16)",  border:"rgba(35,165,90,.3)",  title:"Goes out of their way to help others" },
-  active:       { label:"💬 Active",        color:"#4f7cff", bg:"rgba(79,124,255,.14)", border:"rgba(79,124,255,.3)", title:"Super active member of the community" },
-  friendly:     { label:"💛 Friendly",      color:"#f0b232", bg:"rgba(240,178,50,.16)", border:"rgba(240,178,50,.3)", title:"Known for being kind and welcoming" },
-
-  // ── Contributions ──────────────────────────────────────────────────
-  bug_reporter: { label:"🐛 Bug Reporter",  color:"#eb459e", bg:"rgba(235,69,158,.15)", border:"rgba(235,69,158,.3)", title:"Found and reported bugs to improve the app" },
-  suggester:    { label:"💡 Suggester",     color:"#7c3aed", bg:"rgba(124,58,237,.15)", border:"rgba(124,58,237,.3)", title:"Suggested features that made it in" },
-
-  // ── Special / Staff-adjacent ───────────────────────────────────────
-  trusted:      { label:"🔵 Trusted",       color:"#5bc4fc", bg:"rgba(91,196,252,.14)", border:"rgba(91,196,252,.3)", title:"A trusted and respected community member" },
-  creator:      { label:"👑 Creator",       color:"#ff8c42", bg:"rgba(255,140,66,.16)", border:"rgba(255,140,66,.3)", title:"Made Static Chat" },
-  partner:      { label:"🤖 Partner",       color:"#9c84ec", bg:"rgba(156,132,236,.15)",border:"rgba(156,132,236,.3)",title:"Official partner" },
-
-  // ── Fun / Achievement ──────────────────────────────────────────────
-  gif_master:   { label:"🎭 GIF Master",   color:"#f23f43", bg:"rgba(242,63,67,.14)",  border:"rgba(242,63,67,.3)",  title:"Sent an absurd number of GIFs" },
-  emoji_lord:   { label:"😄 Emoji Lord",   color:"#f0b232", bg:"rgba(240,178,50,.14)", border:"rgba(240,178,50,.3)", title:"Reaction royalty" },
-  night_owl:    { label:"🦉 Night Owl",    color:"#6b7cce", bg:"rgba(107,124,206,.14)",border:"rgba(107,124,206,.3)",title:"Always online at night" },
+  og: {
+    bg:"#f59e0b", title:"OG — Joined before May 4th 2026",
+    icon:`<path fill="currentColor" d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/>`
+  },
+  og_og: {
+    bg:"#f97316", title:"Day One — One of the very first users ever",
+    icon:`<path fill="currentColor" d="M12 1l2.753 5.58 6.157.895-4.455 4.342 1.051 6.128L12 15l-5.506 2.945 1.051-6.128L3.09 7.475l6.157-.895z"/><circle cx="12" cy="12" r="3.5" fill="none" stroke="currentColor" stroke-width="1.5"/>`
+  },
+  early_tester: {
+    bg:"#3b82f6", title:"Early Tester — Helped test before launch",
+    icon:`<path fill="currentColor" d="M9 3v8L5.5 17A2 2 0 0 0 7.36 20h9.28a2 2 0 0 0 1.86-3L15 11V3H9zm0 0h6M10 3h4"/><path fill="none" stroke="currentColor" stroke-width="1.5" d="M9 3v8L5.5 17A2 2 0 0 0 7.36 20h9.28a2 2 0 0 0 1.86-3L15 11V3"/><line x1="9" y1="3" x2="15" y2="3" stroke="currentColor" stroke-width="1.5"/><circle cx="9.5" cy="15" r="1" fill="currentColor"/>`
+  },
+  helper: {
+    bg:"#10b981", title:"Helper — Goes out of their way to help others",
+    icon:`<path fill="currentColor" d="M11.5 2C9 2 7 4 7 6.5c0 1.7.9 3.2 2.2 4l-.7 4h6L13.8 10.5c1.3-.8 2.2-2.3 2.2-4C16 4 14 2 11.5 2zm.5 13v5h-2v-5h2z"/>`
+  },
+  active: {
+    bg:"#4f7cff", title:"Active — Super active member of the community",
+    icon:`<path fill="currentColor" d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 14.5v-9l6 4.5-6 4.5z"/>`
+  },
+  friendly: {
+    bg:"#eab308", title:"Friendly — Known for being kind and welcoming",
+    icon:`<path fill="currentColor" d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/>`
+  },
+  bug_reporter: {
+    bg:"#ec4899", title:"Bug Reporter — Found and reported bugs to improve the app",
+    icon:`<path fill="currentColor" d="M20 8h-2.81c-.45-.78-1.07-1.45-1.82-1.96L17 4.41 15.59 3l-2.17 2.17a6.003 6.003 0 0 0-2.83 0L8.41 3 7 4.41l1.62 1.63C7.88 6.55 7.26 7.22 6.81 8H4v2h2.09c-.05.33-.09.66-.09 1v1H4v2h2v1c0 .34.04.67.09 1H4v2h2.81c1.04 1.79 2.97 3 5.19 3s4.15-1.21 5.19-3H20v-2h-2.09c.05-.33.09-.66.09-1v-1h2v-2h-2v-1c0-.34-.04-.67-.09-1H20V8zm-6 8h-4v-2h4v2zm0-4h-4v-2h4v2z"/>`
+  },
+  suggester: {
+    bg:"#8b5cf6", title:"Suggester — Suggested features that made it in",
+    icon:`<path fill="currentColor" d="M12 2C8.13 2 5 5.13 5 9c0 2.38 1.19 4.47 3 5.74V17c0 .55.45 1 1 1h6c.55 0 1-.45 1-1v-2.26c1.81-1.27 3-3.36 3-5.74 0-3.87-3.13-7-7-7zm3 10.5l-1 .67V16h-4v-2.83l-1-.67C7.72 11.67 7 10.39 7 9c0-2.76 2.24-5 5-5s5 2.24 5 5c0 1.39-.72 2.67-2 3.5z"/>`
+  },
+  trusted: {
+    bg:"#06b6d4", title:"Trusted — A trusted and respected member",
+    icon:`<path fill="currentColor" d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4zm-2 16l-4-4 1.41-1.41L10 14.17l6.59-6.59L18 9l-8 8z"/>`
+  },
+  creator: {
+    bg:"#f97316", title:"Creator — Made Static Chat",
+    icon:`<path fill="currentColor" d="M5 16L3 5l5.5 5L12 4l3.5 6L21 5l-2 11H5zm14 3c0 .6-.4 1-1 1H6c-.6 0-1-.4-1-1v-1h14v1z"/>`
+  },
+  partner: {
+    bg:"#7c3aed", title:"Partner — Official Static Chat partner",
+    icon:`<path fill="currentColor" d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/>`
+  },
+  gif_master: {
+    bg:"#ef4444", title:"GIF Master — Sent an absurd number of GIFs",
+    icon:`<path fill="currentColor" d="M12 3c-4.97 0-9 4.03-9 9s4.03 9 9 9c.83 0 1.5-.67 1.5-1.5 0-.39-.15-.74-.39-1.01-.23-.26-.38-.61-.38-.99 0-.83.67-1.5 1.5-1.5H16c2.76 0 5-2.24 5-5 0-4.42-4.03-8-9-8zm-5.5 9c-.83 0-1.5-.67-1.5-1.5S5.67 9 6.5 9 8 9.67 8 10.5 7.33 12 6.5 12zm3-4C8.67 8 8 7.33 8 6.5S8.67 5 9.5 5s1.5.67 1.5 1.5S10.33 8 9.5 8zm5 0c-.83 0-1.5-.67-1.5-1.5S13.67 5 14.5 5s1.5.67 1.5 1.5S15.33 8 14.5 8zm3 4c-.83 0-1.5-.67-1.5-1.5S16.67 9 17.5 9s1.5.67 1.5 1.5-.67 1.5-1.5 1.5z"/>`
+  },
+  emoji_lord: {
+    bg:"#f59e0b", title:"Emoji Lord — Reaction royalty",
+    icon:`<path fill="currentColor" d="M11.99 2C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2zM12 20c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8zm3.5-9c.83 0 1.5-.67 1.5-1.5S16.33 8 15.5 8 14 8.67 14 9.5s.67 1.5 1.5 1.5zm-7 0c.83 0 1.5-.67 1.5-1.5S9.33 8 8.5 8 7 8.67 7 9.5 7.67 11 8.5 11zm3.5 6.5c2.33 0 4.31-1.46 5.11-3.5H6.89c.8 2.04 2.78 3.5 5.11 3.5z"/>`
+  },
+  night_owl: {
+    bg:"#6366f1", title:"Night Owl — Always online at night",
+    icon:`<path fill="currentColor" d="M12 3a9 9 0 1 0 9 9c0-.46-.04-.92-.1-1.36a5.389 5.389 0 0 1-4.4 2.26 5.403 5.403 0 0 1-3.14-9.8c-.44-.06-.9-.1-1.36-.1z"/>`
+  },
 };
 
+// Render a row of compact icon-only badges for profile display
 function renderBadges(badges=[]) {
   if (!badges||!badges.length) return "";
   return badges.map(b=>{
     const d=BADGE_DEFS[b]; if(!d) return "";
-    const borderStyle=d.border?`border-color:${d.border};`:"";
-    return `<span class="badge-chip" title="${escapeHtml(d.title)}" style="color:${d.color};background:${d.bg};${borderStyle}">${escapeHtml(d.label)}</span>`;
+    return `<span class="badge-icon-wrap" title="${escapeHtml(d.title)}" style="background:${d.bg}">
+      <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true" style="color:#fff">${d.icon}</svg>
+    </span>`;
+  }).join("");
+}
+
+// Render text-label badges for search/admin use only (not displayed to users normally)
+function renderBadgeLabels(badges=[]) {
+  if (!badges||!badges.length) return "";
+  return badges.map(b=>{
+    const d=BADGE_DEFS[b]; if(!d) return "";
+    return `<span class="badge-chip" title="${escapeHtml(d.title)}" style="background:${d.bg};color:#fff;">${escapeHtml(b.replace(/_/g," "))}</span>`;
   }).join("");
 }
 
@@ -1837,7 +1882,6 @@ function renderMessages() {
             <div class="msg-head">
               <span class="msg-author" data-profile-uid="${escapeHtml(m.senderUid)}">${escapeHtml(m.senderName||"User")}</span>
               ${isLeader?`<span class="leader-badge">👑</span>`:""}
-              ${renderBadges(badges)}
               <span class="msg-time">${escapeHtml(formatTime(ts))}</span>
             </div>
             ${replyHtml}
@@ -3581,7 +3625,7 @@ document.addEventListener("click", async e=>{
   else if (action==="ctx-delete") { await deleteMessage(msgId); }
   else if (action==="ctx-report") { openReportModal(uid, name, msgId); }
   else if (action==="ctx-fav-gif") {
-    const url=item.dataset.url, previewUrl=item.dataset.previewurl||item.dataset.url, title=item.dataset.title||"";
+    const url=item.dataset.url, previewUrl=item.dataset.previewUrl||item.dataset.previewurl||item.dataset.url, title=item.dataset.title||"";
     if (!url||!state.user) return;
     if (state.favGifs[url]) {
       delete state.favGifs[url];
@@ -4014,8 +4058,9 @@ window.addEventListener("beforeunload", ()=>{
 
 
 /* =====================================================================
-   ESC KEY — close any open overlay
+   ESC KEY — close any open overlay  (double-Escape = scroll to bottom)
    ===================================================================== */
+let _lastEscTime = 0;
 document.addEventListener("keydown", e => {
   if (e.key !== "Escape") return;
   let closed = false;
@@ -4054,9 +4099,27 @@ document.addEventListener("keydown", e => {
     if (openModal) {
       // Don't close profile-setup modal (required flow)
       if (openModal.id !== "profile-setup-modal" && openModal.id !== "tos-overlay") {
-        closeModal(openModal.id);
+        closeModal(openModal.id); closed = true;
       }
     }
+  }
+
+  // Double-Escape → scroll to newest messages (bottom)
+  const now = Date.now();
+  if (!closed) {
+    if (now - _lastEscTime < 450) {
+      // Second Escape within 450ms — jump to bottom
+      const msgWrap = $("#messages");
+      if (msgWrap) {
+        msgWrap.scrollTo({ top: msgWrap.scrollHeight, behavior: "smooth" });
+        showToast("⬇️ Jumped to latest messages");
+      }
+      _lastEscTime = 0; // reset so triple-Esc doesn't re-trigger
+    } else {
+      _lastEscTime = now;
+    }
+  } else {
+    _lastEscTime = 0; // something was closed — reset double-Esc timer
   }
 });
 

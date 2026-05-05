@@ -1288,6 +1288,22 @@ body[data-theme="daylight"] .msg-followup:hover { background: rgba(0,0,50,.05); 
 .profile-card-badges { display: flex; flex-wrap: wrap; gap: 5px; margin: 6px 0 4px; }
 .profile-card-badges .badge-chip { font-size: 11px; padding: 3px 8px; }
 
+/* Badge icon-only pills (profile cards, settings preview) */
+.badge-icon-wrap {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 22px; height: 22px; border-radius: 6px;
+  vertical-align: middle; cursor: default; user-select: none;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.35);
+  transition: transform .12s, box-shadow .12s;
+  flex-shrink: 0;
+}
+.badge-icon-wrap:hover {
+  transform: translateY(-2px) scale(1.12);
+  box-shadow: 0 4px 10px rgba(0,0,0,0.45);
+}
+.profile-card-badges .badge-icon-wrap { width: 26px; height: 26px; border-radius: 7px; }
+.spp-preview-badges .badge-icon-wrap  { width: 24px; height: 24px; border-radius: 6px; }
+
 /* =================================================
    SLASH COMMAND AUTOCOMPLETE
    ================================================= */
@@ -1355,11 +1371,13 @@ body[data-theme="daylight"] .msg-followup:hover { background: rgba(0,0,50,.05); 
    GIF BUTTON IN COMPOSER
    ================================================= */
 .composer-gif-btn {
-  width: auto !important; padding: 0 7px;
-  font-size: 11px; font-weight: 700; letter-spacing: 0.04em;
+  width: 34px !important; height: 34px; padding: 0;
+  display: flex; align-items: center; justify-content: center;
   color: var(--t-muted); border-radius: var(--radius-sm);
   transition: background .12s, color .12s;
 }
+/* raise SVG badge 2px so it sits at same optical height as other icons */
+.composer-gif-btn svg { transform: translateY(-2px); }
 .composer-gif-btn:hover { background: rgba(255,255,255,.08); color: var(--t-primary); }
 
 /* =================================================
@@ -2025,12 +2043,13 @@ body[data-theme="daylight"] .msg-followup:hover { background: rgba(0,0,50,.05); 
 .gif-search-wrap input::placeholder { color: var(--t-muted); }
 .gif-cats { padding: 6px 8px; }
 .gif-grid {
-  flex: 1; overflow-y: auto; overflow-x: hidden; padding: 4px 8px 8px;
-  display: grid; grid-template-columns: repeat(2, 1fr); gap: 4px;
-  align-content: start;
+  flex: 1; overflow-y: auto; overflow-x: hidden;
+  padding: 4px 8px 8px;
+  columns: 2; column-gap: 4px;
 }
 .gif-cell {
   display: block; width: 100%;
+  break-inside: avoid; margin-bottom: 4px;
   border-radius: var(--radius-sm); overflow: hidden;
   cursor: pointer; border: 2px solid transparent;
   transition: border-color .12s, opacity .1s;
@@ -2053,7 +2072,7 @@ body[data-theme="daylight"] .msg-followup:hover { background: rgba(0,0,50,.05); 
 }
 .gif-fav-btn:hover { background: rgba(242,63,67,.85); transform: scale(1.15); }
 .gif-fav-btn.active { opacity: 1; background: rgba(242,63,67,.85); color: #fff; }
-.gif-hint { color: var(--t-muted); font-size: 13px; padding: 20px 8px; text-align: center; grid-column: 1/-1; }
+.gif-hint { color: var(--t-muted); font-size: 13px; padding: 20px 8px; text-align: center; column-span: all; }
 .gif-footer {
   display: flex; align-items: center; justify-content: center; gap: 4px;
   font-size: 10px; color: var(--t-muted); padding: 4px 8px;

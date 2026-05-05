@@ -346,10 +346,13 @@ export function buildUI() {
               </svg>
             </button>
             <button class="icon-btn composer-gif-btn" id="gif-btn" title="Send a GIF">
-              <!-- GIF badge icon -->
-              <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
-                <rect x="2" y="5" width="20" height="14" rx="3" ry="3" fill="none" stroke="currentColor" stroke-width="1.6"/>
-                <text x="12" y="15.5" text-anchor="middle" font-family="inherit" font-weight="700" font-size="8.5" fill="currentColor" letter-spacing="0.5">GIF</text>
+              <!-- GIF badge icon — rect outline + centered text -->
+              <svg viewBox="0 0 22 12" width="22" height="12" aria-hidden="true" style="overflow:visible">
+                <rect x="0.75" y="0.75" width="20.5" height="10.5" rx="2.5" ry="2.5"
+                  fill="none" stroke="currentColor" stroke-width="1.4"/>
+                <text x="11" y="8.4" text-anchor="middle"
+                  font-family="'Segoe UI',Helvetica,Arial,sans-serif"
+                  font-weight="800" font-size="7.5" fill="currentColor" letter-spacing="0.8">GIF</text>
               </svg>
             </button>
             <button class="icon-btn composer-send-btn" id="send-btn" title="Send" data-active="false">
