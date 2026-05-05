@@ -18,13 +18,12 @@ import {
 // Inject all HTML before any DOM queries
 buildUI();
 
-// Populate loading-screen tip
+// Populate loading-screen tips
 (function() {
   const tipEl = document.getElementById("loading-tip");
   const bottomEl = document.getElementById("loading-tip-bottom");
-  const tip = getRandomTip();
-  if (tipEl) tipEl.textContent = tip;
-  if (bottomEl) bottomEl.textContent = "Static Chat · BETA";
+  if (tipEl) tipEl.textContent = getRandomTip();
+  if (bottomEl) bottomEl.textContent = getRandomTip();
 })();
 
 
@@ -34,15 +33,16 @@ buildUI();
 const STATIC_EMOJI_URL = "./thumb.jpg";
 
 const EMOJI_CATS = [
-  { id: "all",      label: "★"  },
-  { id: "smileys",  label: "😄" },
-  { id: "gestures", label: "👍" },
-  { id: "hearts",   label: "❤️" },
-  { id: "nature",   label: "🌿" },
-  { id: "food",     label: "🍕" },
-  { id: "animals",  label: "🐶" },
-  { id: "objects",  label: "💻" },
-  { id: "special",  label: "⭐" },
+  { id: "favorites", label: "♥"  },
+  { id: "all",       label: "★"  },
+  { id: "smileys",   label: "😄" },
+  { id: "gestures",  label: "👍" },
+  { id: "hearts",    label: "❤️" },
+  { id: "nature",    label: "🌿" },
+  { id: "food",      label: "🍕" },
+  { id: "animals",   label: "🐶" },
+  { id: "objects",   label: "💻" },
+  { id: "special",   label: "⭐" },
 ];
 
 const EMOJI_DATA = [
@@ -401,6 +401,9 @@ const state = {
   lastReadMarker: {},    // chatId → timestamp ms (from localStorage on open)
   chatScrolledInitial: new Set(), // chatIds that have had their initial scroll done
   silentTyping: localStorage.getItem("sc_silent_typing") === "true",
+  autoSendGif:  localStorage.getItem("sc_autosend_gif") === "true",
+  favGifs: {},   // gifUrl → { url, previewUrl, title }
+  favEmojis: {}, // emojiName → { name, char }
 };
 
 // Apply theme before anything renders
@@ -1029,6 +1032,9 @@ function cleanupAllSubscriptions() {
 
 function bootSubscriptions() {
   const uid = state.user.uid;
+  // Load cloud-saved favorites
+  loadFavGifs();
+  loadFavEmojis();
 
   state.unsubscribers.ownProfile = onSnapshot(doc(db,"users",uid), snap=>{
     if (!snap.exists()) return;
@@ -1434,10 +1440,13 @@ $("#dm-list").addEventListener("contextmenu", e=>{
   const chatId=row.dataset.chatId;
   const chat=state.chats.find(c=>c.id===chatId); if (!chat) return;
   const otherUid=chat.members.find(u=>u!==state.user?.uid);
+  const muted=isChatMuted(chatId);
   const items=[
     {label:"Open",         action:"ctx-open-dm",      data:{chatId}},
     {label:"View Profile", action:"ctx-view-profile",  data:{uid:otherUid||""}},
-    {label:"Message",      action:"ctx-message",       data:{uid:otherUid||""}},
+    "divider",
+    {label: muted?"🔔 Unmute Notifications":"🔕 Mute Notifications",
+     action:"ctx-mute-dm", data:{chatId}},
     "divider",
     {label:"Close DM",     action:"ctx-close-dm",      data:{chatId}},
   ];
@@ -1532,13 +1541,24 @@ async function openChat(chatId) {
     query(collection(db,"chats",chatId,"messages"),orderBy("createdAt","asc"),limit(200)),
     snap=>{
       const prevLen=state.messages.length;
+      const hadMessages=state.chatInitialized.has(chatId);
       state.messages=snap.docs.map(d=>({id:d.id,...d.data()}));
-      if (state.chatInitialized.has(chatId)&&state.messages.length>prevLen) {
+      const isNew=hadMessages&&state.messages.length>prevLen;
+      if (isNew) {
         const newest=state.messages[state.messages.length-1];
         if (newest&&newest.senderUid!==state.user.uid&&!isChatMuted(chatId)) playSound("message");
       }
       state.chatInitialized.add(chatId);
       renderMessages();
+      // Animate newest message
+      if (isNew) {
+        const wrap=$("#messages");
+        const last=wrap?.lastElementChild;
+        if (last&&!last.classList.contains("empty")) {
+          last.classList.add("new-msg");
+          last.addEventListener("animationend",()=>last.classList.remove("new-msg"),{once:true});
+        }
+      }
     },
     err=>{ console.error(err); $("#messages").innerHTML=`<div class="empty" style="color:var(--c-danger);margin:24px;">Could not load: ${escapeHtml(err.message)}</div>`; }
   );
@@ -1910,7 +1930,8 @@ const CMD_ALIASES = {
   "f":"fortune","a":"advice","j":"joke",
   "t":"truth","d":"dare","s":"ship",
   "tod":"tod","truth":"truth","dare":"dare",
-  "h":"help","?":"help"
+  "h":"help","?":"help",
+  "q2":"quote","qt":"quote"
 };
 
 async function sendCurrentMessage() {
@@ -2003,8 +2024,13 @@ function handleCommand(cmd, args) {
       const label=pct>=80?"💕 Soulmates!":pct>=60?"💖 Great match!":pct>=40?"💛 Friends first.":pct>=20?"🤔 Maybe not…":"💔 Nope.";
       return `💘 **${escapeHtml(name1)} + ${escapeHtml(name2)}**\n${bar} **${pct}%** — ${label}`;
     }
+    case "tip":
+    case "loadingtip":
+      return `💡 **Tip:** ${getRandomTip()}`;
+    case "quote":
+      return `📖 **Quote:** ${getRandomTip()}`;
     case "help":
-      return `📋 **Commands**\n/8ball [q] · /tod · /truth · /dare · /joke · /fortune · /advice · /coinflip · /roll [NdN] · /ship [a] [b]\n**Aliases:** /cf /flip (coinflip) · /r /dice (roll) · /t (truth) · /d (dare) · /j (joke) · /f (fortune) · /a (advice) · /s (ship)`;
+      return `📋 **Commands**\n/8ball [q] · /tod · /truth · /dare · /joke · /fortune · /advice · /coinflip · /roll [NdN] · /ship [a] [b] · /tip · /quote\n**Aliases:** /cf /flip (coinflip) · /r /dice (roll) · /t (truth) · /d (dare) · /j (joke) · /f (fortune) · /a (advice) · /s (ship)`;
     default: return null; // unknown command — send as plain text
   }
 }
@@ -2269,12 +2295,24 @@ function openSettingsModal(pane="account") {
   if($("#settings-tag-display"))    $("#settings-tag-display").textContent=u.discriminator?`#${u.discriminator}`:"#????";
   if($("#settings-bio-input"))      $("#settings-bio-input").value=u.bio||"";
   if($("#settings-photo-input"))    $("#settings-photo-input").value=u.photoURL||"";
-  if($("#settings-sound-toggle"))   $("#settings-sound-toggle").checked=state.soundEnabled;
-  if($("#settings-hints-toggle"))   $("#settings-hints-toggle").checked=localStorage.getItem("sc_hints")!=="false";
+  if($("#settings-sound-toggle"))          $("#settings-sound-toggle").checked=state.soundEnabled;
+  if($("#settings-hints-toggle"))          $("#settings-hints-toggle").checked=localStorage.getItem("sc_hints")!=="false";
+  if($("#settings-autosend-gif-toggle"))   $("#settings-autosend-gif-toggle").checked=state.autoSendGif;
 
   $$(".theme-swatch").forEach(sw=>sw.classList.toggle("active",sw.dataset.theme===_pendingTheme));
   $$(".status-row-option").forEach(opt=>opt.classList.toggle("active",opt.dataset.status===_pendingStatus));
   $$(".banner-swatch").forEach(sw=>sw.classList.toggle("active",(sw.dataset.color||"")===((_pendingBannerColor)||"")));
+  // Init banner type toggle UI
+  const isGradient=!_pendingBannerColor||_pendingBannerColor.includes(",");
+  $$(".banner-type-btn").forEach(b=>b.classList.toggle("active",b.dataset.type===(isGradient?"gradient":"solid")));
+  const gradSec=$("#banner-gradient-section"); const solidSec=$("#banner-solid-section");
+  if (gradSec) gradSec.style.display=isGradient?"":"none";
+  if (solidSec) solidSec.style.display=isGradient?"none":"";
+  if (!isGradient&&_pendingBannerColor) {
+    const solidPicker=$("#banner-solid-color"); const solidHex=$("#banner-solid-hex");
+    if (solidPicker) solidPicker.value=_pendingBannerColor;
+    if (solidHex) solidHex.value=_pendingBannerColor;
+  }
   const privToggle=$("#settings-privacy-toggle");
   if (privToggle) privToggle.checked=!!_pendingPrivate;
   const sinceEl=$("#settings-created-at");
@@ -2284,11 +2322,11 @@ function openSettingsModal(pane="account") {
   }
 
   updateAvatarPreview("settings",u.username||u.displayName,u.photoURL);
-  // Populate preview banner from pending banner color
+  // Populate preview banner
   const previewBanner=$("#settings-preview-banner");
   if (previewBanner&&_pendingBannerColor) {
-    const [c1,c2]=_pendingBannerColor.split(",");
-    previewBanner.style.background=c2?`linear-gradient(135deg,${c1},${c2})`:c1;
+    const parts=_pendingBannerColor.split(",");
+    previewBanner.style.background=parts.length>=2?`linear-gradient(135deg,${parts[0]},${parts[1]})`:parts[0];
   }
   const pName=$("#settings-preview-name"); if(pName) pName.textContent=u.username||u.displayName||"";
   const pTag=$("#settings-preview-tag"); if(pTag) pTag.textContent=u.discriminator?`#${u.discriminator}`:"";
@@ -2322,8 +2360,8 @@ function _updateSettingsPreview() {
   // Update banner if pending
   const banner=$("#settings-preview-banner");
   if(banner&&_pendingBannerColor){
-    const [c1,c2]=_pendingBannerColor.split(",");
-    banner.style.background=c2?`linear-gradient(135deg,${c1},${c2})`:c1;
+    const parts=_pendingBannerColor.split(",");
+    banner.style.background=parts.length>=2?`linear-gradient(135deg,${parts[0]},${parts[1]})`:parts[0];
   }
 }
 
@@ -2331,7 +2369,7 @@ function _updateSettingsPreview() {
 $("#settings-photo-input")?.addEventListener("input",_updateSettingsPreview);
 $("#settings-username-input")?.addEventListener("input",_updateSettingsPreview);
 
-// Instant-apply: sound and hints toggles take effect immediately
+// Instant-apply: sound, hints, and auto-send GIF toggles take effect immediately
 $("#settings-sound-toggle")?.addEventListener("change", e => {
   state.soundEnabled = e.target.checked;
   localStorage.setItem("sc_sound", e.target.checked ? "true" : "false");
@@ -2341,6 +2379,10 @@ $("#settings-hints-toggle")?.addEventListener("change", e => {
   localStorage.setItem("sc_hints", on ? "true" : "false");
   const hintBar = $("#composer-hint");
   if (hintBar) hintBar.classList.toggle("hidden", !on);
+});
+$("#settings-autosend-gif-toggle")?.addEventListener("change", e => {
+  state.autoSendGif = e.target.checked;
+  localStorage.setItem("sc_autosend_gif", e.target.checked ? "true" : "false");
 });
 
 // Settings modal interactions (theme/status/banner)
@@ -2358,12 +2400,59 @@ $("#settings-modal")?.addEventListener("click", e=>{
     $$(".status-row-option").forEach(o=>o.classList.toggle("active",o.dataset.status===_pendingStatus));
     return;
   }
-  const bannerSwatch=e.target.closest(".banner-swatch");
-  if (bannerSwatch) {
+  // Banner preset swatch
+  const bannerSwatch=e.target.closest(".banner-swatch:not(#banner-custom-apply)");
+  if (bannerSwatch&&bannerSwatch.dataset.color) {
     _pendingBannerColor=bannerSwatch.dataset.color||null;
     $$(".banner-swatch").forEach(s=>s.classList.toggle("active",(s.dataset.color||"")===((_pendingBannerColor)||"")));
     _updateSettingsPreview();
     return;
+  }
+  // Banner custom gradient "Apply" button
+  if (e.target.closest("#banner-custom-apply")) {
+    const c1=$("#banner-custom-color1")?.value||"#4f7cff";
+    const c2=$("#banner-custom-color2")?.value||"#7c3aed";
+    _pendingBannerColor=`${c1},${c2}`;
+    $$(".banner-swatch").forEach(s=>s.classList.remove("active"));
+    _updateSettingsPreview();
+    showToast("Custom gradient applied!");
+    return;
+  }
+  // Banner type toggle (Gradient / Solid)
+  const typeBtn=e.target.closest(".banner-type-btn");
+  if (typeBtn) {
+    $$(".banner-type-btn").forEach(b=>b.classList.toggle("active",b===typeBtn));
+    const isGrad=typeBtn.dataset.type==="gradient";
+    const gradSec=$("#banner-gradient-section"); const solidSec=$("#banner-solid-section");
+    if (gradSec) gradSec.style.display=isGrad?"":"none";
+    if (solidSec) solidSec.style.display=isGrad?"none":"";
+    if (!isGrad) {
+      // switch to solid — apply current solid color picker value
+      const hex=$("#banner-solid-color")?.value||"#4f7cff";
+      _pendingBannerColor=hex;
+      _updateSettingsPreview();
+    }
+    return;
+  }
+});
+
+// Solid color picker — live update
+document.addEventListener("input", e=>{
+  if (e.target.id==="banner-solid-color") {
+    const hex=e.target.value;
+    const hexInput=$("#banner-solid-hex");
+    if (hexInput) hexInput.value=hex;
+    _pendingBannerColor=hex;
+    _updateSettingsPreview();
+  }
+  if (e.target.id==="banner-solid-hex") {
+    const hex=e.target.value.trim();
+    if (/^#[0-9a-fA-F]{6}$/.test(hex)) {
+      const colorPicker=$("#banner-solid-color");
+      if (colorPicker) colorPicker.value=hex;
+      _pendingBannerColor=hex;
+      _updateSettingsPreview();
+    }
   }
 });
 
@@ -2453,6 +2542,12 @@ function buildEmojiGrid(filter="") {
       const altMatch=e.alt&&e.alt.some(a=>a.toLowerCase().includes(f));
       return nameMatch||altMatch;
     });
+  } else if (state.activeCat==="favorites") {
+    // Show favorited emojis from state.favEmojis
+    const favNames=Object.keys(state.favEmojis);
+    items=favNames.length
+      ? favNames.map(name=>EMOJI_DATA.find(e=>e.name===name)).filter(Boolean)
+      : [];
   } else {
     const pool = state.activeCat==="all" ? EMOJI_DATA : EMOJI_DATA.filter(e=>e.cat===state.activeCat);
     // :Static: always first in any listing
@@ -2461,9 +2556,15 @@ function buildEmojiGrid(filter="") {
     items=staticEntry?[staticEntry,...rest]:rest;
   }
   if (!emojiGrid) return;
+  if (!items.length && state.activeCat==="favorites") {
+    emojiGrid.innerHTML=`<div class="emoji-empty-fav">No favourite emojis yet.<br>Hover an emoji and click ♥ to save.</div>`;
+    return;
+  }
   emojiGrid.innerHTML=items.map(e=>{
-    if (e.isStatic) return `<button class="emoji-cell" title=":Static:" data-insert=":Static:"><img src="${STATIC_EMOJI_URL}" class="static-emoji-square" alt=":Static:" /></button>`;
-    return `<button class="emoji-cell" title=":${escapeHtml(e.name)}:" data-insert="${escapeHtml(e.char)}">${e.char}</button>`;
+    if (e.isStatic) {
+      return `<div class="emoji-item-wrap"><button class="emoji-cell" title=":Static:" data-insert=":Static:"><img src="${STATIC_EMOJI_URL}" class="static-emoji-square" alt=":Static:" /></button><button class="emoji-fav-btn${state.favEmojis["Static"]?" active":""}" data-fav-name="Static" title="${state.favEmojis["Static"]?"Remove fav":"Favourite"}">♥</button></div>`;
+    }
+    return `<div class="emoji-item-wrap"><button class="emoji-cell" title=":${escapeHtml(e.name)}:" data-insert="${escapeHtml(e.char)}">${e.char}</button><button class="emoji-fav-btn${state.favEmojis[e.name]?" active":""}" data-fav-name="${escapeHtml(e.name)}" data-fav-char="${escapeHtml(e.char)}" title="${state.favEmojis[e.name]?"Remove fav":"Favourite"}">♥</button></div>`;
   }).join("");
 }
 
@@ -2479,8 +2580,36 @@ emojiBtn?.addEventListener("click",()=>{
 
 emojiSearch?.addEventListener("input",()=>buildEmojiGrid(emojiSearch.value));
 
-// Category tab clicks
-$("#emoji-picker")?.addEventListener("click", e=>{
+// Category tab clicks + emoji fav + emoji insert
+$("#emoji-picker")?.addEventListener("click", async e=>{
+  // ── Fav button ──
+  const favBtn=e.target.closest(".emoji-fav-btn");
+  if (favBtn) {
+    e.stopPropagation();
+    const name=favBtn.dataset.favName;
+    const char=favBtn.dataset.favChar||"";
+    if (!name||!state.user) return;
+    if (state.favEmojis[name]) {
+      delete state.favEmojis[name];
+      favBtn.classList.remove("active");
+      favBtn.title="Favourite";
+      await deleteDoc(doc(db,"users",state.user.uid,"favEmojis",name));
+      showToast("💔 Removed from favourite emojis");
+    } else {
+      state.favEmojis[name]={name, char};
+      favBtn.classList.add("active");
+      favBtn.title="Remove fav";
+      await setDoc(doc(db,"users",state.user.uid,"favEmojis",name),{
+        name, char, addedAt:serverTimestamp()
+      });
+      showToast("⭐ Emoji saved!");
+    }
+    // If we're on the favorites tab, rebuild
+    if (state.activeCat==="favorites") buildEmojiGrid(emojiSearch?.value||"");
+    return;
+  }
+
+  // ── Category tab ──
   const tab=e.target.closest(".emoji-cat-btn");
   if (tab) {
     state.activeCat=tab.dataset.cat;
@@ -2488,6 +2617,8 @@ $("#emoji-picker")?.addEventListener("click", e=>{
     buildEmojiGrid(emojiSearch?.value||"");
     return;
   }
+
+  // ── Emoji insert ──
   const cell=e.target.closest(".emoji-cell");
   if (!cell) return;
   const insert=cell.dataset.insert;
@@ -2585,7 +2716,10 @@ async function showProfileCard(uid, event) {
   const bannerEl=$("#profile-card-banner");
   if (bannerEl) {
     if (bannerColor) {
-      bannerEl.style.background=`linear-gradient(135deg,${bannerColor.includes(",")?bannerColor:bannerColor+","+bannerColor})`;
+      // Single hex = solid; "c1,c2" = gradient
+      bannerEl.style.background=bannerColor.includes(",")
+        ?`linear-gradient(135deg,${bannerColor})`
+        : bannerColor;
     } else {
       bannerEl.style.background="linear-gradient(135deg,var(--c-input-2),var(--c-rail))";
     }
@@ -2859,14 +2993,15 @@ document.addEventListener("visibilitychange", ()=>{ if (!document.hidden) update
 const TENOR_KEY = "LIVDSRZULELA";
 
 const GIF_CATEGORIES=[
-  {id:"trending",  label:"Trending"},
-  {id:"reactions", label:"Reactions"},
-  {id:"memes",     label:"Memes"},
-  {id:"gaming",    label:"Gaming"},
-  {id:"animals",   label:"Animals"},
-  {id:"sports",    label:"Sports"},
-  {id:"anime",     label:"Anime"},
-  {id:"love",      label:"Love"},
+  {id:"favorites",  label:"⭐ Saved"},
+  {id:"trending",   label:"Trending"},
+  {id:"reactions",  label:"Reactions"},
+  {id:"memes",      label:"Memes"},
+  {id:"gaming",     label:"Gaming"},
+  {id:"animals",    label:"Animals"},
+  {id:"sports",     label:"Sports"},
+  {id:"anime",      label:"Anime"},
+  {id:"love",       label:"Love"},
 ];
 let _gifActiveCat="trending";
 
@@ -2881,26 +3016,41 @@ async function fetchGifs(query, isTrending=false) {
   } catch(e){ console.error("GIF:",e); return []; }
 }
 
+function _gifCellHtml(insertUrl, previewUrl, title) {
+  const isFav = !!state.favGifs[insertUrl];
+  return `<button class="gif-cell" data-gif-url="${escapeHtml(insertUrl)}"
+    data-gif-preview="${escapeHtml(previewUrl)}" data-gif-title="${escapeHtml(title)}"
+    title="${escapeHtml(title)}">
+    <img src="${escapeHtml(previewUrl)}" alt="${escapeHtml(title||"GIF")}" loading="lazy" />
+    <button class="gif-fav-btn${isFav?" active":""}" data-fav-url="${escapeHtml(insertUrl)}"
+      title="${isFav?"Remove from saved":"Save GIF"}">♥</button>
+  </button>`;
+}
+
 function renderGifGrid(results) {
   const grid=$("#gif-grid"); if (!grid) return;
   if (!results.length) { grid.innerHTML=`<p class="gif-hint">No GIFs found — try a different search.</p>`; return; }
   grid.innerHTML=results.map(r=>{
     const media=r.media?.[0];
-    // Use tinygif for preview display; gif for insertion (better quality)
     const previewUrl=media?.tinygif?.url||media?.gif?.url||"";
     const insertUrl =media?.gif?.url||media?.tinygif?.url||"";
     if (!previewUrl) return "";
-    return `<button class="gif-cell" data-gif-url="${escapeHtml(insertUrl)}" title="${escapeHtml(r.title||"")}">
-      <img src="${escapeHtml(previewUrl)}" alt="${escapeHtml(r.title||"GIF")}" loading="lazy" />
-    </button>`;
+    return _gifCellHtml(insertUrl, previewUrl, r.title||"");
   }).filter(Boolean).join("");
+}
+
+function renderFavGifGrid() {
+  const grid=$("#gif-grid"); if (!grid) return;
+  const favs=Object.values(state.favGifs);
+  if (!favs.length) { grid.innerHTML=`<p class="gif-hint">No saved GIFs yet — hover a GIF and click ♥ to save it.</p>`; return; }
+  grid.innerHTML=favs.map(f=>_gifCellHtml(f.url, f.previewUrl||f.url, f.title||"")).join("");
 }
 
 async function loadGifCategory(cat) {
   _gifActiveCat=cat;
-  // Update active tab
   $$(".gif-cat-btn").forEach(b=>b.classList.toggle("active",b.dataset.cat===cat));
   const grid=$("#gif-grid");
+  if (cat==="favorites") { renderFavGifGrid(); return; }
   if (grid) grid.innerHTML=`<p class="gif-hint">Loading…</p>`;
   const q=cat==="trending"?"":cat;
   const results=await fetchGifs(q, cat==="trending");
@@ -2959,17 +3109,29 @@ $("#gif-search-input")?.addEventListener("input", ()=>{
 $("#gif-search-input")?.addEventListener("keydown", e=>{ if(e.key==="Enter"){ clearTimeout(_gifSearchTimer); doGifSearch(); } });
 $("#gif-search-btn")?.addEventListener("click", ()=>{ clearTimeout(_gifSearchTimer); doGifSearch(); });
 
-// Click a GIF cell → insert URL into composer
+// Click a GIF cell → insert URL or auto-send
 document.addEventListener("click", e=>{
+  // Ignore clicks on the favorite button
+  if (e.target.closest(".gif-fav-btn")) return;
   const cell=e.target.closest(".gif-cell");
   if (!cell) return;
   const url=cell.dataset.gifUrl; if (!url) return;
-  const c=$("#composer-input"); if (!c) return;
-  const start=c.selectionStart, end=c.selectionEnd;
-  const sep=(c.value.trim()&&!c.value.endsWith(" "))?" ":"";
-  c.value=c.value.slice(0,start)+sep+url+c.value.slice(end);
-  c.focus(); updateSendBtn();
   $("#gif-picker")?.classList.add("hidden"); gifOpen=false;
+  if (state.autoSendGif && state.activeChatId) {
+    // Auto-send immediately
+    const c=$("#composer-input"); if (!c) return;
+    const prev=c.value;
+    c.value=url;
+    sendCurrentMessage();
+    c.value=prev; // restore any draft
+    updateSendBtn();
+  } else {
+    const c=$("#composer-input"); if (!c) return;
+    const start=c.selectionStart, end=c.selectionEnd;
+    const sep=(c.value.trim()&&!c.value.endsWith(" "))?" ":"";
+    c.value=c.value.slice(0,start)+sep+url+c.value.slice(end);
+    c.focus(); updateSendBtn();
+  }
 });
 
 // Close GIF picker on outside click
@@ -2978,6 +3140,58 @@ document.addEventListener("click", e=>{
   if (e.target.closest("#gif-picker")||e.target.closest("#gif-btn")) return;
   $("#gif-picker")?.classList.add("hidden"); gifOpen=false;
 });
+
+// GIF Favorite button click
+document.addEventListener("click", async e=>{
+  const btn=e.target.closest(".gif-fav-btn"); if (!btn) return;
+  e.stopPropagation();
+  const url=btn.dataset.favUrl; if (!url||!state.user) return;
+  const cell=btn.closest(".gif-cell");
+  const previewUrl=cell?.dataset.gifPreview||url;
+  const title=cell?.dataset.gifTitle||"";
+  if (state.favGifs[url]) {
+    // Remove
+    delete state.favGifs[url];
+    btn.classList.remove("active");
+    btn.title="Save GIF";
+    try {
+      const docId=btoa(url).replace(/[^a-zA-Z0-9]/g,"").slice(0,80);
+      await deleteDoc(doc(db,"users",state.user.uid,"favGifs",docId));
+    } catch(_){}
+    showToast("💔 Removed from saved GIFs");
+    if (_gifActiveCat==="favorites") renderFavGifGrid();
+  } else {
+    // Add
+    state.favGifs[url]={url, previewUrl, title};
+    btn.classList.add("active");
+    btn.title="Remove from saved";
+    try {
+      const docId=btoa(url).replace(/[^a-zA-Z0-9]/g,"").slice(0,80);
+      await setDoc(doc(db,"users",state.user.uid,"favGifs",docId),{
+        url, previewUrl, title, addedAt:serverTimestamp()
+      });
+    } catch(_){}
+    showToast("❤️ GIF saved!");
+  }
+});
+
+async function loadFavGifs() {
+  if (!state.user) return;
+  try {
+    const snap=await getDocs(collection(db,"users",state.user.uid,"favGifs"));
+    state.favGifs={};
+    snap.forEach(d=>{ const data=d.data(); if(data.url) state.favGifs[data.url]=data; });
+  } catch(_){}
+}
+
+async function loadFavEmojis() {
+  if (!state.user) return;
+  try {
+    const snap=await getDocs(collection(db,"users",state.user.uid,"favEmojis"));
+    state.favEmojis={};
+    snap.forEach(d=>{ const data=d.data(); if(data.name) state.favEmojis[data.name]=data; });
+  } catch(_){}
+}
 
 
 /* =====================================================================
@@ -3071,6 +3285,19 @@ document.addEventListener("click", async e=>{
 
   if (action==="ctx-open-dm")   { if(item.dataset.chatId) openChat(item.dataset.chatId); }
   else if (action==="ctx-close-dm") { if(item.dataset.chatId&&state.activeChatId===item.dataset.chatId) showFriendsView(); }
+  else if (action==="ctx-mute-dm") {
+    const cid=item.dataset.chatId; if (!cid) return;
+    if (isChatMuted(cid)) {
+      unmuteChat(cid);
+      if (state.activeChatId===cid) updateChatMuteBtn();
+      showToast("🔔 Notifications unmuted");
+    } else {
+      // Mute indefinitely from sidebar — user can change duration via chat header button
+      muteChat(cid, -1);
+      if (state.activeChatId===cid) updateChatMuteBtn();
+      showToast("🔕 Muted indefinitely — open the chat to set a duration");
+    }
+  }
   else if (action==="ctx-view-profile") { showProfileCard(uid, e); }
   else if (action==="ctx-message")  { await openOrCreateDm(uid); }
   else if (action==="ctx-edit-profile") { openSettingsModal(); }
@@ -3550,6 +3777,27 @@ document.addEventListener("keydown", e => {
       }
     }
   }
+});
+
+
+/* =====================================================================
+   AUTO-FOCUS COMPOSER ON TYPING
+   Captures printable keypresses when no input/textarea/contenteditable
+   is focused, and routes them to the composer.
+   ===================================================================== */
+document.addEventListener("keydown", e => {
+  // Ignore: modifier keys, function keys, special keys
+  if (e.ctrlKey || e.metaKey || e.altKey) return;
+  if (e.key.length !== 1) return; // not a printable char
+  // Ignore if already in an editable element
+  const tag = document.activeElement?.tagName;
+  if (tag === "INPUT" || tag === "TEXTAREA" || document.activeElement?.isContentEditable) return;
+  // Only route if chat view is active and composer exists
+  const composer = $("#composer-input");
+  if (!composer || composer.closest(".hidden")) return;
+  if (!state.activeChatId) return;
+  composer.focus();
+  // The keypress will naturally land in the now-focused composer
 });
 
 

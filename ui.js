@@ -37,39 +37,43 @@ export function buildUI() {
     <div class="login-bg-orb login-bg-orb-2"></div>
     <div class="login-bg-orb login-bg-orb-3"></div>
 
-    <!-- Centered card -->
+    <!-- Two-column card -->
     <div class="login-card">
-      <!-- Logo -->
-      <div class="login-logo-area">
-        <img class="login-logo-img" src="${LOGO}" alt="Static Chat"
-             onerror="this.src='${LOGO_FALLBACK}'" />
+
+      <!-- Left: logo & brand panel -->
+      <div class="login-left">
+        <div class="login-logo-area">
+          <img class="login-logo-img" src="${LOGO}" alt="Static Chat"
+               onerror="this.src='${LOGO_FALLBACK}'" />
+        </div>
+        <div class="login-brand-row">
+          <h1 class="login-title">Static Chat</h1>
+          <span class="login-beta-badge">BETA</span>
+        </div>
+        <p class="login-sub">A school-safe space to chat with friends</p>
       </div>
 
-      <!-- Brand -->
-      <div class="login-brand-row">
-        <h1 class="login-title">Static Chat</h1>
-        <span class="login-beta-badge">BETA</span>
+      <!-- Right: sign-in panel -->
+      <div class="login-right">
+        <ul class="login-chips">
+          <li>💬 DMs</li>
+          <li>👥 Groups</li>
+          <li>🎭 GIFs</li>
+          <li>⭐ Favorites</li>
+          <li>🔒 Safe</li>
+        </ul>
+
+        <button id="google-signin-btn" class="btn-google">
+          <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+            <path fill="#fff" d="M21.35 11.1H12v2.9h5.35c-.23 1.5-1.7 4.4-5.35 4.4-3.22 0-5.85-2.66-5.85-5.95S8.78 6.5 12 6.5c1.83 0 3.06.78 3.76 1.45l2.56-2.47C16.78 3.97 14.6 3 12 3 6.95 3 2.85 7.06 2.85 12.45S6.95 21.9 12 21.9c6.93 0 9.5-4.86 9.5-7.4 0-.5-.05-.95-.15-1.4z"/>
+          </svg>
+          Continue with Google
+        </button>
+        <p class="login-error hidden" id="login-error"></p>
+
+        <p class="login-footer">By signing in, you agree to use this platform respectfully.</p>
       </div>
-      <p class="login-sub">A school-safe space to chat with friends</p>
 
-      <!-- Feature chips -->
-      <ul class="login-chips">
-        <li>💬 DMs</li>
-        <li>👥 Groups</li>
-        <li>🎭 GIFs</li>
-        <li>🔒 Safe</li>
-      </ul>
-
-      <!-- Sign-in -->
-      <button id="google-signin-btn" class="btn-google">
-        <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
-          <path fill="#fff" d="M21.35 11.1H12v2.9h5.35c-.23 1.5-1.7 4.4-5.35 4.4-3.22 0-5.85-2.66-5.85-5.95S8.78 6.5 12 6.5c1.83 0 3.06.78 3.76 1.45l2.56-2.47C16.78 3.97 14.6 3 12 3 6.95 3 2.85 7.06 2.85 12.45S6.95 21.9 12 21.9c6.93 0 9.5-4.86 9.5-7.4 0-.5-.05-.95-.15-1.4z"/>
-        </svg>
-        Continue with Google
-      </button>
-      <p class="login-error hidden" id="login-error"></p>
-
-      <p class="login-footer">By signing in you agree to use this platform respectfully.</p>
     </div>
 
     <!-- Bottom bar — tip + plug -->
@@ -473,70 +477,103 @@ export function buildUI() {
         <div class="settings-pane" data-pane="account">
           <div class="settings-pane-title">Account &amp; Profile</div>
 
-          <!-- Live preview card -->
-          <div class="settings-profile-preview" id="settings-profile-preview-card">
-            <div class="spp-banner" id="settings-preview-banner"></div>
-            <div class="spp-body">
-              <div class="spp-avatar-wrap">
-                <div class="setup-avatar-preview" id="settings-avatar-preview" style="width:72px;height:72px;font-size:26px;">
-                  <span id="settings-avatar-initial">?</span>
+          <div class="settings-account-cols">
+
+            <!-- LEFT: Edit form -->
+            <div class="settings-account-form">
+
+              <div class="settings-field-group">
+                <label class="modal-label">Profile Photo URL</label>
+                <input type="text" id="settings-photo-input" placeholder="https://… (leave blank to use Google photo)" autocomplete="off" />
+              </div>
+              <div class="settings-field-group">
+                <label class="modal-label">Username</label>
+                <input type="text" id="settings-username-input" maxlength="32" spellcheck="false" />
+                <p class="hint" style="margin:5px 0 0;">Your full tag: <strong id="settings-tag-display">#0000</strong></p>
+              </div>
+              <div class="settings-field-group">
+                <label class="modal-label">Bio <span class="label-optional">up to 200 chars</span></label>
+                <textarea id="settings-bio-input" maxlength="200" rows="3" placeholder="Tell people a bit about yourself…"></textarea>
+              </div>
+
+              <!-- Banner section -->
+              <div class="settings-section-title" style="margin-top:20px;margin-bottom:8px;">Banner</div>
+              <div class="banner-type-row">
+                <button class="banner-type-btn active" id="banner-type-gradient" data-type="gradient">Gradient</button>
+                <button class="banner-type-btn" id="banner-type-solid" data-type="solid">Solid Color</button>
+              </div>
+              <div id="banner-gradient-section">
+                <div class="banner-swatches" id="banner-swatches">
+                  <button class="banner-swatch active" data-color="#4f7cff,#7c3aed" title="Blue-Purple" style="background:linear-gradient(135deg,#4f7cff,#7c3aed)"></button>
+                  <button class="banner-swatch" data-color="#23a55a,#1a8a4b" title="Green" style="background:linear-gradient(135deg,#23a55a,#1a8a4b)"></button>
+                  <button class="banner-swatch" data-color="#f0b232,#e0941f" title="Gold" style="background:linear-gradient(135deg,#f0b232,#e0941f)"></button>
+                  <button class="banner-swatch" data-color="#f23f43,#c0302e" title="Red" style="background:linear-gradient(135deg,#f23f43,#c0302e)"></button>
+                  <button class="banner-swatch" data-color="#ff8c42,#e07030" title="Orange" style="background:linear-gradient(135deg,#ff8c42,#e07030)"></button>
+                  <button class="banner-swatch" data-color="#1a91da,#1060a0" title="Sky" style="background:linear-gradient(135deg,#1a91da,#1060a0)"></button>
+                  <button class="banner-swatch" data-color="#e91e8c,#b5166e" title="Pink" style="background:linear-gradient(135deg,#e91e8c,#b5166e)"></button>
+                  <button class="banner-swatch" data-color="#7c3aed,#5b1fb5" title="Purple" style="background:linear-gradient(135deg,#7c3aed,#5b1fb5)"></button>
+                  <!-- Custom gradient swatches -->
+                  <div class="banner-custom-row" style="grid-column:1/-1;margin-top:6px;">
+                    <label class="banner-custom-label">Custom:</label>
+                    <input type="color" id="banner-custom-color1" value="#4f7cff" title="Start color" />
+                    <input type="color" id="banner-custom-color2" value="#7c3aed" title="End color" />
+                    <button class="banner-swatch" id="banner-custom-apply" style="width:auto;padding:0 10px;height:28px;font-size:11px;background:var(--c-input-2);color:var(--t-secondary);" title="Apply custom gradient">Apply</button>
+                  </div>
                 </div>
               </div>
-              <div class="spp-name" id="settings-preview-name">Username</div>
-              <div class="spp-tag" id="settings-preview-tag">#0000</div>
-            </div>
-          </div>
-
-          <div class="settings-field-group">
-            <label class="modal-label">Profile Photo URL</label>
-            <input type="text" id="settings-photo-input" placeholder="https://… (leave blank to use Google photo)" autocomplete="off" />
-          </div>
-          <div class="settings-field-group">
-            <label class="modal-label">Username</label>
-            <input type="text" id="settings-username-input" maxlength="32" spellcheck="false" />
-            <p class="hint" style="margin:5px 0 0;">Your full tag: <strong id="settings-tag-display">#0000</strong></p>
-          </div>
-          <div class="settings-field-group">
-            <label class="modal-label">Bio <span class="label-optional">up to 200 chars</span></label>
-            <textarea id="settings-bio-input" maxlength="200" rows="3" placeholder="Tell people a bit about yourself…"></textarea>
-          </div>
-
-          <div class="settings-section-title" style="margin-top:20px;margin-bottom:10px;">Banner Color</div>
-          <div class="banner-swatches" id="banner-swatches">
-            <button class="banner-swatch active" data-color="#4f7cff,#7c3aed" title="Blue-Purple" style="background:linear-gradient(135deg,#4f7cff,#7c3aed)"></button>
-            <button class="banner-swatch" data-color="#23a55a,#1a8a4b" title="Green" style="background:linear-gradient(135deg,#23a55a,#1a8a4b)"></button>
-            <button class="banner-swatch" data-color="#f0b232,#e0941f" title="Gold" style="background:linear-gradient(135deg,#f0b232,#e0941f)"></button>
-            <button class="banner-swatch" data-color="#f23f43,#c0302e" title="Red" style="background:linear-gradient(135deg,#f23f43,#c0302e)"></button>
-            <button class="banner-swatch" data-color="#ff8c42,#e07030" title="Orange" style="background:linear-gradient(135deg,#ff8c42,#e07030)"></button>
-            <button class="banner-swatch" data-color="#1a91da,#1060a0" title="Sky" style="background:linear-gradient(135deg,#1a91da,#1060a0)"></button>
-            <button class="banner-swatch" data-color="#e91e8c,#b5166e" title="Pink" style="background:linear-gradient(135deg,#e91e8c,#b5166e)"></button>
-            <button class="banner-swatch" data-color="#7c3aed,#5b1fb5" title="Purple" style="background:linear-gradient(135deg,#7c3aed,#5b1fb5)"></button>
-          </div>
-
-          <div style="margin-top:20px;">
-            <label class="settings-toggle-row">
-              <div class="settings-toggle-info">
-                <div class="settings-toggle-label">Private Profile</div>
-                <div class="settings-toggle-sub">Bio &amp; avatar hidden until someone searches your exact username#tag</div>
+              <div id="banner-solid-section" style="display:none;">
+                <div class="banner-custom-row">
+                  <label class="banner-custom-label">Color:</label>
+                  <input type="color" id="banner-solid-color" value="#4f7cff" title="Banner solid color" />
+                  <input type="text" id="banner-solid-hex" class="hex-input" placeholder="#4f7cff" maxlength="7" />
+                </div>
               </div>
-              <span class="toggle-switch">
-                <input type="checkbox" id="settings-privacy-toggle" />
-                <span class="toggle-track"></span>
-              </span>
-            </label>
-          </div>
 
-          <div class="settings-field-group" style="margin-top:16px;">
-            <div class="settings-info-row">
-              <span class="settings-info-label">Member Since</span>
-              <span id="settings-created-at" class="settings-info-value">—</span>
+              <div style="margin-top:20px;">
+                <label class="settings-toggle-row">
+                  <div class="settings-toggle-info">
+                    <div class="settings-toggle-label">Private Profile</div>
+                    <div class="settings-toggle-sub">Bio &amp; avatar hidden until someone searches your exact username#tag</div>
+                  </div>
+                  <span class="toggle-switch">
+                    <input type="checkbox" id="settings-privacy-toggle" />
+                    <span class="toggle-track"></span>
+                  </span>
+                </label>
+              </div>
+
+              <div class="settings-field-group" style="margin-top:16px;">
+                <div class="settings-info-row">
+                  <span class="settings-info-label">Member Since</span>
+                  <span id="settings-created-at" class="settings-info-value">—</span>
+                </div>
+              </div>
+
+              <div class="settings-pane-foot">
+                <button class="btn-secondary" data-close="settings-modal">Cancel</button>
+                <button class="btn-primary" id="settings-save-btn">Save Changes</button>
+              </div>
+            </div><!-- /.settings-account-form -->
+
+            <!-- RIGHT: Live preview -->
+            <div class="settings-account-sidebar">
+              <div class="settings-preview-label">Preview</div>
+              <div class="settings-profile-preview" id="settings-profile-preview-card">
+                <div class="spp-banner" id="settings-preview-banner"></div>
+                <div class="spp-body">
+                  <div class="spp-avatar-wrap">
+                    <div class="setup-avatar-preview" id="settings-avatar-preview" style="width:72px;height:72px;font-size:26px;">
+                      <span id="settings-avatar-initial">?</span>
+                    </div>
+                  </div>
+                  <div class="spp-name" id="settings-preview-name">Username</div>
+                  <div class="spp-tag" id="settings-preview-tag">#0000</div>
+                </div>
+              </div>
+              <p class="hint" style="margin-top:10px;font-size:11px;text-align:center;">Live preview updates as you type</p>
             </div>
-          </div>
 
-          <div class="settings-pane-foot">
-            <button class="btn-secondary" data-close="settings-modal">Cancel</button>
-            <button class="btn-primary" id="settings-save-btn">Save Changes</button>
-          </div>
+          </div><!-- /.settings-account-cols -->
         </div>
 
         <!-- APPEARANCE PANE (theme + status + sounds + hints) -->
@@ -594,6 +631,17 @@ export function buildUI() {
               </span>
             </label>
           </div>
+
+          <label class="settings-toggle-row" style="margin-top:12px;">
+              <div class="settings-toggle-info">
+                <div class="settings-toggle-label">Auto-send GIFs</div>
+                <div class="settings-toggle-sub">Click a GIF to send it immediately instead of pasting into the composer</div>
+              </div>
+              <span class="toggle-switch">
+                <input type="checkbox" id="settings-autosend-gif-toggle" />
+                <span class="toggle-track"></span>
+              </span>
+            </label>
 
           <p class="hint" style="margin-top:20px;text-align:center;">All appearance &amp; preference changes apply instantly.</p>
         </div>
