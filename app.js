@@ -485,6 +485,12 @@ document.addEventListener("input", e=>{
   localStorage.setItem("sc_custom_"+e.target.id.slice(3), e.target.value);
   _applyCustomThemeColors();
 });
+/* =====================================================================
+   DOM HELPERS
+   ===================================================================== */
+const $ = s => document.querySelector(s);
+const $$ = s => document.querySelectorAll(s);
+
 
 /* ---------- Per-chat color picker ---------- */
 function _showChatColorPicker(chatId, x, y) {
@@ -619,12 +625,6 @@ $("#ic-color-hex")?.addEventListener("keydown", e=>{
   if (e.key === "Enter") { e.preventDefault(); $("#ic-color-apply")?.click(); }
 });
 
-
-/* =====================================================================
-   DOM HELPERS
-   ===================================================================== */
-const $ = s => document.querySelector(s);
-const $$ = s => document.querySelectorAll(s);
 
 /* =====================================================================
    CUSTOM CONFIRM DIALOG  (replaces all browser confirm() calls)

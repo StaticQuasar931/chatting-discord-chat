@@ -480,35 +480,52 @@ export function buildUI() {
   <!-- ====== TERMS OF USE — shown on first visit ====== -->
   <div id="tos-overlay" class="tos-overlay" role="dialog" aria-modal="true" aria-labelledby="tos-title">
     <div class="tos-card">
+      <!-- 3-column header: icon left · title center · icon right -->
       <div class="tos-header">
-        <img src="${LOGO}" alt="" class="tos-logo" />
-        <h2 id="tos-title">Before You Continue</h2>
-        <p class="tos-sub">Static Chat is a community tool. By entering, you agree to the following.</p>
-        <p class="tos-author">
-          Built by <a href="https://sites.google.com/view/staticquasar931/gm3z" target="_blank" rel="noopener noreferrer"><strong>StaticQuasar931</strong></a>
-          · <a href="https://sites.google.com/view/staticquasar931/gm3z" target="_blank" rel="noopener noreferrer">Where's Epstein? 🎮</a>
-        </p>
-      </div>
-      <div class="tos-body">
-        <ul class="tos-list">
-          <li>⚠️ <strong>Use at your own risk.</strong> This is a school-built, school-safe project — but no platform is 100% monitored.</li>
-          <li>🧠 <strong>Be mature.</strong> Treat everyone with respect. Harassment, bullying, and hate speech will result in removal.</li>
-          <li>🔒 <strong>Protect your privacy.</strong> Never share passwords, addresses, phone numbers, or any sensitive personal information.</li>
-          <li>📵 <strong>No inappropriate content.</strong> Keep it school-appropriate. No NSFW text, links, or images.</li>
-          <li>🚩 <strong>Report problems.</strong> Use the report button if you see something wrong. Don't abuse it.</li>
-          <li>📋 <strong>No abuse of the platform.</strong> No spam, bots, impersonation, or attempts to exploit the system.</li>
-          <li>👤 <strong>You are responsible</strong> for what you send. Think before you type.</li>
-        </ul>
-        <p class="tos-footer-note">By clicking "I Agree", you acknowledge you've read this and agree to use Static Chat responsibly.</p>
-      </div>
-      <div class="tos-foot">
-        <button class="btn-primary" id="tos-agree-btn">I Agree — Let Me In</button>
-        <div class="tos-credits">
+        <div class="tos-header-row">
+          <img src="${LOGO}" alt="" class="tos-side-icon tos-side-icon-left" />
+          <div class="tos-header-center">
+            <h2 id="tos-title">Before You Continue</h2>
+            <p class="tos-sub">Please read carefully before entering Static Chat.</p>
+          </div>
+          <img src="${LOGO}" alt="" class="tos-side-icon tos-side-icon-right" />
+        </div>
+        <div class="tos-author">
           <a href="https://sites.google.com/view/staticquasar931/gm3z" target="_blank" rel="noopener noreferrer">
-            🌐 Visit StaticQuasar931's site
+            Built by <strong>StaticQuasar931</strong>
           </a>
         </div>
       </div>
+
+      <div class="tos-body">
+        <ul class="tos-list">
+          <li>⚠️ <strong>Use at your own risk.</strong> This is an independent, hobbyist project provided "as is" without warranties of any kind. The creator is not liable for any loss, harm, or damages from use of this service.</li>
+          <li>🔞 <strong>Age requirement.</strong> You must be at least 13 years old (or the digital-consent age in your country) to use Static Chat. If you are under that age, leave now.</li>
+          <li>🧠 <strong>Be respectful.</strong> Harassment, bullying, hate speech, threats, or discriminatory content are not allowed and may result in removal.</li>
+          <li>🔒 <strong>Protect your privacy.</strong> Never share passwords, addresses, phone numbers, financial info, or other sensitive personal information. The creator cannot prevent other users from saving anything you send.</li>
+          <li>📵 <strong>Keep it appropriate.</strong> No NSFW, sexual, violent, illegal, or otherwise harmful content. No content that exploits minors. No content that violates any applicable law.</li>
+          <li>🤖 <strong>No abuse of the platform.</strong> No spam, bots, impersonation, scraping, or attempts to bypass security. The creator may remove accounts at any time and without notice.</li>
+          <li>👁️ <strong>Limited moderation.</strong> Reports are reviewed when possible. Automated filters exist but no platform is 100% monitored. <strong>You are responsible</strong> for what you send and how you interact with others.</li>
+          <li>🛂 <strong>School Discovery feature.</strong> Domain matching is not identity verification. Anyone can create an email at most domains. Treat everyone as a stranger and never share personal info just because you share a domain.</li>
+          <li>📜 <strong>Service may change or end.</strong> Features, data, and the service itself may change, be paused, or shut down at any time. No guarantee of message persistence or backups.</li>
+          <li>🚩 <strong>Report problems</strong> using the in-app report button. Don't abuse the report system.</li>
+        </ul>
+        <p class="tos-footer-note">
+          By clicking "I Agree", you confirm you have read these terms, are old enough to use this service, and agree to use Static Chat responsibly. If you do not agree, close this page.
+        </p>
+      </div>
+
+      <div class="tos-foot">
+        <button class="btn-primary" id="tos-agree-btn">I Agree — Let Me In</button>
+      </div>
+
+      <!-- Where's Epstein plug — bottom right corner -->
+      <a class="tos-epstein-plug"
+         href="https://sites.google.com/view/staticquasar931/static-gmes/wheres-epstein"
+         target="_blank" rel="noopener noreferrer"
+         title="Play Where's Epstein? — by StaticQuasar931">
+        🎮 Play Where's Epstein?
+      </a>
     </div>
   </div>
 
