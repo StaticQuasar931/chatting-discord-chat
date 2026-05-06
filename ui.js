@@ -312,6 +312,9 @@ export function buildUI() {
                 <path fill="currentColor" d="M15 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm-9-2V7H4v3H1v2h3v3h2v-3h3v-2H6zm9 4c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/>
               </svg>
             </button>
+            <button class="icon-btn" id="chat-group-info-btn" title="Group info" hidden>
+              <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path fill="currentColor" d="M12 8c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm0 2c-1.1 0-2 .9-2 2v6c0 1.1.9 2 2 2s2-.9 2-2v-6c0-1.1-.9-2-2-2z"/></svg>
+            </button>
             <!-- Divider line before search -->
             <div class="header-divider"></div>
             <!-- Always-visible compact search — expands on focus -->
@@ -512,7 +515,7 @@ export function buildUI() {
         <label class="modal-label" style="margin-top:18px;">Username <span class="label-optional">letters, numbers, underscores · 3–32 chars</span></label>
         <input type="text" id="setup-username-input" placeholder="cooluser" maxlength="32" autocomplete="off" spellcheck="false" />
         <label class="modal-label" style="margin-top:14px;">Bio <span class="label-optional">optional · up to 200 chars</span></label>
-        <textarea id="setup-bio-input" class="modal-textarea" placeholder="Tell people a little about yourself…" maxlength="200" rows="3"></textarea>
+        <textarea id="setup-bio-input" class="modal-textarea" placeholder="Tell people a little about yourself…" maxlength="500" rows="3"></textarea>
         <p class="field-error" id="setup-error"></p>
       </div>
       <div class="modal-foot">
@@ -583,7 +586,7 @@ export function buildUI() {
               </div>
               <div class="settings-field-group">
                 <label class="modal-label">Bio <span class="label-optional">up to 200 chars</span></label>
-                <textarea id="settings-bio-input" maxlength="200" rows="3" placeholder="Tell people a bit about yourself…"></textarea>
+                <textarea id="settings-bio-input" maxlength="500" rows="3" placeholder="Tell people a bit about yourself…"></textarea>
               </div>
               <div class="settings-field-group">
                 <label class="modal-label">Status Phrase <span class="label-optional">up to 60 chars</span></label>
@@ -696,24 +699,40 @@ export function buildUI() {
             <button class="theme-swatch" data-theme="forest">Forest</button>
             <button class="theme-swatch" data-theme="rose">Rose</button>
             <button class="theme-swatch" data-theme="slate">Slate</button>
+            <button class="theme-swatch" data-theme="ocean">Ocean ✨</button>
+            <button class="theme-swatch" data-theme="sunset">Sunset ✨</button>
+            <button class="theme-swatch" data-theme="aurora">Aurora ✨</button>
             <button class="theme-swatch" data-theme="cloud">Cloud</button>
             <button class="theme-swatch" data-theme="daylight">Daylight</button>
             <button class="theme-swatch" data-theme="light">Light</button>
-            <button class="theme-swatch theme-swatch-custom" data-theme="custom" id="theme-swatch-custom">Custom</button>
+            <button class="theme-swatch theme-swatch-custom" data-theme="custom" id="theme-swatch-custom">🌈 Custom</button>
           </div>
-          <!-- Custom theme color pickers (shown when Custom is selected) -->
+          <!-- Custom theme color pickers (in-app HSV) -->
           <div id="theme-custom-pickers" style="display:none;margin-top:10px;">
             <div class="theme-custom-row">
               <label class="theme-custom-label">Background</label>
-              <input type="color" id="tc-bg" value="#1a1b1e" />
+              <button class="ic-color-btn" data-ic-target="bg"><span class="ic-color-swatch" id="tc-bg-swatch" style="background:#1a1b1e"></span><span id="tc-bg-text">#1a1b1e</span></button>
+              <input type="hidden" id="tc-bg" value="#1a1b1e" />
             </div>
             <div class="theme-custom-row">
               <label class="theme-custom-label">Sidebar</label>
-              <input type="color" id="tc-sidebar" value="#131416" />
+              <button class="ic-color-btn" data-ic-target="sidebar"><span class="ic-color-swatch" id="tc-sidebar-swatch" style="background:#131416"></span><span id="tc-sidebar-text">#131416</span></button>
+              <input type="hidden" id="tc-sidebar" value="#131416" />
             </div>
             <div class="theme-custom-row">
               <label class="theme-custom-label">Accent</label>
-              <input type="color" id="tc-accent" value="#4f7cff" />
+              <button class="ic-color-btn" data-ic-target="accent"><span class="ic-color-swatch" id="tc-accent-swatch" style="background:#4f7cff"></span><span id="tc-accent-text">#4f7cff</span></button>
+              <input type="hidden" id="tc-accent" value="#4f7cff" />
+            </div>
+          </div>
+
+          <!-- In-app color picker popover (hidden by default) -->
+          <div id="ic-color-popover" class="ic-color-popover hidden">
+            <div class="ic-color-grid" id="ic-color-grid"></div>
+            <div class="ic-color-hex-row">
+              <span style="font-size:11px;color:var(--t-muted);">HEX</span>
+              <input type="text" class="ic-color-hex" id="ic-color-hex" maxlength="7" />
+              <button class="btn-secondary" id="ic-color-apply">Apply</button>
             </div>
           </div>
 
@@ -833,8 +852,18 @@ export function buildUI() {
               </span>
             </label>
             <div class="settings-field-group" style="margin-top:12px;" id="dblclick-emoji-row">
-              <label class="modal-label">Double-click react emoji</label>
-              <div style="display:flex;align-items:center;gap:8px;">
+              <label class="modal-label">Double-click action</label>
+              <div style="display:flex;flex-direction:column;gap:6px;">
+                <label class="radio-row">
+                  <input type="radio" name="dblclick-mode" value="emoji" id="dbl-mode-emoji" checked />
+                  <span>React with chosen emoji</span>
+                </label>
+                <label class="radio-row">
+                  <input type="radio" name="dblclick-mode" value="picker" id="dbl-mode-picker" />
+                  <span>Open emoji picker</span>
+                </label>
+              </div>
+              <div id="dblclick-emoji-chooser" style="display:flex;align-items:center;gap:8px;margin-top:8px;">
                 <span id="dblclick-emoji-preview" style="font-size:22px;cursor:pointer;" title="Click to change">👍</span>
                 <input type="text" id="settings-dblclick-emoji" placeholder="👍" maxlength="4"
                   style="width:60px;text-align:center;font-size:18px;" />
@@ -848,6 +877,16 @@ export function buildUI() {
               </div>
               <span class="toggle-switch">
                 <input type="checkbox" id="settings-silent-typing-toggle" />
+                <span class="toggle-track"></span>
+              </span>
+            </label>
+            <label class="settings-toggle-row" style="margin-top:12px;">
+              <div class="settings-toggle-info">
+                <div class="settings-toggle-label">Show Last Active Time</div>
+                <div class="settings-toggle-sub">Let others see when you were last active on your profile</div>
+              </div>
+              <span class="toggle-switch">
+                <input type="checkbox" id="settings-show-last-active-toggle" />
                 <span class="toggle-track"></span>
               </span>
             </label>
@@ -971,6 +1010,71 @@ export function buildUI() {
     </div>
   </div>
 
+  <!-- Group Info / Settings Modal -->
+  <div class="modal hidden" id="group-info-modal">
+    <div class="modal-card group-info-card">
+      <div class="modal-head">
+        <h2 id="group-info-title">Group Info</h2>
+        <button class="icon-btn modal-close" data-close="group-info-modal">
+          <svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </div>
+      <div class="modal-body" style="padding:18px 20px;max-height:70vh;overflow-y:auto;">
+
+        <!-- Avatar + name editing -->
+        <div class="group-info-head">
+          <div class="group-info-avatar" id="group-info-avatar"></div>
+          <div style="flex:1;min-width:0;">
+            <label class="modal-label">Group Name</label>
+            <div style="display:flex;gap:6px;">
+              <input type="text" id="group-info-name-input" class="modal-input" maxlength="50" placeholder="Group name" />
+              <button class="btn-primary" id="group-info-save-name-btn" style="padding:0 12px;">Save</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Group picture URL -->
+        <label class="modal-label" style="margin-top:14px;">Group Picture URL <span class="label-optional">optional</span></label>
+        <div style="display:flex;gap:6px;">
+          <input type="text" id="group-info-photo-input" class="modal-input" placeholder="https://example.com/image.png" />
+          <button class="btn-secondary" id="group-info-save-photo-btn" style="padding:0 12px;">Set</button>
+        </div>
+
+        <!-- Description -->
+        <label class="modal-label" style="margin-top:14px;">Description / Rules <span class="label-optional">max 1000 chars</span></label>
+        <textarea id="group-info-desc-input" class="modal-textarea" rows="3" maxlength="1000" placeholder="What's this group about? Any rules?"></textarea>
+        <div style="text-align:right;margin-top:4px;">
+          <button class="btn-secondary" id="group-info-save-desc-btn">Save Description</button>
+        </div>
+
+        <!-- Invite code -->
+        <div class="group-info-section">
+          <label class="modal-label">Invite Code</label>
+          <div style="display:flex;gap:8px;align-items:center;">
+            <code id="group-info-code" class="join-code-display" style="flex:1;font-size:18px;text-align:center;cursor:pointer;" title="Click to copy">——————</code>
+            <button class="icon-btn" id="group-info-regen-code" title="Regenerate code">
+              <svg viewBox="0 0 24 24" width="16" height="16"><path fill="currentColor" d="M17.65 6.35A7.958 7.958 0 0 0 12 4c-4.42 0-8 3.58-8 8s3.58 8 8 8c3.73 0 6.84-2.55 7.73-6h-2.08A5.99 5.99 0 0 1 12 18c-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/></svg>
+            </button>
+          </div>
+        </div>
+
+        <!-- Members list -->
+        <div class="group-info-section">
+          <label class="modal-label">Members (<span id="group-info-member-count">0</span>)</label>
+          <div id="group-info-members-list" class="group-info-members-list"></div>
+        </div>
+
+        <!-- Danger zone -->
+        <div class="group-info-section group-info-danger">
+          <button class="btn-secondary" id="group-info-leave-btn" style="color:var(--c-danger);width:100%;">
+            <svg viewBox="0 0 24 24" width="14" height="14" style="vertical-align:-2px;margin-right:4px;"><path fill="currentColor" d="M17 7l-1.41 1.41L18.17 11H8v2h10.17l-2.58 2.58L17 17l5-5-5-5zM4 5h8V3H4c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h8v-2H4V5z"/></svg>
+            Leave Group
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- Report Modal -->
   <div class="modal hidden" id="report-modal">
     <div class="modal-card">
@@ -1021,7 +1125,7 @@ export function buildUI() {
       <div class="profile-card-bio-label">About Me</div>
       <div class="profile-card-bio" id="profile-card-bio"></div>
       <div class="profile-card-notes-label" id="profile-card-notes-label">Note</div>
-      <textarea class="profile-card-notes" id="profile-card-notes" placeholder="Add a private note about this person…" maxlength="500"></textarea>
+      <textarea class="profile-card-notes" id="profile-card-notes" placeholder="Add a private note about this person…" maxlength="1000"></textarea>
       <div class="profile-card-actions" id="profile-card-actions">
         <!-- buttons injected by showProfileCard() -->
         <button class="profile-card-more-btn" id="profile-card-more-btn" title="More options" style="display:none">⋯</button>
@@ -1064,6 +1168,7 @@ export function buildUI() {
             <div class="full-profile-section-label">About Me</div>
             <div class="full-profile-bio" id="fp-bio"></div>
             <div class="full-profile-since" id="fp-since"></div>
+            <div class="full-profile-since" id="fp-last-active" style="display:none"></div>
             <div class="full-profile-since fp-friends-since-row" id="fp-friends-since" style="display:none"></div>
             <div id="fp-mutual-groups" style="display:none">
               <div class="full-profile-divider" style="margin:10px 0 8px;"></div>
@@ -1078,7 +1183,7 @@ export function buildUI() {
               <span style="font-weight:400;text-transform:none;letter-spacing:0;font-size:10px;color:var(--t-muted);"> — only you see this</span>
             </div>
             <textarea class="full-profile-notes" id="fp-notes"
-              placeholder="Add a private note…" maxlength="500"></textarea>
+              placeholder="Add a private note…" maxlength="1000"></textarea>
           </div>
         </div>
 

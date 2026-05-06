@@ -403,9 +403,11 @@ const state = {
   unreadCounts: {},      // chatId → number of unread messages since last open
   chatScrolledInitial: new Set(), // chatIds that have had their initial scroll done
   silentTyping:      localStorage.getItem("sc_silent_typing") === "true",
+  showLastActive:    localStorage.getItem("sc_show_last_active") === "true",
   autoSendGif:       localStorage.getItem("sc_autosend_gif") === "true",
   dblClickReact:     localStorage.getItem("sc_dblclick_react") === "true",
   dblClickEmoji:     localStorage.getItem("sc_dblclick_emoji") || "👍",
+  dblClickMode:      localStorage.getItem("sc_dblclick_mode") || "emoji", // "emoji" | "picker"
   compactMode:       localStorage.getItem("sc_compact") === "true",
   textSize:          parseFloat(localStorage.getItem("sc_text_size")) || 15,
   customStatus:      localStorage.getItem("sc_custom_status")||"",
@@ -475,12 +477,141 @@ function _rgbToHex(r,g,b){return"#"+[r,g,b].map(v=>Math.max(0,Math.min(255,Math.
 function _lighten(hex,amt){ const [r,g,b]=_hexToRgb(hex); return _rgbToHex(r+amt,g+amt,b+amt); }
 function _darken(hex,amt) { return _lighten(hex,-amt); }
 
-// Wire custom theme color pickers (live update)
+// Wire custom theme color pickers (live update via hidden inputs)
 document.addEventListener("input", e=>{
   if (!["tc-bg","tc-sidebar","tc-accent"].includes(e.target.id)) return;
   if (state.theme!=="custom") return;
   localStorage.setItem("sc_custom_"+e.target.id.slice(3), e.target.value);
   _applyCustomThemeColors();
+});
+
+/* ---------- Per-chat color picker ---------- */
+function _showChatColorPicker(chatId, x, y) {
+  document.getElementById("chat-color-popover")?.remove();
+  const presets = ["#4f7cff","#06b6d4","#10b981","#84cc16","#eab308","#f97316","#ef4444","#ec4899","#a855f7","#8b5cf6","#6b7280","#475569"];
+  const cur = localStorage.getItem(`sc_chat_color_${chatId}`)||"";
+  const pop = document.createElement("div");
+  pop.id = "chat-color-popover";
+  pop.className = "ic-color-popover";
+  pop.style.left = Math.min(window.innerWidth-260, x) + "px";
+  pop.style.top  = Math.min(window.innerHeight-200, y) + "px";
+  pop.innerHTML = `
+    <div style="font-size:11px;color:var(--t-muted);font-weight:700;margin-bottom:6px;">Chat color</div>
+    <div class="ic-color-grid" style="grid-template-columns:repeat(6,1fr);">
+      ${presets.map(c=>`<div class="ic-color-cell" style="background:${c}" data-cc="${c}"></div>`).join("")}
+    </div>
+    <div style="display:flex;gap:6px;margin-top:8px;">
+      <button class="btn-secondary" data-cc-clear style="flex:1;font-size:12px;">Reset to default</button>
+    </div>
+  `;
+  document.body.appendChild(pop);
+  pop.addEventListener("click", e=>{
+    const cell=e.target.closest("[data-cc]");
+    if (cell) {
+      const c=cell.dataset.cc;
+      localStorage.setItem(`sc_chat_color_${chatId}`, c);
+      if (state.activeChatId===chatId) {
+        document.body.style.setProperty("--c-chat-accent", c);
+        document.body.classList.add("has-chat-accent");
+      }
+      showToast("Chat color set ✓");
+      pop.remove(); return;
+    }
+    if (e.target.closest("[data-cc-clear]")) {
+      localStorage.removeItem(`sc_chat_color_${chatId}`);
+      if (state.activeChatId===chatId) {
+        document.body.style.removeProperty("--c-chat-accent");
+        document.body.classList.remove("has-chat-accent");
+      }
+      showToast("Chat color reset");
+      pop.remove();
+    }
+  });
+  // Close on outside click
+  setTimeout(()=>document.addEventListener("click", function _close(e){
+    if (!pop.contains(e.target)) { pop.remove(); document.removeEventListener("click", _close); }
+  }), 0);
+}
+
+/* ---------- In-app color picker ---------- */
+const IC_PRESET_COLORS = [
+  // Reds / pinks
+  "#ef4444","#f43f5e","#ec4899","#d946ef","#a855f7","#8b5cf6","#6366f1","#3b82f6",
+  // Blues / cyans / greens
+  "#0ea5e9","#06b6d4","#14b8a6","#10b981","#22c55e","#84cc16","#eab308","#f59e0b",
+  // Oranges / browns / grays
+  "#f97316","#ea580c","#7c2d12","#1f2937","#374151","#6b7280","#9ca3af","#e5e7eb",
+  // Special
+  "#000000","#1a1b1e","#131416","#23252a","#4f7cff","#9333ea","#fbbf24","#ffffff"
+];
+
+let _icCurrentTarget = null; // id suffix: bg|sidebar|accent
+
+function _icRenderGrid() {
+  const grid = $("#ic-color-grid"); if (!grid) return;
+  grid.innerHTML = IC_PRESET_COLORS.map(c=>`<div class="ic-color-cell" style="background:${c}" data-ic-color="${c}" title="${c}"></div>`).join("");
+}
+_icRenderGrid();
+
+function _icApplyColor(target, color) {
+  // target = "bg" | "sidebar" | "accent"
+  const hex = color.toLowerCase();
+  const inp = $(`#tc-${target}`);
+  const sw  = $(`#tc-${target}-swatch`);
+  const txt = $(`#tc-${target}-text`);
+  if (inp) inp.value = hex;
+  if (sw)  sw.style.background = hex;
+  if (txt) txt.textContent = hex;
+  localStorage.setItem("sc_custom_"+target, hex);
+  if (state.theme === "custom") _applyCustomThemeColors();
+  _markSettingsDirty?.();
+}
+
+// Open popover when clicking a color button
+document.addEventListener("click", e=>{
+  const btn = e.target.closest(".ic-color-btn");
+  if (btn) {
+    e.stopPropagation();
+    _icCurrentTarget = btn.dataset.icTarget;
+    const pop = $("#ic-color-popover");
+    const cur = $(`#tc-${_icCurrentTarget}`)?.value || "#000000";
+    $("#ic-color-hex").value = cur;
+    // Position popover near the button
+    const rect = btn.getBoundingClientRect();
+    pop.style.left = Math.min(window.innerWidth-260, rect.left) + "px";
+    pop.style.top  = (rect.bottom + 6) + "px";
+    pop.classList.remove("hidden");
+    return;
+  }
+  // Click on a preset cell
+  const cell = e.target.closest(".ic-color-cell");
+  if (cell && _icCurrentTarget) {
+    _icApplyColor(_icCurrentTarget, cell.dataset.icColor);
+    $("#ic-color-popover").classList.add("hidden");
+    return;
+  }
+  // Apply hex
+  if (e.target.id === "ic-color-apply") {
+    let hex = $("#ic-color-hex").value.trim();
+    if (!hex.startsWith("#")) hex = "#" + hex;
+    if (/^#[0-9a-f]{6}$/i.test(hex) && _icCurrentTarget) {
+      _icApplyColor(_icCurrentTarget, hex);
+      $("#ic-color-popover").classList.add("hidden");
+    } else {
+      showToast("Enter a valid hex like #4f7cff");
+    }
+    return;
+  }
+  // Click outside the popover → close
+  const pop = $("#ic-color-popover");
+  if (pop && !pop.classList.contains("hidden") && !pop.contains(e.target) && !e.target.closest(".ic-color-btn")) {
+    pop.classList.add("hidden");
+  }
+});
+
+// Hex input: live update on Enter
+$("#ic-color-hex")?.addEventListener("keydown", e=>{
+  if (e.key === "Enter") { e.preventDefault(); $("#ic-color-apply")?.click(); }
 });
 
 
@@ -1773,17 +1904,34 @@ function chatHasUnread(c) { return chatUnreadCount(c)>0; }
 
 function renderChatLists() {
   const filterText=state.filters.sidebar.toLowerCase();
-  const dms=state.chats.filter(c=>c.type==="dm");
-  const groups=state.chats.filter(c=>c.type==="group");
+  // Filter out fully-muted chats unless searching
+  const visibleChats = state.chats.filter(c=>{
+    if (filterText) return true; // search overrides hide
+    return chatMuteLevel(c.id) !== "all";
+  });
+  const dms=visibleChats.filter(c=>c.type==="dm");
+  const groups=visibleChats.filter(c=>c.type==="group");
 
+  // Helper: does a chat have any cached message matching the filter?
+  const _msgMatches = (cId) => {
+    if (!filterText || filterText.length<2) return false;
+    const msgs = state.messageCache[cId]||[];
+    return msgs.some(m=>(m.text||"").toLowerCase().includes(filterText));
+  };
   $("#dm-list").innerHTML=dms.map(c=>{
     const otherUid=c.members.find(m=>m!==state.user.uid);
     const profile=state.userCache[otherUid];
     const name=profile?.username||profile?.displayName||"Direct Message";
     const photo=profile?.photoURL||null;
-    if (filterText&&!name.toLowerCase().includes(filterText)) return "";
+    const lastMsgMatches = (c.lastMessage||"").toLowerCase().includes(filterText||"");
+    const cacheMatches = _msgMatches(c.id);
+    if (filterText && !name.toLowerCase().includes(filterText) && !lastMsgMatches && !cacheMatches) return "";
+    const matchHint = filterText && (lastMsgMatches||cacheMatches) && !name.toLowerCase().includes(filterText)
+      ? `<span class="side-row-match-hint" title="Message match">💬</span>` : "";
     const active=state.activeChatId===c.id?"active":"";
-    const unreadN=chatUnreadCount(c);
+    const muteLevel=chatMuteLevel(c.id);
+    const mutedDot=muteLevel?`<span class="side-row-mute-dot" title="Muted (${muteLevel})">🔕</span>`:"";
+    const unreadN=muteLevel?0:chatUnreadCount(c);
     const unread=unreadN>0?`<span class="side-item-unread" title="${unreadN} new message${unreadN===1?"":"s"}">${unreadN>99?"99+":unreadN}</span>`:"";
     const onlineStatus=resolveStatus(profile);
     const dmAvatar=`<div class="side-row-avatar-wrap">
@@ -1791,10 +1939,10 @@ function renderChatLists() {
       <span class="side-status-dot" data-status="${escapeHtml(onlineStatus)}"></span>
     </div>`;
     return `
-      <div class="side-row ${active}" data-chat-id="${escapeHtml(c.id)}" data-type="dm">
+      <div class="side-row ${active} ${muteLevel?"muted-row":""}" data-chat-id="${escapeHtml(c.id)}" data-type="dm">
         ${dmAvatar}
         <div class="side-row-name">${escapeHtml(name)}</div>
-        ${unread}
+        ${matchHint}${mutedDot}${unread}
         <button class="icon-btn side-row-close" title="Close" data-action="close-dm" data-chat-id="${escapeHtml(c.id)}">
           <svg viewBox="0 0 24 24" width="14" height="14"><path fill="currentColor" d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
         </button>
@@ -1803,15 +1951,21 @@ function renderChatLists() {
 
   $("#group-list").innerHTML=groups.map(c=>{
     const name=c.name||"Group";
-    if (filterText&&!name.toLowerCase().includes(filterText)) return "";
+    const lastMsgMatches = (c.lastMessage||"").toLowerCase().includes(filterText||"");
+    const cacheMatches = _msgMatches(c.id);
+    if (filterText && !name.toLowerCase().includes(filterText) && !lastMsgMatches && !cacheMatches) return "";
+    const matchHint = filterText && (lastMsgMatches||cacheMatches) && !name.toLowerCase().includes(filterText)
+      ? `<span class="side-row-match-hint" title="Message match">💬</span>` : "";
     const active=state.activeChatId===c.id?"active":"";
-    const unreadN2=chatUnreadCount(c);
+    const muteLevel=chatMuteLevel(c.id);
+    const mutedDot=muteLevel?`<span class="side-row-mute-dot" title="Muted (${muteLevel})">🔕</span>`:"";
+    const unreadN2=muteLevel?0:chatUnreadCount(c);
     const unread=unreadN2>0?`<span class="side-item-unread" title="${unreadN2} new">${unreadN2>99?"99+":unreadN2}</span>`:"";
     return `
-      <div class="side-row ${active}" data-chat-id="${escapeHtml(c.id)}" data-type="group">
+      <div class="side-row ${active} ${muteLevel?"muted-row":""}" data-chat-id="${escapeHtml(c.id)}" data-type="group">
         <div class="side-row-fallback">${escapeHtml(groupInitials(name))}</div>
         <div class="side-row-name">${escapeHtml(name)}</div>
-        ${unread}
+        ${matchHint}${mutedDot}${unread}
       </div>`;
   }).join("");
 
@@ -1839,6 +1993,7 @@ $("#dm-list").addEventListener("contextmenu", e=>{
     {label:"Open",         action:"ctx-open-dm",      data:{chatId}},
     {label:"View Profile", action:"ctx-view-profile",  data:{uid:otherUid||""}},
     "divider",
+    {label:"🎨 Set chat color", action:"ctx-set-color", data:{chatId}},
     {label: muted?"🔔 Unmute Notifications":"🔕 Mute Notifications",
      action:"ctx-mute-dm", data:{chatId}},
     "divider",
@@ -1848,6 +2003,36 @@ $("#dm-list").addEventListener("contextmenu", e=>{
 });
 $("#group-list").addEventListener("click", e=>{ const row=e.target.closest(".side-row"); if(row) openChat(row.dataset.chatId); });
 $("#rail-groups").addEventListener("click", e=>{ const av=e.target.closest(".rail-group-avatar"); if(av) openChat(av.dataset.chatId); });
+
+// Right-click on a group row → quick actions
+function _showGroupCtxMenu(e, chatId) {
+  const chat=state.chats.find(c=>c.id===chatId); if (!chat||chat.type!=="group") return;
+  const muted=isChatMuted(chatId);
+  const items=[
+    {label:"Open",                action:"ctx-open-dm",       data:{chatId}},
+    {label:"Group Info & Settings", action:"ctx-group-info",  data:{chatId}},
+    "divider",
+    {label:"Add Members",         action:"ctx-add-members",   data:{chatId}},
+    {label:"Copy Invite Code",    action:"ctx-copy-invite",   data:{chatId}},
+    {label:"🎨 Set chat color",   action:"ctx-set-color",     data:{chatId}},
+    "divider",
+    {label: muted?"🔔 Unmute Notifications":"🔕 Mute Notifications",
+     action:"ctx-mute-dm", data:{chatId}},
+    "divider",
+    {label:"Leave Group",         action:"ctx-leave-group",   data:{chatId}, danger:true},
+  ];
+  showCtxMenu(e.clientX, e.clientY, items);
+}
+$("#group-list").addEventListener("contextmenu", e=>{
+  const row=e.target.closest(".side-row"); if (!row) return;
+  e.preventDefault();
+  _showGroupCtxMenu(e, row.dataset.chatId);
+});
+$("#rail-groups").addEventListener("contextmenu", e=>{
+  const av=e.target.closest(".rail-group-avatar"); if (!av) return;
+  e.preventDefault();
+  _showGroupCtxMenu(e, av.dataset.chatId);
+});
 $("#sidebar-search").addEventListener("input", e=>{ state.filters.sidebar=e.target.value; renderChatLists(); });
 $("#new-dm-btn").addEventListener("click", ()=>{
   showFriendsView();
@@ -1917,6 +2102,16 @@ async function openChat(chatId) {
   showChatView(); renderChatHeader(); renderChatLists();
   clearReplyTo();
   renderTypingIndicator([]);
+
+  // Apply per-chat custom accent color (if set)
+  const customAccent = localStorage.getItem(`sc_chat_color_${chatId}`);
+  if (customAccent) {
+    document.body.style.setProperty("--c-chat-accent", customAccent);
+    document.body.classList.add("has-chat-accent");
+  } else {
+    document.body.style.removeProperty("--c-chat-accent");
+    document.body.classList.remove("has-chat-accent");
+  }
 
   // Restore draft for this chat
   const draftEl=$("#composer-input");
@@ -1994,7 +2189,7 @@ async function openChat(chatId) {
 async function renderChatHeader() {
   const c=state.activeChat; if (!c) return;
   const avatarWrap=$("#chat-header-avatar-wrap");
-  const addBtn=$("#chat-add-member-btn"), leaveBtn=$("#chat-leave-btn");
+  const addBtn=$("#chat-add-member-btn"), leaveBtn=$("#chat-leave-btn"), gearBtn=$("#chat-group-info-btn");
   const codeBadge=$("#chat-join-code-badge");
   // Refresh pinned panel if it's open
   if (!$("#pins-panel")?.classList.contains("hidden")) renderPinsPanel();
@@ -2015,6 +2210,7 @@ async function renderChatHeader() {
     avatarWrap.innerHTML=`<div class="chat-header-avatar-status-wrap">${avatarMarkup(name,profile?.photoURL,"chat-header-avatar","chat-header-avatar-fallback")}<span class="chat-header-status-dot" data-status="${escapeHtml(visStatus)}"></span></div>`;
     avatarWrap.dataset.profileUid=otherUid||"";
     if(addBtn) addBtn.hidden=true; if(leaveBtn) leaveBtn.hidden=true;
+    if(gearBtn) gearBtn.hidden=true;
     if(codeBadge) codeBadge.hidden=true;
     const si=$("#chat-search-input"); if(si) si.placeholder=`Search ${name}`;
   } else {
@@ -2022,10 +2218,30 @@ async function renderChatHeader() {
     const nameEl2=$("#chat-header-name");
     nameEl2.textContent=c.name||"Group";
     nameEl2.classList.remove("clickable"); nameEl2.style.cursor="";
-    $("#chat-header-sub").textContent=`${c.members.length} member${c.members.length===1?"":"s"}${isLeader?" · 👑 Leader":""}`;
-    avatarWrap.innerHTML=`<div class="chat-header-avatar-fallback">${escapeHtml(groupInitials(c.name||"G"))}</div>`;
+    // Show member avatars inline when there's room (≤5 members)
+    let memberAvatarsHtml = "";
+    if (c.members.length<=5) {
+      const items = await Promise.all(c.members.slice(0,5).map(async uid=>{
+        const p = state.userCache[uid] || await fetchUserProfile(uid) || {};
+        const name = p.username || p.displayName || "U";
+        const initial = (name[0]||"U").toUpperCase();
+        return p.photoURL
+          ? `<img class="gc-member-avatar" src="${escapeHtml(p.photoURL)}" alt="" title="${escapeHtml(name)}" />`
+          : `<span class="gc-member-avatar gc-member-fallback" title="${escapeHtml(name)}">${escapeHtml(initial)}</span>`;
+      }));
+      memberAvatarsHtml = `<span class="gc-member-avatars">${items.join("")}</span>`;
+    }
+    $("#chat-header-sub").innerHTML=`${memberAvatarsHtml}<span>${c.members.length} member${c.members.length===1?"":"s"}${isLeader?" · 👑 Leader":""}</span>`;
+    if (c.photoURL) {
+      avatarWrap.innerHTML=`<img class="chat-header-avatar" src="${escapeHtml(c.photoURL)}" alt="" />`;
+    } else {
+      avatarWrap.innerHTML=`<div class="chat-header-avatar-fallback">${escapeHtml(groupInitials(c.name||"G"))}</div>`;
+    }
+    avatarWrap.style.cursor="pointer";
+    avatarWrap.title="Group info";
     delete avatarWrap.dataset.profileUid;
     if(addBtn) addBtn.hidden=false; if(leaveBtn) leaveBtn.hidden=false;
+    if(gearBtn) gearBtn.hidden=false;
     if (codeBadge) {
       if (c.joinCode) { codeBadge.textContent=c.joinCode; codeBadge.hidden=false; codeBadge.title="Click to copy join code"; }
       else codeBadge.hidden=true;
@@ -2035,10 +2251,12 @@ async function renderChatHeader() {
   updateChatMuteBtn();
 }
 
-// Chat header avatar/name click → open profile (DMs only)
+// Chat header avatar click → open profile (DMs) or group info modal (groups)
 document.addEventListener("click", e=>{
   const wrap=e.target.closest("#chat-header-avatar-wrap");
-  if (wrap && wrap.dataset.profileUid) { showProfileCard(wrap.dataset.profileUid, e); }
+  if (!wrap) return;
+  if (wrap.dataset.profileUid) { showProfileCard(wrap.dataset.profileUid, e); }
+  else if (state.activeChat?.type==="group") { openGroupInfoModal(); }
 });
 document.addEventListener("click", e=>{
   const nameEl=e.target.closest("#chat-header-name");
@@ -2047,6 +2265,8 @@ document.addEventListener("click", e=>{
     if (c?.type==="dm") {
       const otherUid=c.members.find(u=>u!==state.user?.uid);
       if (otherUid) showProfileCard(otherUid, e);
+    } else if (c?.type==="group") {
+      openGroupInfoModal();
     }
   }
 });
@@ -2070,7 +2290,30 @@ document.addEventListener("click", e=>{
 const SVG_EDIT   = `<svg viewBox="0 0 24 24" width="15" height="15"><path fill="currentColor" d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34a1 1 0 0 0-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg>`;
 const SVG_REPORT = `<svg viewBox="0 0 24 24" width="15" height="15"><path fill="currentColor" d="M14.4 6L14 4H5v17h2v-7h5.6l.4 2h7V6h-5.6z"/></svg>`;
 const SVG_REPLY  = `<svg viewBox="0 0 24 24" width="15" height="15"><path fill="currentColor" d="M10 9V5l-7 7 7 7v-4.1c5 0 8.5 1.6 11 5.1-1-5-4-10-11-11z"/></svg>`;
-const QUICK_REACTS = ["👍","❤️","😂","😮","😢"];
+const QUICK_REACTS_DEFAULT = ["👍","❤️","😂","😮","😢"];
+// Track recent reactions (most-recently-used first, capped at 5)
+function _getRecentReacts() {
+  try {
+    const raw = localStorage.getItem("sc_recent_reacts");
+    const arr = raw ? JSON.parse(raw) : [];
+    if (Array.isArray(arr) && arr.length) return arr;
+  } catch(_){}
+  return QUICK_REACTS_DEFAULT.slice();
+}
+function _pushRecentReact(emoji) {
+  if (!emoji) return;
+  let arr = _getRecentReacts().filter(e=>e!==emoji);
+  arr.unshift(emoji);
+  arr = arr.slice(0, 5);
+  try { localStorage.setItem("sc_recent_reacts", JSON.stringify(arr)); } catch(_){}
+}
+// Replace static array with dynamic getter
+const QUICK_REACTS = new Proxy([], { get: (_, p) => {
+  const arr = _getRecentReacts();
+  if (p === "map") return arr.map.bind(arr);
+  if (p === "length") return arr.length;
+  return arr[p];
+}});
 
 // OG cutoff — any account created before this timestamp gets an OG badge automatically
 const OG_CUTOFF_MS = new Date("2026-05-04T00:00:00Z").getTime();
@@ -2344,7 +2587,7 @@ function renderMessages() {
           <div class="msg-content">
             <div class="msg-head">
               <span class="msg-author" data-profile-uid="${escapeHtml(m.senderUid)}">${escapeHtml(m.senderName||"User")}</span>
-              ${isLeader?`<span class="leader-badge">👑</span>`:""}
+              ${isLeader?`<span class="leader-badge" title="Group leader"><svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path fill="currentColor" d="M5 16L3 5l5.5 5L12 4l3.5 6L21 5l-2 11H5zm14 3c0 .6-.4 1-1 1H6c-.6 0-1-.4-1-1v-1h14v1z"/></svg></span>`:""}
               <span class="msg-time">${escapeHtml(formatTime(ts))}</span>
             </div>
             ${replyHtml}
@@ -2417,12 +2660,48 @@ $("#messages").addEventListener("dblclick", async e=>{
   const group=e.target.closest(".message-group,.msg-followup");
   if (!group) return;
   const msgId=group.dataset.msgId; if (!msgId) return;
+
+  if (state.dblClickMode === "picker") {
+    // Open emoji picker for custom react
+    _openReactionPicker(msgId, e.clientX, e.clientY);
+    return;
+  }
   const emoji=state.dblClickEmoji||"👍";
   await toggleReaction(msgId, emoji);
   // Brief visual flash
   group.classList.add("dbl-react-flash");
   setTimeout(()=>group.classList.remove("dbl-react-flash"), 400);
 });
+
+/* Open the emoji picker positioned near a message and apply chosen emoji as reaction */
+function _openReactionPicker(msgId, x, y) {
+  const picker = $("#emoji-picker");
+  if (!picker) return;
+  // Position near the cursor
+  picker.style.left = Math.max(10, Math.min(window.innerWidth-360, x-180)) + "px";
+  picker.style.bottom = "auto";
+  picker.style.top = Math.max(10, y - 360) + "px";
+  picker.classList.remove("hidden");
+  emojiOpen = true;
+  // Mark mode so the next emoji click reacts instead of inserting
+  picker.dataset.reactMsgId = msgId;
+}
+
+// When in react-mode, intercept emoji clicks to react instead of inserting
+document.addEventListener("click", async e=>{
+  const picker = $("#emoji-picker");
+  if (!picker || picker.classList.contains("hidden")) return;
+  if (!picker.dataset.reactMsgId) return;
+  const cell = e.target.closest(".emoji-cell");
+  if (!cell) return;
+  e.stopImmediatePropagation();
+  const emoji = cell.dataset.emoji || cell.textContent.trim();
+  const msgId = picker.dataset.reactMsgId;
+  await toggleReaction(msgId, emoji);
+  picker.classList.add("hidden");
+  emojiOpen = false;
+  delete picker.dataset.reactMsgId;
+}, true);
 
 // Message area delegation
 $("#messages").addEventListener("click", async e=>{
@@ -2955,6 +3234,177 @@ $("#chat-leave-btn")?.addEventListener("click", ()=>{
 
 
 /* =====================================================================
+   GROUP INFO MODAL — edit name/pic/desc, invite code, members, leave
+   ===================================================================== */
+function _generateInviteCode(len=6) {
+  const chars="ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; // no I,O,1,0
+  let s=""; for (let i=0;i<len;i++) s+=chars.charAt(Math.floor(Math.random()*chars.length));
+  return s;
+}
+
+async function openGroupInfoModal(chatId) {
+  const c = chatId ? state.chats.find(x=>x.id===chatId) || state.activeChat : state.activeChat;
+  if (!c || c.type!=="group") { showToast("Not a group chat"); return; }
+  state._groupInfoChatId = c.id;
+
+  $("#group-info-title").textContent = c.name || "Group";
+  $("#group-info-name-input").value = c.name || "";
+  $("#group-info-photo-input").value = c.photoURL || "";
+  $("#group-info-desc-input").value = c.description || "";
+  const code = c.joinCode || "—";
+  $("#group-info-code").textContent = code;
+
+  // Render avatar
+  const avEl = $("#group-info-avatar");
+  if (c.photoURL) avEl.innerHTML = `<img src="${escapeHtml(c.photoURL)}" alt="" />`;
+  else avEl.innerHTML = `<span>${escapeHtml(groupInitials(c.name||"G"))}</span>`;
+
+  // Render members with crowns + actions
+  const myUid = state.user.uid;
+  const isLeader = Array.isArray(c.leaders) && c.leaders.includes(myUid);
+  const leaders = Array.isArray(c.leaders) ? c.leaders : [];
+  $("#group-info-member-count").textContent = c.members.length;
+  const list = $("#group-info-members-list");
+
+  const memberHtml = await Promise.all(c.members.map(async uid=>{
+    const p = state.userCache[uid] || await fetchUserProfile(uid) || {};
+    const name = p.username || p.displayName || "User";
+    const isThemLeader = leaders.includes(uid);
+    const isSelf = uid===myUid;
+    const crown = isThemLeader ? `<svg viewBox="0 0 24 24" width="12" height="12" style="color:#f59e0b;flex-shrink:0;"><path fill="currentColor" d="M5 16L3 5l5.5 5L12 4l3.5 6L21 5l-2 11H5z"/></svg>` : "";
+
+    // Action buttons (only leaders see them, and not for themselves)
+    let actions = "";
+    if (isLeader && !isSelf) {
+      if (!isThemLeader) {
+        actions += `<button class="icon-btn" data-gm-action="promote" data-gm-uid="${escapeHtml(uid)}" title="Promote to leader" style="padding:2px;"><svg viewBox="0 0 24 24" width="14" height="14"><path fill="currentColor" d="M5 16L3 5l5.5 5L12 4l3.5 6L21 5l-2 11H5z"/></svg></button>`;
+      } else {
+        actions += `<button class="icon-btn" data-gm-action="demote" data-gm-uid="${escapeHtml(uid)}" title="Remove leader" style="padding:2px;color:var(--t-muted);"><svg viewBox="0 0 24 24" width="14" height="14"><path fill="currentColor" d="M19 13H5v-2h14v2z"/></svg></button>`;
+      }
+      actions += `<button class="icon-btn" data-gm-action="kick" data-gm-uid="${escapeHtml(uid)}" title="Kick from group" style="padding:2px;color:var(--c-danger);"><svg viewBox="0 0 24 24" width="14" height="14"><path fill="currentColor" d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg></button>`;
+    }
+
+    return `<div class="group-info-member" data-profile-uid="${escapeHtml(uid)}">
+      ${avatarMarkup(name, p.photoURL, "group-info-member-avatar", "group-info-member-fallback")}
+      <span class="group-info-member-name">${escapeHtml(name)}${isSelf?" (you)":""}</span>
+      ${crown}
+      <span class="group-info-member-actions">${actions}</span>
+    </div>`;
+  }));
+  list.innerHTML = memberHtml.join("");
+
+  openModal("group-info-modal");
+}
+
+// Header gear button → open modal
+$("#chat-group-info-btn")?.addEventListener("click", ()=>openGroupInfoModal());
+
+// Save name
+$("#group-info-save-name-btn")?.addEventListener("click", async ()=>{
+  const c = state.chats.find(x=>x.id===state._groupInfoChatId); if (!c) return;
+  const newName = $("#group-info-name-input").value.trim();
+  if (!newName) { showToast("Name can't be empty"); return; }
+  if (newName.length>50) { showToast("Name too long (50 max)"); return; }
+  try {
+    await updateDoc(doc(db,"chats",c.id), { name: newName });
+    showToast("Group name updated");
+    $("#group-info-title").textContent = newName;
+  } catch(err){ showToast("Error: "+err.message); }
+});
+
+// Save photo URL
+$("#group-info-save-photo-btn")?.addEventListener("click", async ()=>{
+  const c = state.chats.find(x=>x.id===state._groupInfoChatId); if (!c) return;
+  const url = $("#group-info-photo-input").value.trim();
+  try {
+    await updateDoc(doc(db,"chats",c.id), { photoURL: url || null });
+    showToast(url ? "Group picture updated" : "Group picture cleared");
+    const avEl = $("#group-info-avatar");
+    if (url) avEl.innerHTML = `<img src="${escapeHtml(url)}" alt="" />`;
+    else avEl.innerHTML = `<span>${escapeHtml(groupInitials(c.name||"G"))}</span>`;
+  } catch(err){ showToast("Error: "+err.message); }
+});
+
+// Save description
+$("#group-info-save-desc-btn")?.addEventListener("click", async ()=>{
+  const c = state.chats.find(x=>x.id===state._groupInfoChatId); if (!c) return;
+  const desc = $("#group-info-desc-input").value.trim();
+  try {
+    await updateDoc(doc(db,"chats",c.id), { description: desc });
+    showToast("Description saved");
+  } catch(err){ showToast("Error: "+err.message); }
+});
+
+// Regenerate invite code
+$("#group-info-regen-code")?.addEventListener("click", ()=>{
+  const c = state.chats.find(x=>x.id===state._groupInfoChatId); if (!c) return;
+  showConfirm("Regenerate invite code? The old code will stop working.", async ()=>{
+    try {
+      const code = _generateInviteCode();
+      await updateDoc(doc(db,"chats",c.id), { joinCode: code });
+      $("#group-info-code").textContent = code;
+      showToast("New code: "+code);
+    } catch(err){ showToast("Error: "+err.message); }
+  }, {title:"Regenerate Code", yesLabel:"Regenerate", danger:true});
+});
+
+// Click invite code → copy
+$("#group-info-code")?.addEventListener("click", e=>{
+  const code = e.target.textContent.trim();
+  if (code && code!=="—") { navigator.clipboard.writeText(code).catch(()=>{}); showToast("Code copied!"); }
+});
+
+// Leave group
+$("#group-info-leave-btn")?.addEventListener("click", ()=>{
+  const c = state.chats.find(x=>x.id===state._groupInfoChatId); if (!c) return;
+  showConfirm(`Leave "${c.name}"?`, async ()=>{
+    try {
+      const newMembers=c.members.filter(m=>m!==state.user.uid);
+      const newLeaders=(c.leaders||[]).filter(m=>m!==state.user.uid);
+      await updateDoc(doc(db,"chats",c.id),{members:newMembers,leaders:newLeaders});
+      closeModal("group-info-modal");
+      showFriendsView(); showToast("Left group");
+    } catch(err){ showToast("Error: "+err.message); }
+  }, { title:"Leave Group", yesLabel:"Leave", danger:true });
+});
+
+// Member action delegation: promote/demote/kick + click to view profile
+$("#group-info-members-list")?.addEventListener("click", async e=>{
+  const btn = e.target.closest("[data-gm-action]");
+  if (btn) {
+    e.stopPropagation();
+    const c = state.chats.find(x=>x.id===state._groupInfoChatId); if (!c) return;
+    const action = btn.dataset.gmAction, uid = btn.dataset.gmUid;
+    try {
+      if (action==="promote") {
+        const newLeaders=[...(c.leaders||[]),uid];
+        await updateDoc(doc(db,"chats",c.id),{leaders:newLeaders});
+        showToast("Promoted to leader");
+        openGroupInfoModal(c.id); // refresh
+      } else if (action==="demote") {
+        const newLeaders=(c.leaders||[]).filter(m=>m!==uid);
+        await updateDoc(doc(db,"chats",c.id),{leaders:newLeaders});
+        showToast("Removed leader role");
+        openGroupInfoModal(c.id);
+      } else if (action==="kick") {
+        showConfirm("Kick this member?", async ()=>{
+          const newMembers=c.members.filter(m=>m!==uid);
+          const newLeaders=(c.leaders||[]).filter(m=>m!==uid);
+          await updateDoc(doc(db,"chats",c.id),{members:newMembers,leaders:newLeaders});
+          showToast("Member kicked");
+          openGroupInfoModal(c.id);
+        }, {title:"Kick Member", yesLabel:"Kick", danger:true});
+      }
+    } catch(err){ showToast("Error: "+err.message); }
+    return;
+  }
+  // Click row → view profile
+  const row = e.target.closest("[data-profile-uid]");
+  if (row) showFullProfile(row.dataset.profileUid);
+});
+
+
+/* =====================================================================
    MODALS
    ===================================================================== */
 function openModal(id)  { const m=document.getElementById(id); if(m) m.classList.remove("hidden"); }
@@ -3004,6 +3454,7 @@ function onSettingsClose(force=false) {
   _settingsDirty=false;
   $("#settings-modal")?.classList.remove("settings-dirty");
   if (_pendingTheme!==null && _pendingTheme!==state.theme) applyTheme(state.theme);
+  closeModal("settings-modal");
 }
 // Intercept close attempts for settings-modal
 document.addEventListener("click", e=>{
@@ -3066,9 +3517,15 @@ function openSettingsModal(pane) {
   if($("#settings-gif-autofreeze-toggle"))      $("#settings-gif-autofreeze-toggle").checked=state.gifAutoFreeze;
   if($("#settings-compact-toggle"))            $("#settings-compact-toggle").checked=state.compactMode;
   $$(".text-size-btn").forEach(b=>b.classList.toggle("active", parseFloat(b.dataset.size)===state.textSize));
+  if($("#settings-show-last-active-toggle"))   $("#settings-show-last-active-toggle").checked=state.showLastActive;
   if($("#settings-dblclick-react-toggle"))     $("#settings-dblclick-react-toggle").checked=state.dblClickReact;
   if($("#settings-dblclick-emoji"))            $("#settings-dblclick-emoji").value=state.dblClickEmoji;
   if($("#dblclick-emoji-preview"))             $("#dblclick-emoji-preview").textContent=state.dblClickEmoji;
+  // Double-click mode radio
+  const modeRadio = document.querySelector(`input[name="dblclick-mode"][value="${state.dblClickMode}"]`);
+  if (modeRadio) modeRadio.checked = true;
+  const ch = $("#dblclick-emoji-chooser");
+  if (ch) ch.style.display = (state.dblClickMode === "emoji") ? "" : "none";
   if($("#settings-silent-typing-toggle"))      $("#settings-silent-typing-toggle").checked=state.silentTyping;
   // Show/hide dblclick emoji row
   const dblRow=$("#dblclick-emoji-row"); if(dblRow) dblRow.style.display=state.dblClickReact?"":"none";
@@ -3243,6 +3700,14 @@ $("#settings-dblclick-react-toggle")?.addEventListener("change", e => {
   localStorage.setItem("sc_dblclick_react", e.target.checked ? "true" : "false");
   const row=$("#dblclick-emoji-row"); if(row) row.style.display=e.target.checked?"":"none";
 });
+// Double-click mode (emoji vs picker)
+document.addEventListener("change", e => {
+  if (e.target.name !== "dblclick-mode") return;
+  state.dblClickMode = e.target.value;
+  localStorage.setItem("sc_dblclick_mode", e.target.value);
+  const ch = $("#dblclick-emoji-chooser");
+  if (ch) ch.style.display = (e.target.value === "emoji") ? "" : "none";
+});
 $("#settings-dblclick-emoji")?.addEventListener("input", e => {
   const v=e.target.value.trim()||"👍";
   state.dblClickEmoji=v;
@@ -3252,6 +3717,15 @@ $("#settings-dblclick-emoji")?.addEventListener("input", e => {
 $("#settings-silent-typing-toggle")?.addEventListener("change", e => {
   state.silentTyping = e.target.checked;
   localStorage.setItem("sc_silent_typing", e.target.checked ? "true" : "false");
+});
+$("#settings-show-last-active-toggle")?.addEventListener("change", async e => {
+  state.showLastActive = e.target.checked;
+  localStorage.setItem("sc_show_last_active", e.target.checked ? "true" : "false");
+  // Persist to Firestore so others' clients see the preference
+  if (state.user?.uid) {
+    try { await updateDoc(doc(db,"users",state.user.uid), { showLastActive: e.target.checked }); }
+    catch(_){}
+  }
 });
 $("#settings-gif-freeze-default-toggle")?.addEventListener("change", e => {
   state.gifFreezeDefault = e.target.checked;
@@ -3422,6 +3896,8 @@ function _initCrop(src) {
   const canvas=document.getElementById("avatar-crop-canvas");
   if (!canvas) return;
   canvas.width=CROP_CANVAS_SIZE; canvas.height=CROP_CANVAS_SIZE;
+  // Ensure events are wired (in case MutationObserver missed it)
+  if (typeof window.wireCropCanvas === "function") window.wireCropCanvas();
   _cropImg=new Image();
   _cropImg.crossOrigin="anonymous";
   _cropImg.onload=()=>{
@@ -3492,7 +3968,7 @@ function _getCroppedDataUrl() {
 document.addEventListener("DOMContentLoaded", ()=>{}, {once:true});
 (function(){
   let canvasWired=false;
-  function wireCropCanvas() {
+  window.wireCropCanvas = function wireCropCanvas() {
     if (canvasWired) return;
     const canvas=document.getElementById("avatar-crop-canvas");
     if (!canvas) return;
@@ -3549,9 +4025,10 @@ document.addEventListener("DOMContentLoaded", ()=>{}, {once:true});
       _drawCrop();
     },{passive:false});
     canvas.style.cursor="grab";
-  }
-  // Wire after modal first opens
-  const observer=new MutationObserver(()=>wireCropCanvas());
+  };
+  // Wire after modal first opens (or eagerly try now)
+  window.wireCropCanvas();
+  const observer=new MutationObserver(()=>window.wireCropCanvas());
   observer.observe(document.body, {childList:true, subtree:true});
 })();
 
@@ -4221,6 +4698,25 @@ async function showFullProfile(uid) {
       fpSince.style.display="";
     } else fpSince.style.display="none";
   }
+  // Last active timeline (optional — only if profile owner enabled it)
+  const fpLastActive = $("#fp-last-active");
+  if (fpLastActive) {
+    const showLastActive = profile.showLastActive !== false; // default off unless explicitly enabled
+    if (!isSelf && showLastActive && profile.lastSeen && !isPrivate) {
+      const ls = profile.lastSeen.toDate ? profile.lastSeen.toDate() : new Date(profile.lastSeen);
+      const diff = Date.now() - ls.getTime();
+      let txt = "Active just now";
+      if (profile.isOnline && diff < 5*60*1000) txt = "Active now";
+      else if (diff < 60*1000) txt = "Active just now";
+      else if (diff < 60*60*1000) txt = `Last active ${Math.floor(diff/60000)} min ago`;
+      else if (diff < 24*60*60*1000) txt = `Last active ${Math.floor(diff/3600000)}h ago`;
+      else if (diff < 7*24*60*60*1000) txt = `Last active ${Math.floor(diff/86400000)}d ago`;
+      else txt = `Last active ${ls.toLocaleDateString()}`;
+      fpLastActive.textContent = txt;
+      fpLastActive.style.display = "";
+    } else fpLastActive.style.display = "none";
+  }
+
   // Friends since
   const fpFriendsSince = $("#fp-friends-since");
   if (fpFriendsSince) {
@@ -4309,6 +4805,14 @@ async function showFullProfile(uid) {
         <svg viewBox="0 0 24 24" width="15" height="15"><path fill="currentColor" d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2z"/></svg>
         Message
       </button>`;
+      // Invite to group — only show if user is in any groups
+      const myGroups = state.chats.filter(c=>c.type==="group" && c.members.includes(state.user.uid) && !c.members.includes(uid));
+      if (myGroups.length) {
+        actionsHtml += `<button class="btn-ghost fp-action-btn" data-fp-action="invite-group" data-fp-uid="${escapeHtml(uid)}" title="Invite to a group chat">
+          <svg viewBox="0 0 24 24" width="15" height="15"><path fill="currentColor" d="M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5c-1.66 0-3 1.34-3 3s1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5C6.34 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z"/></svg>
+          Invite to Group
+        </button>`;
+      }
       actionsHtml += `<button class="btn-ghost fp-action-btn fp-action-danger" data-fp-action="remove-friend" data-fp-uid="${escapeHtml(uid)}">Remove Friend</button>`;
     }
     actionsHtml += isBlocked
@@ -4376,6 +4880,45 @@ document.addEventListener("click", async e=>{
   else if (action==="copy-id") {
     navigator.clipboard.writeText(uid||"").catch(()=>{});
     showToast("User ID copied!");
+  }
+  else if (action==="invite-group") {
+    // Show a small picker with this user's groups (where target is not yet a member)
+    const myGroups = state.chats.filter(c=>c.type==="group" && c.members.includes(state.user.uid) && !c.members.includes(uid));
+    if (!myGroups.length) { showToast("No eligible groups"); return; }
+    // Remove any existing inviter
+    document.getElementById("group-invite-picker")?.remove();
+    const overlay = document.createElement("div");
+    overlay.id = "group-invite-picker";
+    overlay.className = "modal";
+    overlay.innerHTML = `
+      <div class="modal-card" style="max-width:380px;width:90vw;">
+        <div class="modal-head"><h2>Invite to Group</h2>
+          <button class="icon-btn modal-close" data-close-invite>
+            <svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+          </button>
+        </div>
+        <div class="modal-body" style="padding:14px 18px;max-height:50vh;overflow-y:auto;">
+          ${myGroups.map(g=>`
+            <button class="group-invite-row" data-gi-chat-id="${escapeHtml(g.id)}">
+              <div class="side-row-fallback">${escapeHtml(groupInitials(g.name||"G"))}</div>
+              <span style="flex:1;text-align:left;">${escapeHtml(g.name||"Group")}</span>
+              <span style="font-size:11px;color:var(--t-muted);">${g.members.length} member${g.members.length===1?"":"s"}</span>
+            </button>
+          `).join("")}
+        </div>
+      </div>`;
+    document.body.appendChild(overlay);
+    overlay.addEventListener("click", async e2 => {
+      if (e2.target.closest("[data-close-invite]") || e2.target===overlay) { overlay.remove(); return; }
+      const row = e2.target.closest("[data-gi-chat-id]");
+      if (!row) return;
+      const chatId = row.dataset.giChatId;
+      try {
+        await updateDoc(doc(db,"chats",chatId), { members: arrayUnion(uid) });
+        showToast("Added to group ✓");
+        overlay.remove();
+      } catch(err){ showToast("Error: "+err.message); }
+    });
   }
 });
 
@@ -4448,7 +4991,7 @@ async function toggleReaction(msgId, emoji) {
   const uids=reactions[emoji]?[...reactions[emoji]]:[];
   const idx=uids.indexOf(state.user.uid);
   if (idx>=0) { uids.splice(idx,1); if (!uids.length) delete reactions[emoji]; else reactions[emoji]=uids; }
-  else { uids.push(state.user.uid); reactions[emoji]=uids; }
+  else { uids.push(state.user.uid); reactions[emoji]=uids; _pushRecentReact(emoji); }
   try { await updateDoc(doc(db,"chats",chatId,"messages",msgId),{reactions}); }
   catch(err){ showToast("Reaction failed: "+err.message); }
 }
@@ -4491,11 +5034,12 @@ function clearTypingIndicator() {
 
 function renderTypingIndicator(names=[]) {
   const el=$("#typing-indicator"); if (!el) return;
-  if (!names.length) { el.classList.add("hidden"); el.textContent=""; return; }
-  const text=names.length===1?`${names[0]} is typing…`
-    :names.length===2?`${names[0]} and ${names[1]} are typing…`
-    :"Several people are typing…";
-  el.textContent=text;
+  if (!names.length) { el.classList.add("hidden"); el.innerHTML=""; return; }
+  const phrase=names.length===1?`${escapeHtml(names[0])} is typing`
+    :names.length===2?`${escapeHtml(names[0])} and ${escapeHtml(names[1])} are typing`
+    :"Several people are typing";
+  // Animated dots — three pulsing dots (like Discord/iMessage)
+  el.innerHTML=`<span class="typing-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="typing-text">${phrase}</span>`;
   el.classList.remove("hidden");
 }
 
@@ -5081,6 +5625,37 @@ document.addEventListener("click", async e=>{
       showToast("🔕 Muted indefinitely — open the chat to set a duration");
     }
   }
+  else if (action==="ctx-group-info") { if(item.dataset.chatId) openGroupInfoModal(item.dataset.chatId); }
+  else if (action==="ctx-add-members") {
+    if (item.dataset.chatId) {
+      // Switch to that chat first so the existing add-member flow works
+      await openChat(item.dataset.chatId);
+      $("#chat-add-member-btn")?.click();
+    }
+  }
+  else if (action==="ctx-copy-invite") {
+    const cid=item.dataset.chatId;
+    const ch=state.chats.find(c=>c.id===cid);
+    if (ch?.joinCode) { navigator.clipboard.writeText(ch.joinCode).catch(()=>{}); showToast("Invite code copied!"); }
+    else showToast("No invite code set");
+  }
+  else if (action==="ctx-set-color") {
+    const cid=item.dataset.chatId; if (!cid) return;
+    _showChatColorPicker(cid, e.clientX, e.clientY);
+  }
+  else if (action==="ctx-leave-group") {
+    const cid=item.dataset.chatId;
+    const ch=state.chats.find(c=>c.id===cid); if (!ch) return;
+    showConfirm(`Leave "${ch.name}"?`, async ()=>{
+      try {
+        const newMembers=ch.members.filter(m=>m!==state.user.uid);
+        const newLeaders=(ch.leaders||[]).filter(m=>m!==state.user.uid);
+        await updateDoc(doc(db,"chats",cid),{members:newMembers,leaders:newLeaders});
+        if (state.activeChatId===cid) showFriendsView();
+        showToast("Left group");
+      } catch(err){ showToast("Error: "+err.message); }
+    }, { title:"Leave Group", yesLabel:"Leave", danger:true });
+  }
   else if (action==="ctx-view-profile") { showProfileCard(uid, e); }
   else if (action==="ctx-message")  { await openOrCreateDm(uid); }
   else if (action==="ctx-edit-profile") { openSettingsModal(); }
@@ -5398,20 +5973,36 @@ function _getMutes() {
 function _saveMutes(obj) {
   localStorage.setItem("sc_mutes", JSON.stringify(obj));
 }
+/* Mute levels:
+   - "notif"   — silence sounds/badges (default, what existed before)
+   - "preview" — also hide last-message preview in sidebar
+   - "all"     — also hide chat entirely from sidebar (still accessible via search)
+*/
+function _normalizeMute(entry) {
+  if (entry == null) return null;
+  if (typeof entry === "number") return { exp: entry, level: "notif" };
+  return entry;
+}
 function isChatMuted(chatId) {
   if (!chatId) return false;
   const mutes = _getMutes();
-  const exp = mutes[chatId];
-  if (exp === undefined) return false;
-  if (exp === -1) return true; // indefinite
-  if (Date.now() < exp) return true;
-  // Expired — clean up
+  const e = _normalizeMute(mutes[chatId]); if (!e) return false;
+  if (e.exp === -1) return true;
+  if (Date.now() < e.exp) return true;
   delete mutes[chatId]; _saveMutes(mutes);
   return false;
 }
-function muteChat(chatId, durationMs) {
+function chatMuteLevel(chatId) {
+  if (!isChatMuted(chatId)) return null;
+  const e = _normalizeMute(_getMutes()[chatId]);
+  return e?.level || "notif";
+}
+function muteChat(chatId, durationMs, level="notif") {
   const mutes = _getMutes();
-  mutes[chatId] = durationMs === -1 ? -1 : Date.now() + durationMs;
+  mutes[chatId] = {
+    exp: durationMs === -1 ? -1 : Date.now() + durationMs,
+    level
+  };
   _saveMutes(mutes);
 }
 function unmuteChat(chatId) {
@@ -5437,13 +6028,26 @@ document.addEventListener("click", e => {
     showToast("🔔 Notifications unmuted");
     return;
   }
-  // Build dropdown
+  // Build dropdown — duration + level options
   const rect = btn.getBoundingClientRect();
   const menu = document.createElement("div");
   menu.id = "mute-menu";
   menu.className = "mute-menu";
   menu.innerHTML = `
-    <div class="mute-menu-title">Mute Notifications</div>
+    <div class="mute-menu-title">Mute Level</div>
+    <label class="mute-level-row">
+      <input type="radio" name="mute-level" value="notif" checked />
+      <span>🔕 Notifications only<small>Silence sounds &amp; badges</small></span>
+    </label>
+    <label class="mute-level-row">
+      <input type="radio" name="mute-level" value="preview" />
+      <span>🤫 Hide preview<small>Also hide last-message preview</small></span>
+    </label>
+    <label class="mute-level-row">
+      <input type="radio" name="mute-level" value="all" />
+      <span>👁️‍🗨️ Hide chat<small>Also hide from sidebar</small></span>
+    </label>
+    <div class="mute-menu-title" style="margin-top:8px;">Duration</div>
     <button class="mute-option" data-ms="900000">🕐 15 minutes</button>
     <button class="mute-option" data-ms="3600000">🕐 1 hour</button>
     <button class="mute-option" data-ms="28800000">🕗 8 hours</button>
@@ -5457,10 +6061,13 @@ document.addEventListener("click", e => {
   menu.addEventListener("click", e2 => {
     const opt = e2.target.closest(".mute-option"); if (!opt) return;
     const ms = parseInt(opt.dataset.ms, 10);
-    muteChat(state.activeChatId, ms);
+    const level = menu.querySelector('input[name="mute-level"]:checked')?.value || "notif";
+    muteChat(state.activeChatId, ms, level);
     updateChatMuteBtn();
+    renderChatLists(); // refresh sidebar to apply preview/hide level
     const label = opt.textContent.trim();
-    showToast(`🔕 Muted: ${label}`);
+    const levelLabel = level==="all"?" (hidden)":level==="preview"?" (preview hidden)":"";
+    showToast(`🔕 Muted${levelLabel}: ${label}`);
     menu.remove();
   });
 });
@@ -5617,7 +6224,10 @@ document.addEventListener("keydown", e => {
     if (openModal) {
       // Don't close profile-setup modal (required flow)
       if (openModal.id !== "profile-setup-modal" && openModal.id !== "tos-overlay") {
-        closeModal(openModal.id); closed = true;
+        // Settings modal goes through dirty-check
+        if (openModal.id === "settings-modal") onSettingsClose();
+        else closeModal(openModal.id);
+        closed = true;
       }
     }
   }
