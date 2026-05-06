@@ -404,6 +404,7 @@ const state = {
   chatScrolledInitial: new Set(), // chatIds that have had their initial scroll done
   silentTyping:      localStorage.getItem("sc_silent_typing") === "true",
   showLastActive:    localStorage.getItem("sc_show_last_active") === "true",
+  pfpAnimate:        localStorage.getItem("sc_pfp_animate") || "always", // "always"|"messages-only"|"never"
   autoSendGif:       localStorage.getItem("sc_autosend_gif") === "true",
   dblClickReact:     localStorage.getItem("sc_dblclick_react") === "true",
   dblClickEmoji:     localStorage.getItem("sc_dblclick_emoji") || "👍",
@@ -548,10 +549,13 @@ const IC_PRESET_COLORS = [
 let _icCurrentTarget = null; // id suffix: bg|sidebar|accent
 
 function _icRenderGrid() {
-  const grid = $("#ic-color-grid"); if (!grid) return;
+  const grid = document.getElementById("ic-color-grid"); if (!grid) return;
+  if (grid.dataset.populated==="1") return;
   grid.innerHTML = IC_PRESET_COLORS.map(c=>`<div class="ic-color-cell" style="background:${c}" data-ic-color="${c}" title="${c}"></div>`).join("");
+  grid.dataset.populated="1";
 }
-_icRenderGrid();
+// Render lazily on first popover open (avoid running before $ is defined)
+document.addEventListener("DOMContentLoaded", _icRenderGrid);
 
 function _icApplyColor(target, color) {
   // target = "bg" | "sidebar" | "accent"
@@ -573,6 +577,7 @@ document.addEventListener("click", e=>{
   if (btn) {
     e.stopPropagation();
     _icCurrentTarget = btn.dataset.icTarget;
+    _icRenderGrid(); // ensure populated
     const pop = $("#ic-color-popover");
     const cur = $(`#tc-${_icCurrentTarget}`)?.value || "#000000";
     $("#ic-color-hex").value = cur;
@@ -728,8 +733,26 @@ async function _autoFlagCheck(text, msgId, chatId, senderUid, senderName) {
   }
 }
 
-function avatarMarkup(displayName, photoURL, sizeClass="side-row-avatar", fallbackClass="side-row-fallback") {
-  if (photoURL) return `<img class="${sizeClass}" src="${escapeHtml(photoURL)}" alt="" />`;
+/* Should an animated PFP be allowed in this context?
+   state.pfpAnimate: "always" | "messages-only" | "never" */
+function _shouldAnimatePfp(context) {
+  const mode = state.pfpAnimate || "always";
+  if (mode === "always") return true;
+  if (mode === "never") return false;
+  if (mode === "messages-only") return context === "message";
+  return true;
+}
+
+function avatarMarkup(displayName, photoURL, sizeClass="side-row-avatar", fallbackClass="side-row-fallback", context) {
+  if (photoURL) {
+    const isGif = /\.gif(\?|$)/i.test(photoURL);
+    if (isGif && !_shouldAnimatePfp(context)) {
+      // Replace animated GIF with static fallback (initials)
+      const initial = (displayName||"?").trim().charAt(0).toUpperCase()||"?";
+      return `<div class="${fallbackClass}" title="GIF avatar (animation paused)">${escapeHtml(initial)}</div>`;
+    }
+    return `<img class="${sizeClass}" src="${escapeHtml(photoURL)}" alt="" />`;
+  }
   const initial = (displayName||"?").trim().charAt(0).toUpperCase()||"?";
   return `<div class="${fallbackClass}">${escapeHtml(initial)}</div>`;
 }
@@ -1012,6 +1035,7 @@ onAuthStateChanged(auth, async firebaseUser => {
       bootSubscriptions();
       bootBlocklistCheck();
       _syncAutoEarnedBadges(); // write OG badge to Firestore if earned
+      _updateSchoolRailVisibility(); // show "School" rail btn if eligible domain
     }
   } else {
     state.user = null;
@@ -2582,7 +2606,7 @@ function renderMessages() {
       html.push(`
         <div class="message-group${extraClass}" data-msg-id="${escapeHtml(m.id)}" title="${tsTitle}">
           <div class="msg-avatar-btn" data-profile-uid="${escapeHtml(m.senderUid)}" role="button" tabindex="0">
-            ${avatarMarkup(m.senderName,m.senderPhoto,"msg-avatar","msg-avatar-fallback")}
+            ${avatarMarkup(m.senderName,m.senderPhoto,"msg-avatar","msg-avatar-fallback","message")}
           </div>
           <div class="msg-content">
             <div class="msg-head">
@@ -3405,6 +3429,206 @@ $("#group-info-members-list")?.addEventListener("click", async e=>{
 
 
 /* =====================================================================
+   SCHOOL DISCOVERY
+   Lets users with non-gmail email domains opt in to a directory of
+   other users from the same school domain. Includes a school-wide
+   group chat (auto-joined on opt-in).
+   ===================================================================== */
+const _BLOCKED_DOMAINS = new Set(["gmail.com","googlemail.com","yahoo.com","outlook.com","hotmail.com","icloud.com","aol.com","protonmail.com","proton.me","live.com","me.com"]);
+
+function _userSchoolDomain() {
+  const email = (state.user?.email || "").toLowerCase();
+  const at = email.indexOf("@");
+  if (at < 0) return null;
+  const dom = email.slice(at+1);
+  if (!dom || _BLOCKED_DOMAINS.has(dom)) return null;
+  return dom;
+}
+
+function _updateSchoolRailVisibility() {
+  const btn = $("#rail-school");
+  if (!btn) return;
+  const dom = _userSchoolDomain();
+  btn.classList.toggle("hidden", !dom);
+  if (dom) btn.title = `School Discovery — ${dom}`;
+}
+
+let _schoolMembersUnsub = null;
+
+async function openSchoolModal() {
+  const dom = _userSchoolDomain();
+  if (!dom) { showToast("School Discovery is only for non-personal email domains."); return; }
+
+  $("#school-domain-display").textContent = dom;
+  $("#school-directory-domain").textContent = dom;
+
+  // Check if already opted in
+  let optedIn = false;
+  try {
+    const snap = await getDoc(doc(db, "schoolDirectories", dom, "members", state.user.uid));
+    optedIn = snap.exists();
+  } catch(_){}
+
+  if (optedIn) _showSchoolDirectory(dom);
+  else _showSchoolOptin(dom);
+  openModal("school-modal");
+}
+
+function _showSchoolOptin(dom) {
+  $("#school-optin-view").classList.remove("hidden");
+  $("#school-directory-view").classList.add("hidden");
+  $("#school-consent-check").checked = false;
+  $("#school-join-btn").disabled = true;
+}
+
+async function _showSchoolDirectory(dom) {
+  $("#school-optin-view").classList.add("hidden");
+  $("#school-directory-view").classList.remove("hidden");
+
+  // Listen to members
+  if (_schoolMembersUnsub) { _schoolMembersUnsub(); _schoolMembersUnsub = null; }
+  const list = $("#school-members-list");
+  list.innerHTML = `<div class="empty" style="padding:18px;color:var(--t-muted);">Loading…</div>`;
+
+  try {
+    _schoolMembersUnsub = onSnapshot(
+      collection(db, "schoolDirectories", dom, "members"),
+      snap => {
+        const members = snap.docs.map(d => d.data());
+        $("#school-directory-count").textContent = members.length;
+        if (!members.length) {
+          list.innerHTML = `<div class="empty" style="padding:18px;color:var(--t-muted);">No other members yet — be the first!</div>`;
+          return;
+        }
+        list.innerHTML = members.map(m => {
+          const name = m.username || "User";
+          const bio = m.bio || "";
+          const isMe = m.uid === state.user.uid;
+          return `<div class="school-member-row" data-profile-uid="${escapeHtml(m.uid)}">
+            ${avatarMarkup(name, m.photoURL, "side-row-avatar", "side-row-fallback")}
+            <div class="school-member-info">
+              <div class="school-member-name">${escapeHtml(name)}${isMe?" <small style='color:var(--t-muted);font-weight:400;'>(you)</small>":""}</div>
+              <div class="school-member-bio">${escapeHtml(bio.slice(0,80) || "No bio")}</div>
+            </div>
+          </div>`;
+        }).join("");
+      },
+      err => {
+        console.warn("school members:", err);
+        list.innerHTML = `<div class="empty" style="padding:18px;color:var(--c-danger);">Couldn't load members: ${escapeHtml(err.message||"unknown error")}</div>`;
+      }
+    );
+  } catch(err) {
+    list.innerHTML = `<div class="empty" style="padding:18px;color:var(--c-danger);">Error: ${escapeHtml(err.message)}</div>`;
+  }
+}
+
+// Consent checkbox enables the join button
+document.addEventListener("change", e => {
+  if (e.target.id === "school-consent-check") {
+    const btn = $("#school-join-btn"); if (btn) btn.disabled = !e.target.checked;
+  }
+});
+
+// Opt in
+$("#school-join-btn")?.addEventListener("click", async () => {
+  const dom = _userSchoolDomain(); if (!dom || !state.user) return;
+  if (!$("#school-consent-check").checked) return;
+  const btn = $("#school-join-btn");
+  btn.disabled = true; btn.textContent = "Joining…";
+  try {
+    // Add to directory
+    await setDoc(doc(db, "schoolDirectories", dom, "members", state.user.uid), {
+      uid: state.user.uid,
+      username: state.user.username || state.user.displayName,
+      photoURL: state.user.photoURL || null,
+      bio: state.user.bio || "",
+      joinedAt: serverTimestamp()
+    });
+    // Update directory metadata
+    await setDoc(doc(db, "schoolDirectories", dom), {
+      domain: dom, lastJoinedAt: serverTimestamp()
+    }, { merge: true });
+    showToast("✓ Welcome to the directory!");
+    _showSchoolDirectory(dom);
+  } catch(err) {
+    showToast("Error joining: " + err.message);
+    btn.disabled = false; btn.textContent = "Opt In & Continue";
+  }
+});
+
+// Leave directory
+$("#school-leave-btn")?.addEventListener("click", () => {
+  const dom = _userSchoolDomain(); if (!dom) return;
+  showConfirm("Stop being discoverable to other " + dom + " members?", async () => {
+    try {
+      await deleteDoc(doc(db, "schoolDirectories", dom, "members", state.user.uid));
+      showToast("Left the directory");
+      closeModal("school-modal");
+      if (_schoolMembersUnsub) { _schoolMembersUnsub(); _schoolMembersUnsub = null; }
+    } catch(err) { showToast("Error: " + err.message); }
+  }, { title: "Leave Directory", yesLabel: "Leave", danger: true });
+});
+
+// Open school chat — find or create a group chat shared by domain
+$("#school-open-chat-btn")?.addEventListener("click", async () => {
+  const dom = _userSchoolDomain(); if (!dom || !state.user) return;
+  const btn = $("#school-open-chat-btn");
+  btn.disabled = true;
+  try {
+    // Check directory for chatId
+    const dirSnap = await getDoc(doc(db, "schoolDirectories", dom));
+    let chatId = dirSnap.exists() ? dirSnap.data().chatId : null;
+    if (chatId) {
+      // Verify chat exists & user is member
+      const chatSnap = await getDoc(doc(db, "chats", chatId));
+      if (!chatSnap.exists()) chatId = null;
+      else if (!chatSnap.data().members.includes(state.user.uid)) {
+        // Auto-add to school chat
+        await updateDoc(doc(db, "chats", chatId), { members: arrayUnion(state.user.uid) });
+      }
+    }
+    if (!chatId) {
+      // Create the school chat (first joiner)
+      const ref = await addDoc(collection(db, "chats"), {
+        type: "group",
+        members: [state.user.uid],
+        leaders: [state.user.uid],
+        name: `🎓 ${dom}`,
+        description: `Auto-created school chat for ${dom}. Stay safe — verify identities before sharing personal info.`,
+        createdBy: state.user.uid,
+        createdAt: serverTimestamp(),
+        lastMessage: "",
+        lastMessageAt: serverTimestamp(),
+        schoolDomain: dom,
+        joinCode: dom.replace(/[^a-z0-9]/gi, "").slice(0, 8).toUpperCase()
+      });
+      chatId = ref.id;
+      await setDoc(doc(db, "schoolDirectories", dom), { chatId, domain: dom }, { merge: true });
+    }
+    closeModal("school-modal");
+    openChat(chatId);
+  } catch(err) {
+    showToast("Error opening school chat: " + err.message);
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+// Rail button click
+$("#rail-school")?.addEventListener("click", openSchoolModal);
+
+// Member row click → full profile
+$("#school-members-list")?.addEventListener("click", e => {
+  const row = e.target.closest("[data-profile-uid]");
+  if (row) {
+    e.stopPropagation();
+    showFullProfile(row.dataset.profileUid);
+  }
+});
+
+
+/* =====================================================================
    MODALS
    ===================================================================== */
 function openModal(id)  { const m=document.getElementById(id); if(m) m.classList.remove("hidden"); }
@@ -3518,6 +3742,9 @@ function openSettingsModal(pane) {
   if($("#settings-compact-toggle"))            $("#settings-compact-toggle").checked=state.compactMode;
   $$(".text-size-btn").forEach(b=>b.classList.toggle("active", parseFloat(b.dataset.size)===state.textSize));
   if($("#settings-show-last-active-toggle"))   $("#settings-show-last-active-toggle").checked=state.showLastActive;
+  // PFP animate mode
+  const pfpRadio = document.querySelector(`input[name="pfp-animate"][value="${state.pfpAnimate}"]`);
+  if (pfpRadio) pfpRadio.checked = true;
   if($("#settings-dblclick-react-toggle"))     $("#settings-dblclick-react-toggle").checked=state.dblClickReact;
   if($("#settings-dblclick-emoji"))            $("#settings-dblclick-emoji").value=state.dblClickEmoji;
   if($("#dblclick-emoji-preview"))             $("#dblclick-emoji-preview").textContent=state.dblClickEmoji;
@@ -3707,6 +3934,15 @@ document.addEventListener("change", e => {
   localStorage.setItem("sc_dblclick_mode", e.target.value);
   const ch = $("#dblclick-emoji-chooser");
   if (ch) ch.style.display = (e.target.value === "emoji") ? "" : "none";
+});
+
+// Profile picture animation mode
+document.addEventListener("change", e => {
+  if (e.target.name !== "pfp-animate") return;
+  state.pfpAnimate = e.target.value;
+  localStorage.setItem("sc_pfp_animate", e.target.value);
+  // Re-render visible UI so the new mode applies immediately
+  renderMessages?.(); renderChatLists?.(); renderFriendsList?.(); renderChatHeader?.(); updateUserPanel?.();
 });
 $("#settings-dblclick-emoji")?.addEventListener("input", e => {
   const v=e.target.value.trim()||"👍";
@@ -4954,6 +5190,21 @@ function maybeToggleSidebar(open) {
 });
 $("#rail-home")?.addEventListener("click",()=>maybeToggleSidebar(true));
 $("#open-friends-btn")?.addEventListener("click",()=>maybeToggleSidebar(false));
+
+// Hamburger button toggles sidebar on mobile
+$("#mobile-sidebar-toggle")?.addEventListener("click", () => {
+  const appEl = $("#app");
+  if (appEl.classList.contains("show-sidebar")) appEl.classList.remove("show-sidebar");
+  else appEl.classList.add("show-sidebar");
+});
+// Close sidebar when tapping outside (mobile only)
+document.addEventListener("click", e => {
+  if (!window.matchMedia("(max-width: 768px)").matches) return;
+  const appEl = $("#app");
+  if (!appEl?.classList.contains("show-sidebar")) return;
+  if (e.target.closest(".sidebar, .rail, #mobile-sidebar-toggle")) return;
+  appEl.classList.remove("show-sidebar");
+});
 
 
 /* =====================================================================

@@ -175,6 +175,11 @@ export function buildUI() {
           <path fill="currentColor" d="M17.63 5.84C17.27 5.33 16.67 5 16 5L5 5.01C3.9 5.01 3 5.9 3 7v10c0 1.1.9 1.99 2 1.99L16 19c.67 0 1.27-.33 1.63-.84L22 12l-4.37-6.16zM16 17H5V7h11l3.55 5L16 17z"/>
         </svg>
       </button>
+      <button class="rail-btn rail-school hidden" id="rail-school" title="School Discovery — find people from your school">
+        <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+          <path fill="currentColor" d="M5 13.18v4L12 21l7-3.82v-4L12 17l-7-3.82zM12 3L1 9l11 6 9-4.91V17h2V9L12 3z"/>
+        </svg>
+      </button>
     </nav>
 
     <!-- SIDEBAR -->
@@ -285,6 +290,9 @@ export function buildUI() {
       <!-- CHAT VIEW -->
       <section id="chat-view" class="view hidden">
         <header class="main-header chat-header">
+          <button class="mobile-sidebar-toggle" id="mobile-sidebar-toggle" title="Toggle sidebar" aria-label="Open sidebar">
+            <svg viewBox="0 0 24 24" width="22" height="22"><path fill="currentColor" d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+          </button>
           <div class="chat-header-info">
             <div class="chat-header-avatar-wrap" id="chat-header-avatar-wrap"></div>
             <div>
@@ -476,6 +484,10 @@ export function buildUI() {
         <img src="${LOGO}" alt="" class="tos-logo" />
         <h2 id="tos-title">Before You Continue</h2>
         <p class="tos-sub">Static Chat is a community tool. By entering, you agree to the following.</p>
+        <p class="tos-author">
+          Built by <a href="https://sites.google.com/view/staticquasar931/gm3z" target="_blank" rel="noopener noreferrer"><strong>StaticQuasar931</strong></a>
+          · <a href="https://sites.google.com/view/staticquasar931/gm3z" target="_blank" rel="noopener noreferrer">Where's Epstein? 🎮</a>
+        </p>
       </div>
       <div class="tos-body">
         <ul class="tos-list">
@@ -490,7 +502,12 @@ export function buildUI() {
         <p class="tos-footer-note">By clicking "I Agree", you acknowledge you've read this and agree to use Static Chat responsibly.</p>
       </div>
       <div class="tos-foot">
-        <button class="btn-primary" id="tos-agree-btn" style="width:100%;padding:13px;font-size:15px;">I Agree — Let Me In</button>
+        <button class="btn-primary" id="tos-agree-btn">I Agree — Let Me In</button>
+        <div class="tos-credits">
+          <a href="https://sites.google.com/view/staticquasar931/gm3z" target="_blank" rel="noopener noreferrer">
+            🌐 Visit StaticQuasar931's site
+          </a>
+        </div>
       </div>
     </div>
   </div>
@@ -890,6 +907,23 @@ export function buildUI() {
                 <span class="toggle-track"></span>
               </span>
             </label>
+            <div class="settings-field-group" style="margin-top:14px;">
+              <label class="modal-label">Animated Profile Pictures (GIFs)</label>
+              <div style="display:flex;flex-direction:column;gap:6px;">
+                <label class="radio-row">
+                  <input type="radio" name="pfp-animate" value="always" id="pfp-anim-always" />
+                  <span>Animate everywhere <small style="color:var(--t-muted);">(default)</small></span>
+                </label>
+                <label class="radio-row">
+                  <input type="radio" name="pfp-animate" value="messages-only" id="pfp-anim-msg" />
+                  <span>Only animate in messages <small style="color:var(--t-muted);">(static in sidebar/headers)</small></span>
+                </label>
+                <label class="radio-row">
+                  <input type="radio" name="pfp-animate" value="never" id="pfp-anim-never" />
+                  <span>Never animate <small style="color:var(--t-muted);">(show initials instead)</small></span>
+                </label>
+              </div>
+            </div>
           </div>
 
           <p class="hint" style="margin-top:20px;text-align:center;">All appearance &amp; preference changes apply instantly.</p>
@@ -1006,6 +1040,81 @@ export function buildUI() {
       </div>
       <div class="modal-foot" style="justify-content:center;">
         <button class="btn-primary" id="group-code-ok-btn">Let's Chat!</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- School Discovery Modal -->
+  <div class="modal hidden" id="school-modal">
+    <div class="modal-card school-modal-card">
+      <div class="modal-head">
+        <h2>🎓 School Discovery</h2>
+        <button class="icon-btn modal-close" data-close="school-modal">
+          <svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </div>
+      <div class="modal-body" style="padding:18px 20px;max-height:75vh;overflow-y:auto;">
+        <!-- OPT-IN VIEW (shown if not yet opted in) -->
+        <div id="school-optin-view">
+          <div class="school-banner">
+            <div class="school-banner-icon">🎓</div>
+            <div>
+              <div class="school-banner-title">Connect with classmates</div>
+              <div class="school-banner-sub">Find people who go to your school</div>
+            </div>
+          </div>
+
+          <div class="school-domain-card">
+            <div class="modal-label">Your school domain (auto-detected)</div>
+            <div class="school-domain-value" id="school-domain-display">—</div>
+            <div class="hint">Anyone signed in with this email domain can find you here.</div>
+          </div>
+
+          <div class="school-warning">
+            <strong>⚠️ Stay safe:</strong>
+            <ul style="margin:6px 0 0;padding-left:18px;font-size:13px;color:var(--t-secondary);line-height:1.5;">
+              <li>People can <strong>spoof and lie</strong>. Just because they share your email domain doesn't mean they're a real classmate.</li>
+              <li><strong>Catfishing is possible.</strong> Someone could pretend to be a student or staff member.</li>
+              <li>Be careful with <strong>personal info</strong> (full name, location, phone, photos) — same rules as the rest of Static Chat.</li>
+              <li>If something feels off, <strong>report it</strong> and don't share more.</li>
+            </ul>
+          </div>
+
+          <label class="school-consent-row">
+            <input type="checkbox" id="school-consent-check" />
+            <span>I understand the risks and want my profile to be discoverable to other users in my school domain.</span>
+          </label>
+          <div class="modal-foot" style="padding:16px 0 0;">
+            <button class="btn-secondary" data-close="school-modal">Not now</button>
+            <button class="btn-primary" id="school-join-btn" disabled>Opt In &amp; Continue</button>
+          </div>
+        </div>
+
+        <!-- DIRECTORY VIEW (shown after opt-in) -->
+        <div id="school-directory-view" class="hidden">
+          <div class="school-directory-head">
+            <div>
+              <div class="school-banner-title" id="school-directory-domain">—</div>
+              <div class="school-banner-sub"><span id="school-directory-count">0</span> students discoverable</div>
+            </div>
+            <div style="display:flex;gap:6px;">
+              <button class="btn-primary" id="school-open-chat-btn" title="Open the school-wide group chat">
+                💬 School Chat
+              </button>
+              <button class="btn-ghost" id="school-leave-btn" title="Stop being discoverable">
+                Leave
+              </button>
+            </div>
+          </div>
+
+          <div class="hint" style="margin:8px 0;">
+            🔍 Spoofing reminder: domain match doesn't guarantee identity. Verify before sharing personal info.
+          </div>
+
+          <div id="school-members-list" class="school-members-list">
+            <div class="empty" style="padding:18px;color:var(--t-muted);">Loading…</div>
+          </div>
+        </div>
       </div>
     </div>
   </div>
