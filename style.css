@@ -1303,7 +1303,65 @@ body.compact-mode .msg-head { gap: 4px; }
   font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--t-muted); margin-bottom: 4px;
 }
 .profile-card-bio { font-size: 13px; color: var(--t-secondary); line-height: 1.5; min-height: 18px; margin-bottom: 12px; word-break: break-word; }
-.profile-card-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.profile-card-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+/* 3-dots overflow menu on profile card */
+.profile-card-more-btn {
+  margin-left: auto; width: 28px; height: 28px; border-radius: 50%;
+  background: var(--c-input-2); color: var(--t-muted); border: 1px solid var(--c-border-2);
+  display: grid; place-items: center; cursor: pointer; font-size: 16px; line-height: 1;
+  transition: background .12s, color .12s; flex-shrink: 0;
+}
+.profile-card-more-btn:hover { background: var(--c-input); color: var(--t-primary); }
+/* Notes section on profile card */
+.profile-card-notes-label {
+  font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em;
+  color: var(--t-muted); margin: 8px 0 4px;
+}
+.profile-card-notes {
+  width: 100%; min-height: 48px; max-height: 80px; resize: vertical;
+  background: var(--c-input-2); border: 1px solid var(--c-border-2);
+  border-radius: var(--radius-sm); color: var(--t-primary); font-size: 12px;
+  padding: 6px 8px; box-sizing: border-box; outline: none; font-family: inherit;
+  line-height: 1.4;
+}
+.profile-card-notes:focus { border-color: var(--c-accent); }
+.profile-card-notes::placeholder { color: var(--t-muted); }
+
+/* =================================================
+   FULL PROFILE MODAL
+   ================================================= */
+.full-profile-modal {
+  max-width: 480px; width: 96vw; padding: 0; overflow: hidden;
+}
+.full-profile-banner {
+  height: 100px;
+  background: linear-gradient(135deg,var(--c-input-2),var(--c-rail));
+}
+.full-profile-body { padding: 0 24px 24px; }
+.full-profile-avatar-row { display: flex; align-items: flex-end; gap: 12px; margin-top: -36px; margin-bottom: 12px; }
+.full-profile-avatar {
+  width: 72px; height: 72px; border-radius: 50%; border: 4px solid var(--c-surface);
+  background: var(--c-accent); display: grid; place-items: center;
+  font-weight: 700; font-size: 26px; color: #fff; overflow: hidden; flex-shrink: 0;
+}
+.full-profile-avatar img { width: 100%; height: 100%; object-fit: cover; border-radius: 50%; }
+.full-profile-status {
+  width: 16px; height: 16px; border-radius: 50%; border: 3px solid var(--c-surface);
+  margin-bottom: 8px;
+}
+.full-profile-name-block { padding-top: 40px; }
+.full-profile-name { font-weight: 800; font-size: 22px; color: var(--t-primary); line-height: 1.1; }
+.full-profile-tag { font-size: 14px; color: var(--t-muted); margin-top: 2px; }
+.full-profile-custom-status { font-size: 13px; color: var(--t-secondary); margin-top: 4px; font-style: italic; }
+.full-profile-badges { display: flex; flex-wrap: wrap; gap: 4px; margin: 8px 0; }
+.full-profile-divider { height: 1px; background: var(--c-border-2); margin: 12px 0; }
+.full-profile-section-label {
+  font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em;
+  color: var(--t-muted); margin-bottom: 6px;
+}
+.full-profile-bio { font-size: 14px; color: var(--t-secondary); line-height: 1.5; word-break: break-word; }
+.full-profile-since { font-size: 12px; color: var(--t-muted); margin-top: 4px; }
+.full-profile-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 16px; }
 
 /* =================================================
    TOAST
@@ -1601,8 +1659,7 @@ body[data-theme="daylight"] .msg-followup:hover { background: rgba(0,0,50,.05); 
   color: var(--t-muted); border-radius: var(--radius-sm);
   transition: background .12s, color .12s;
 }
-/* raise SVG 3px so it sits at same optical height as other toolbar icons */
-.composer-gif-btn svg { transform: translateY(-3px); }
+.composer-gif-btn svg { display: block; }
 .composer-gif-btn:hover { background: rgba(255,255,255,.08); color: var(--t-primary); }
 
 /* =================================================
@@ -1888,22 +1945,8 @@ body[data-theme="daylight"] .msg-followup:hover { background: rgba(0,0,50,.05); 
 }
 
 /* =================================================
-   GIF CATEGORY TABS
+   GIF CATEGORY TABS — see "GIF PICKER — improved" section below
    ================================================= */
-.gif-cats {
-  display: flex; gap: 4px; padding: 6px 8px;
-  border-bottom: 1px solid var(--c-border-2); overflow-x: auto; flex-shrink: 0;
-}
-.gif-cats::-webkit-scrollbar { height: 3px; }
-.gif-cat-btn {
-  flex-shrink: 0; padding: 4px 10px; border-radius: var(--radius-pill);
-  font-size: 12px; font-weight: 600; cursor: pointer;
-  background: var(--c-input-2); color: var(--t-muted);
-  transition: background .12s, color .12s; white-space: nowrap;
-}
-.gif-cat-btn:hover { background: var(--c-input); color: var(--t-primary); }
-.gif-cat-btn.active { background: var(--c-accent-soft); color: var(--c-accent); }
-/* gif-grid override removed — see GIF PICKER — improved section */
 
 /* =================================================
    SETTINGS MODAL — DISCORD LEFT NAV

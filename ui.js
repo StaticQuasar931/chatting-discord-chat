@@ -398,16 +398,15 @@ export function buildUI() {
               </svg>
             </button>
             <button class="icon-btn composer-gif-btn" id="gif-btn" title="Send a GIF">
-              <!-- GIF badge — rounded rect + G I F letterforms as paths for pixel-perfect render -->
-              <svg viewBox="0 0 36 20" width="36" height="20" aria-hidden="true" fill="currentColor">
-                <rect x="1" y="1" width="34" height="18" rx="4" ry="4"
-                  fill="none" stroke="currentColor" stroke-width="1.6"/>
+              <!-- GIF badge — rounded rect + clean path letterforms -->
+              <svg viewBox="0 0 36 20" width="28" height="16" aria-hidden="true" fill="currentColor">
+                <rect x="0.8" y="0.8" width="34.4" height="18.4" rx="4" fill="none" stroke="currentColor" stroke-width="1.6"/>
                 <!-- G -->
-                <path d="M8.2 6.2a4 4 0 1 0 0 7.6h2.6V10H9.2v1.4h.8v1H8.2a2.4 2.4 0 1 1 0-4.8c.7 0 1.3.3 1.7.7l1-1A4 4 0 0 0 8.2 6.2Z"/>
+                <path d="M9.1 5.5C6.5 5.5 4.4 7.4 4.4 10s2.1 4.5 4.7 4.5c1.4 0 2.5-.5 3.3-1.4v-3.3H8.3v1.5h2.4v1.2c-.5.4-1.1.6-1.6.6-1.8 0-3-1.3-3-3s1.2-3 3-3c.9 0 1.7.4 2.2 1l1.1-1.1C11.6 6.1 10.4 5.5 9.1 5.5z"/>
                 <!-- I -->
-                <rect x="13.2" y="6.4" width="1.6" height="7.2"/>
+                <rect x="14.2" y="5.7" width="1.7" height="8.6"/>
                 <!-- F -->
-                <path d="M17.4 6.4h4.8V8h-3.2v1.6h2.8v1.6h-2.8v2.4h-1.6V6.4Z"/>
+                <path d="M18.3 5.7h5.6v1.7h-3.9v2.1h3.4v1.7h-3.4v3.1h-1.7z"/>
               </svg>
             </button>
             <button class="icon-btn composer-send-btn" id="send-btn" title="Send" data-active="false">
@@ -754,6 +753,36 @@ export function buildUI() {
                 <span class="toggle-track"></span>
               </span>
             </label>
+            <label class="settings-toggle-row" style="margin-top:12px;">
+              <div class="settings-toggle-info">
+                <div class="settings-toggle-label">Freeze GIFs on load</div>
+                <div class="settings-toggle-sub">Pause all incoming GIFs automatically — click to replay</div>
+              </div>
+              <span class="toggle-switch">
+                <input type="checkbox" id="settings-gif-freeze-default-toggle" />
+                <span class="toggle-track"></span>
+              </span>
+            </label>
+            <label class="settings-toggle-row" style="margin-top:12px;">
+              <div class="settings-toggle-info">
+                <div class="settings-toggle-label">Keep GIFs frozen</div>
+                <div class="settings-toggle-sub">Remember which GIFs you froze — stays frozen through menus &amp; reloads</div>
+              </div>
+              <span class="toggle-switch">
+                <input type="checkbox" id="settings-gif-keep-frozen-toggle" />
+                <span class="toggle-track"></span>
+              </span>
+            </label>
+            <label class="settings-toggle-row" style="margin-top:12px;">
+              <div class="settings-toggle-info">
+                <div class="settings-toggle-label">Auto-freeze after 2 loops</div>
+                <div class="settings-toggle-sub">GIFs automatically pause after playing twice</div>
+              </div>
+              <span class="toggle-switch">
+                <input type="checkbox" id="settings-gif-autofreeze-toggle" />
+                <span class="toggle-track"></span>
+              </span>
+            </label>
 
           <div style="margin-top:24px;">
             <div class="settings-section-title" style="margin-bottom:10px;">Messages</div>
@@ -975,7 +1004,37 @@ export function buildUI() {
       <div class="profile-card-divider"></div>
       <div class="profile-card-bio-label">About Me</div>
       <div class="profile-card-bio" id="profile-card-bio"></div>
-      <div class="profile-card-actions" id="profile-card-actions"></div>
+      <div class="profile-card-notes-label" id="profile-card-notes-label">Note</div>
+      <textarea class="profile-card-notes" id="profile-card-notes" placeholder="Add a private note about this person…" maxlength="500"></textarea>
+      <div class="profile-card-actions" id="profile-card-actions">
+        <!-- buttons injected by showProfileCard() -->
+        <button class="profile-card-more-btn" id="profile-card-more-btn" title="More options" style="display:none">⋯</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Full Profile Modal -->
+  <div id="full-profile-modal" class="modal hidden">
+    <div class="modal-card full-profile-modal" role="dialog" aria-label="Full Profile" style="position:relative;overflow:hidden;max-height:92vh;overflow-y:auto;">
+      <div class="full-profile-banner" id="fp-banner"></div>
+      <div class="full-profile-body">
+        <div class="full-profile-avatar-row">
+          <div class="full-profile-avatar" id="fp-avatar"></div>
+          <span class="status-dot full-profile-status" id="fp-status-dot" data-status="offline" style="display:none"></span>
+        </div>
+        <div class="full-profile-name" id="fp-name"></div>
+        <div class="full-profile-tag" id="fp-tag"></div>
+        <div class="full-profile-custom-status" id="fp-custom-status" style="display:none"></div>
+        <div class="full-profile-badges" id="fp-badges"></div>
+        <div class="full-profile-divider"></div>
+        <div class="full-profile-section-label">About Me</div>
+        <div class="full-profile-bio" id="fp-bio"></div>
+        <div class="full-profile-since" id="fp-since"></div>
+        <div class="full-profile-actions" id="fp-actions"></div>
+      </div>
+      <button class="profile-card-close" id="full-profile-close" aria-label="Close" style="position:absolute;top:8px;right:8px;z-index:2;">
+        <svg viewBox="0 0 24 24" width="14" height="14"><path fill="currentColor" d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+      </button>
     </div>
   </div>
 

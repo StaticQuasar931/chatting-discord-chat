@@ -407,6 +407,11 @@ const state = {
   compactMode:       localStorage.getItem("sc_compact") === "true",
   textSize:          parseFloat(localStorage.getItem("sc_text_size")) || 15,
   customStatus:      localStorage.getItem("sc_custom_status")||"",
+  gifFreezeDefault:  localStorage.getItem("sc_gif_freeze_default") === "true",
+  gifKeepFrozen:     localStorage.getItem("sc_gif_keep_frozen") === "true",
+  gifAutoFreeze:     localStorage.getItem("sc_gif_autofreeze") === "true",
+  // Set of GIF src URLs that the user has frozen (persists when gifKeepFrozen is on)
+  frozenGifs: new Set(JSON.parse(localStorage.getItem("sc_frozen_gifs")||"[]")),
   favGifs: {},   // gifUrl → { url, previewUrl, title }
   favEmojis: {}, // emojiName → { name, char }
 };
@@ -731,7 +736,10 @@ function formatMessage(raw) {
     if (IMAGE_URL_RE.test(url) || GIF_CDN_RE.test(url)) {
       const isGif = /\.gif(\?|$)/i.test(url) || GIF_CDN_RE.test(url);
       if (isGif) {
-        return `<div class="gif-embed-wrap"><img class="msg-embed-img gif-embed-live" src="${url}" alt="" loading="lazy" onerror="this.style.display='none'" title="Click to freeze" /><span class="gif-embed-tag">GIF</span></div>`;
+        // data-gif-src stores original URL so freeze/unfreeze logic can always find it
+        const freezeAttrs = state.gifFreezeDefault || state.frozenGifs.has(url)
+          ? `data-autofreeze="true"` : ``;
+        return `<div class="gif-embed-wrap"><img class="msg-embed-img gif-embed-live" src="${url}" alt="" ${freezeAttrs} data-gif-src="${url}" onerror="this.style.display='none'" title="Click to freeze" /><span class="gif-embed-tag">GIF</span></div>`;
       }
       return `<a href="${url}" target="_blank" rel="noopener"><img class="msg-embed-img" src="${url}" alt="" loading="lazy" onerror="this.style.display='none'" /></a>`;
     }
@@ -2243,42 +2251,25 @@ $("#messages").addEventListener("click", async e=>{
     if (!wrap) return;
     const gifImg = wrap.querySelector(".gif-embed-live");
     if (!gifImg) return;
-    const origSrc = gifImg.dataset.origSrc;
+    const origSrc = gifImg.dataset.origSrc || gifImg.dataset.gifSrc;
     if (origSrc) { gifImg.src = ""; requestAnimationFrame(() => { gifImg.src = origSrc; }); }
     gifImg.dataset.frozen = "false";
+    gifImg.dataset.loopCount = "0";
     gifImg.style.display = "";
     wrap.querySelector(".gif-freeze-canvas")?.remove();
     wrap.querySelector(".gif-freeze-overlay")?.remove();
     gifImg.title = "Click to freeze";
+    // Remove from persistent frozen set
+    if (state.gifKeepFrozen && origSrc) {
+      state.frozenGifs.delete(origSrc);
+      _saveFrozenGifs();
+    }
     return;
   }
   // GIF freeze click (check BEFORE profile trigger)
   const gifEmbedA = e.target.closest(".gif-embed-live");
   if (gifEmbedA && gifEmbedA.dataset.frozen !== "true") {
-    const wrap = gifEmbedA.closest(".gif-embed-wrap");
-    if (!wrap) return;
-    try {
-      const w = gifEmbedA.offsetWidth || gifEmbedA.naturalWidth || 300;
-      const h = gifEmbedA.offsetHeight || gifEmbedA.naturalHeight || 200;
-      const canvas = document.createElement("canvas");
-      canvas.width = w; canvas.height = h;
-      canvas.className = "gif-freeze-canvas";
-      const ctx = canvas.getContext("2d");
-      ctx.drawImage(gifEmbedA, 0, 0, w, h);
-      gifEmbedA.dataset.origSrc = gifEmbedA.src;
-      gifEmbedA.dataset.frozen = "true";
-      gifEmbedA.src = "";
-      gifEmbedA.style.display = "none";
-      gifEmbedA.title = "";
-      const overlay = document.createElement("div");
-      overlay.className = "gif-freeze-overlay";
-      overlay.innerHTML = `<button class="gif-replay-btn" title="Replay GIF">
-        <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path fill="currentColor" d="M12 5V1L7 6l5 5V7c3.31 0 6 2.69 6 6s-2.69 6-6 6-6-2.69-6-6H4c0 4.42 3.58 8 8 8s8-3.58 8-8-3.58-8-8-8z"/></svg>
-        Replay
-      </button>`;
-      wrap.appendChild(canvas);
-      wrap.appendChild(overlay);
-    } catch (_) { /* cross-origin draw error — skip */ }
+    _freezeGifImg(gifEmbedA, /*manual=*/true);
     return;
   }
 
@@ -2818,7 +2809,10 @@ function openSettingsModal(pane) {
   if($("#settings-custom-status-input"))  $("#settings-custom-status-input").value=state.customStatus||"";
   if($("#settings-sound-toggle"))              $("#settings-sound-toggle").checked=state.soundEnabled;
   if($("#settings-hints-toggle"))              $("#settings-hints-toggle").checked=localStorage.getItem("sc_hints")!=="false";
-  if($("#settings-autosend-gif-toggle"))       $("#settings-autosend-gif-toggle").checked=state.autoSendGif;
+  if($("#settings-autosend-gif-toggle"))            $("#settings-autosend-gif-toggle").checked=state.autoSendGif;
+  if($("#settings-gif-freeze-default-toggle"))  $("#settings-gif-freeze-default-toggle").checked=state.gifFreezeDefault;
+  if($("#settings-gif-keep-frozen-toggle"))     $("#settings-gif-keep-frozen-toggle").checked=state.gifKeepFrozen;
+  if($("#settings-gif-autofreeze-toggle"))      $("#settings-gif-autofreeze-toggle").checked=state.gifAutoFreeze;
   if($("#settings-compact-toggle"))            $("#settings-compact-toggle").checked=state.compactMode;
   $$(".text-size-btn").forEach(b=>b.classList.toggle("active", parseFloat(b.dataset.size)===state.textSize));
   if($("#settings-dblclick-react-toggle"))     $("#settings-dblclick-react-toggle").checked=state.dblClickReact;
@@ -3007,6 +3001,20 @@ $("#settings-dblclick-emoji")?.addEventListener("input", e => {
 $("#settings-silent-typing-toggle")?.addEventListener("change", e => {
   state.silentTyping = e.target.checked;
   localStorage.setItem("sc_silent_typing", e.target.checked ? "true" : "false");
+});
+$("#settings-gif-freeze-default-toggle")?.addEventListener("change", e => {
+  state.gifFreezeDefault = e.target.checked;
+  localStorage.setItem("sc_gif_freeze_default", e.target.checked ? "true" : "false");
+});
+$("#settings-gif-keep-frozen-toggle")?.addEventListener("change", e => {
+  state.gifKeepFrozen = e.target.checked;
+  localStorage.setItem("sc_gif_keep_frozen", e.target.checked ? "true" : "false");
+  // If turned off, clear the frozen set
+  if (!e.target.checked) { state.frozenGifs.clear(); _saveFrozenGifs(); }
+});
+$("#settings-gif-autofreeze-toggle")?.addEventListener("change", e => {
+  state.gifAutoFreeze = e.target.checked;
+  localStorage.setItem("sc_gif_autofreeze", e.target.checked ? "true" : "false");
 });
 
 // Settings modal interactions (theme/status/banner)
@@ -3694,9 +3702,23 @@ async function showProfileCard(uid, event) {
     }
   }
 
-  // Badges
+  // Badges — merge hardcoded augmented badges with Firestore userBadges/{uid}
   const badgesEl=$("#profile-card-badges");
-  if (badgesEl) badgesEl.innerHTML=renderBadges(profile.badges||[]);
+  if (badgesEl) {
+    badgesEl.innerHTML=renderBadges(profile.badges||[]);
+    // Async fetch extra badges from Firestore (won't block card show)
+    getDoc(doc(db,"userBadges",uid)).then(snap=>{
+      if (!snap.exists()) return;
+      const fb = snap.data()?.badges || [];
+      if (!fb.length) return;
+      const merged = [...new Set([...(profile.badges||[]), ...fb])];
+      // Cache so repeated opens are fast
+      state.userCache[uid] = {...profile, badges: merged};
+      if (!$("#profile-card")?.classList.contains("hidden")) {
+        badgesEl.innerHTML = renderBadges(merged);
+      }
+    }).catch(()=>{});
+  }
 
   // Name / custom status / bio
   $("#profile-card-name").textContent=profile.username||profile.displayName||"User";
@@ -3737,10 +3759,30 @@ async function showProfileCard(uid, event) {
       actionsHtml+=`<span style="font-size:12px;color:var(--t-muted);">Request sent</span>`;
     if (isFriend) actionsHtml+=`<button class="btn-ghost" data-pc-action="message" data-pc-uid="${escapeHtml(uid)}">Message</button>`;
   }
-  $("#profile-card-actions").innerHTML=actionsHtml;
+  // "View Full Profile" button always visible (except self — they have Edit Profile)
+  if (!isSelf) actionsHtml+=`<button class="btn-ghost" data-pc-action="view-full-profile" data-pc-uid="${escapeHtml(uid)}" style="font-size:12px;">Full Profile</button>`;
 
-  // Position
-  const W=290, H=360;
+  // 3-dots more menu button (injected after actions div so it floats right via flex)
+  const moreBtn = `<button class="profile-card-more-btn" id="profile-card-more-btn" data-pc-uid="${escapeHtml(uid)}" title="More options">⋯</button>`;
+  $("#profile-card-actions").innerHTML = actionsHtml + moreBtn;
+
+  // Notes
+  const notesArea = $("#profile-card-notes");
+  const notesLabel = $("#profile-card-notes-label");
+  if (notesArea) {
+    if (!isSelf) {
+      notesArea.style.display = "";
+      if (notesLabel) notesLabel.style.display = "";
+      notesArea.value = localStorage.getItem(`sc_notes_${uid}`) || "";
+      notesArea.dataset.noteUid = uid;
+    } else {
+      notesArea.style.display = "none";
+      if (notesLabel) notesLabel.style.display = "none";
+    }
+  }
+
+  // Position — expand height estimate if notes visible
+  const W=290, H=isSelf?340:400;
   let x=event.clientX+12, y=event.clientY-20;
   if (x+W>window.innerWidth-8) x=event.clientX-W-12;
   if (y+H>window.innerHeight-8) y=window.innerHeight-H-8;
@@ -3773,7 +3815,43 @@ $("#profile-card")?.addEventListener("click", async e=>{
   } else if (action==="edit-profile") {
     $("#profile-card").classList.add("hidden");
     openSettingsModal();
+  } else if (action==="view-full-profile") {
+    const targetUid = btn.dataset.pcUid;
+    $("#profile-card").classList.add("hidden");
+    showFullProfile(targetUid);
   }
+});
+
+// Notes autosave on input
+document.addEventListener("input", e => {
+  if (e.target.id !== "profile-card-notes") return;
+  const uid = e.target.dataset.noteUid;
+  if (!uid) return;
+  const val = e.target.value;
+  if (val.trim()) localStorage.setItem(`sc_notes_${uid}`, val);
+  else localStorage.removeItem(`sc_notes_${uid}`);
+});
+
+// 3-dots context menu on profile card
+document.addEventListener("click", e => {
+  const moreBtn = e.target.closest("#profile-card-more-btn");
+  if (!moreBtn) return;
+  e.stopPropagation();
+  const uid = moreBtn.dataset.pcUid;
+  if (!uid) return;
+  const isFriend = state.friends.some(f => f.uid === uid);
+  const isBlocked = (state.user?.blockedUsers||[]).includes(uid);
+  const items = [
+    { label:"View Full Profile", action:"ctx-view-full-profile", data:{uid} },
+    { label:"Copy User ID",      action:"ctx-copy-user-id",      data:{uid} },
+    "divider",
+    isFriend ? { label:"Remove Friend", action:"ctx-pc-unfriend", data:{uid}, danger:true } : null,
+    isBlocked
+      ? { label:"Unblock User",   action:"ctx-pc-unblock", data:{uid} }
+      : { label:"Block User",     action:"ctx-pc-block",   data:{uid}, danger:true },
+  ].filter(Boolean);
+  const rect = moreBtn.getBoundingClientRect();
+  showCtxMenu(rect.left, rect.bottom+4, items);
 });
 
 document.addEventListener("click",e=>{
@@ -3782,6 +3860,109 @@ document.addEventListener("click",e=>{
   if (card.contains(e.target)) return;
   if (e.target.closest("[data-profile-uid]")||e.target.closest(".friend-row")) return;
   card.classList.add("hidden");
+});
+
+
+/* =====================================================================
+   FULL PROFILE MODAL
+   ===================================================================== */
+async function showFullProfile(uid) {
+  const modal = $("#full-profile-modal"); if (!modal) return;
+  const profile = await fetchUserProfile(uid); if (!profile) return;
+  const isSelf = uid === state.user?.uid;
+  const isFriend = state.friends.some(f => f.uid === uid);
+  const hasPendingOut = state.outgoing?.some(r => r.toUid === uid);
+  const isPrivate = profile.isPrivate && !isFriend && !isSelf;
+
+  // Banner
+  const bannerEl = $("#fp-banner");
+  if (bannerEl) {
+    const bc = isSelf ? (state.bannerColor||null) : (profile.bannerColor||null);
+    if (bc) bannerEl.style.background = bc.includes(",") ? `linear-gradient(135deg,${bc})` : bc;
+    else bannerEl.style.background = "linear-gradient(135deg,var(--c-input-2),var(--c-rail))";
+  }
+
+  // Avatar
+  const avatarEl = $("#fp-avatar");
+  if (avatarEl) {
+    if (isPrivate) { avatarEl.innerHTML=""; avatarEl.textContent="?"; }
+    else if (profile.photoURL) avatarEl.innerHTML = `<img src="${escapeHtml(profile.photoURL)}" alt="" />`;
+    else { avatarEl.innerHTML=""; avatarEl.textContent = (profile.username||profile.displayName||"?").charAt(0).toUpperCase(); }
+  }
+
+  // Status dot
+  const sdot = $("#fp-status-dot");
+  if (sdot) {
+    if (!isSelf && !isFriend) { sdot.style.display="none"; }
+    else { sdot.style.display=""; sdot.dataset.status = resolveStatus(profile); }
+  }
+
+  // Text fields
+  $("#fp-name").textContent = profile.username||profile.displayName||"User";
+  $("#fp-tag").textContent = profile.discriminator ? `#${profile.discriminator}` : "";
+  const cs = isSelf ? state.customStatus : (profile.customStatus||"");
+  const fpCs = $("#fp-custom-status");
+  if (fpCs) { fpCs.textContent=cs; fpCs.style.display=cs?"":"none"; }
+  $("#fp-bio").textContent = isPrivate ? "This profile is private." : (profile.bio||"No bio set yet.");
+  const fpSince = $("#fp-since");
+  if (fpSince) {
+    if (profile.createdAt && !isPrivate) {
+      const d = profile.createdAt.toDate ? profile.createdAt.toDate() : new Date(profile.createdAt);
+      fpSince.textContent = "Member since " + d.toLocaleDateString(undefined,{year:"numeric",month:"long",day:"numeric"});
+      fpSince.style.display="";
+    } else fpSince.style.display="none";
+  }
+
+  // Badges
+  const fpBadges = $("#fp-badges");
+  if (fpBadges) {
+    fpBadges.innerHTML = renderBadges(profile.badges||[]);
+    getDoc(doc(db,"userBadges",uid)).then(snap=>{
+      if (!snap.exists()) return;
+      const fb = snap.data()?.badges||[];
+      if (!fb.length) return;
+      const merged = [...new Set([...(profile.badges||[]),...fb])];
+      fpBadges.innerHTML = renderBadges(merged);
+    }).catch(()=>{});
+  }
+
+  // Actions
+  let actionsHtml = "";
+  if (isSelf) {
+    actionsHtml = `<button class="btn-ghost" data-fp-action="edit-profile">Edit Profile</button>`;
+  } else {
+    if (!isFriend && !hasPendingOut)
+      actionsHtml += `<button class="btn-primary" data-fp-action="add-friend" data-fp-uid="${escapeHtml(uid)}">Add Friend</button>`;
+    else if (hasPendingOut)
+      actionsHtml += `<span style="font-size:13px;color:var(--t-muted);">Request sent</span>`;
+    if (isFriend)
+      actionsHtml += `<button class="btn-ghost" data-fp-action="message" data-fp-uid="${escapeHtml(uid)}">Message</button>`;
+  }
+  const fpActions = $("#fp-actions"); if (fpActions) fpActions.innerHTML = actionsHtml;
+
+  openModal("full-profile-modal");
+}
+
+$("#full-profile-close")?.addEventListener("click", ()=>closeModal("full-profile-modal"));
+
+document.addEventListener("click", async e=>{
+  const btn = e.target.closest("[data-fp-action]"); if (!btn) return;
+  const action = btn.dataset.fpAction, uid = btn.dataset.fpUid;
+  if (action==="edit-profile") { closeModal("full-profile-modal"); openSettingsModal(); }
+  else if (action==="message") { closeModal("full-profile-modal"); await openOrCreateDm(uid); }
+  else if (action==="add-friend") {
+    btn.disabled=true; btn.textContent="Sending…";
+    try {
+      const p=state.userCache[uid]||{};
+      await setDoc(doc(db,"friendRequests",`${state.user.uid}_${uid}`),{
+        fromUid:state.user.uid, toUid:uid,
+        fromName:state.user.displayName, fromPhoto:state.user.photoURL||null,
+        toName:p.username||p.displayName||"User", toPhoto:p.photoURL||null,
+        createdAt:serverTimestamp()
+      });
+      btn.textContent="Sent ✓"; showToast("Friend request sent");
+    } catch(err){ btn.disabled=false; btn.textContent="Add Friend"; showToast("Error: "+err.message); }
+  }
 });
 
 
@@ -3948,6 +4129,109 @@ document.addEventListener("visibilitychange", ()=>{ if (!document.hidden) update
 
 
 /* =====================================================================
+   GIF FREEZE HELPERS
+   ===================================================================== */
+
+function _saveFrozenGifs() {
+  try { localStorage.setItem("sc_frozen_gifs", JSON.stringify([...state.frozenGifs])); } catch(_){}
+}
+
+// Freeze a gif-embed-live img element in place using a canvas snapshot.
+// manual=true means the user clicked it, so we may persist the URL.
+function _freezeGifImg(gifImg, manual=false) {
+  if (!gifImg || gifImg.dataset.frozen === "true") return;
+  const wrap = gifImg.closest(".gif-embed-wrap");
+  if (!wrap) return;
+  try {
+    const w = gifImg.offsetWidth || gifImg.naturalWidth || 300;
+    const h = gifImg.offsetHeight || gifImg.naturalHeight || 200;
+    if (w < 2 || h < 2) return; // image hasn't rendered yet — skip
+    const canvas = document.createElement("canvas");
+    canvas.width = w; canvas.height = h;
+    canvas.className = "gif-freeze-canvas";
+    const ctx = canvas.getContext("2d");
+    ctx.drawImage(gifImg, 0, 0, w, h);
+    const src = gifImg.src || gifImg.dataset.gifSrc || "";
+    gifImg.dataset.origSrc = src;
+    gifImg.dataset.frozen = "true";
+    gifImg.src = "";
+    gifImg.style.display = "none";
+    gifImg.title = "";
+    const overlay = document.createElement("div");
+    overlay.className = "gif-freeze-overlay";
+    overlay.innerHTML = `<button class="gif-replay-btn" title="Replay GIF">
+      <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path fill="currentColor" d="M12 5V1L7 6l5 5V7c3.31 0 6 2.69 6 6s-2.69 6-6 6-6-2.69-6-6H4c0 4.42 3.58 8 8 8s8-3.58 8-8-3.58-8-8-8z"/></svg>
+      Replay
+    </button>`;
+    wrap.appendChild(canvas);
+    wrap.appendChild(overlay);
+    // Persist if keep-frozen is on and it was a manual freeze
+    if (manual && state.gifKeepFrozen && src) {
+      state.frozenGifs.add(src);
+      _saveFrozenGifs();
+    }
+  } catch (_) { /* cross-origin draw error — skip */ }
+}
+
+// Called after a GIF img loads. Handles:
+//   • freeze-by-default / keep-frozen (data-autofreeze attr)
+//   • auto-freeze after 2 loops (loop count via repeated load events)
+function _onGifImgLoad(gifImg) {
+  if (!gifImg || !gifImg.classList.contains("gif-embed-live")) return;
+  if (gifImg.dataset.frozen === "true") return;
+
+  // Auto-freeze on load (freeze-default or keep-frozen)
+  if (gifImg.dataset.autofreeze === "true") {
+    // Small delay so the frame is painted before we draw to canvas
+    setTimeout(() => _freezeGifImg(gifImg, false), 120);
+    return;
+  }
+
+  // Auto-freeze after 2 loops
+  if (state.gifAutoFreeze) {
+    const count = parseInt(gifImg.dataset.loopCount||"0", 10) + 1;
+    gifImg.dataset.loopCount = String(count);
+    if (count >= 2) {
+      setTimeout(() => _freezeGifImg(gifImg, false), 80);
+    }
+  }
+}
+
+// MutationObserver: watch the messages area for new gif-embed-live images
+// and attach the load handler + autofreeze logic.
+(function _initGifFreezeObserver() {
+  const observer = new MutationObserver(mutations => {
+    for (const m of mutations) {
+      for (const node of m.addedNodes) {
+        if (!(node instanceof Element)) continue;
+        // Check if the added node itself is a gif-embed-live img
+        const imgs = node.classList?.contains("gif-embed-live")
+          ? [node]
+          : [...node.querySelectorAll(".gif-embed-live")];
+        for (const img of imgs) {
+          if (img._gifLoadBound) continue;
+          img._gifLoadBound = true;
+          img.addEventListener("load", () => _onGifImgLoad(img));
+          // If already loaded (cached), run immediately
+          if (img.complete && img.naturalWidth > 0) {
+            _onGifImgLoad(img);
+          }
+        }
+      }
+    }
+  });
+  // Start observing once DOM is ready
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", () => {
+      observer.observe(document.body, { childList: true, subtree: true });
+    });
+  } else {
+    observer.observe(document.body, { childList: true, subtree: true });
+  }
+})();
+
+
+/* =====================================================================
    GIF SEARCH  (Tenor API v1)
    ===================================================================== */
 const TENOR_KEY = "LIVDSRZULELA";
@@ -3980,11 +4264,11 @@ async function fetchGifs(query, isTrending=false, nextPos="") {
 
 function _gifCellHtml(insertUrl, previewUrl, title) {
   const isFav = !!state.favGifs[insertUrl];
-  // Use <div> wrapper to avoid invalid <button><button> nesting (causes browser to break DOM structure)
+  // No loading="lazy" — lazy prevents images from loading in dynamically shown containers
   return `<div class="gif-cell" role="button" tabindex="0" data-gif-url="${escapeHtml(insertUrl)}"
     data-gif-preview="${escapeHtml(previewUrl)}" data-gif-title="${escapeHtml(title)}"
     title="${escapeHtml(title)}">
-    <img src="${escapeHtml(previewUrl)}" alt="${escapeHtml(title||"GIF")}" loading="lazy" />
+    <img src="${escapeHtml(previewUrl)}" alt="${escapeHtml(title||"GIF")}" />
     <span class="gif-fav-btn${isFav?" active":""}" data-fav-url="${escapeHtml(insertUrl)}"
       title="${isFav?"Remove from saved":"Save GIF"}" role="button" tabindex="-1">♥</span>
   </div>`;
@@ -3995,8 +4279,10 @@ function renderGifGrid(results, append=false) {
   if (!results.length && !append) { grid.innerHTML=`<p class="gif-hint">No GIFs found — try a different search.</p>`; return; }
   const cells=results.map(r=>{
     const media=r.media?.[0];
-    const previewUrl=media?.tinygif?.url||media?.gif?.url||"";
-    const insertUrl =media?.gif?.url||media?.tinygif?.url||"";
+    // Use mediumgif for preview (higher quality than tinygif, lower bandwidth than gif)
+    // Fall back to gif → tinygif in order of quality
+    const previewUrl=media?.mediumgif?.url||media?.gif?.url||media?.tinygif?.url||"";
+    const insertUrl =media?.gif?.url||media?.mediumgif?.url||media?.tinygif?.url||"";
     if (!previewUrl) return "";
     return _gifCellHtml(insertUrl, previewUrl, r.title||"");
   }).filter(Boolean).join("");
@@ -4406,6 +4692,30 @@ document.addEventListener("click", async e=>{
       await setDoc(doc(db,"users",state.user.uid,"favEmojis",name),{name,char,addedAt:serverTimestamp()});
       showToast("⭐ Emoji saved!");
     }
+  }
+  // Profile card 3-dots actions
+  else if (action==="ctx-view-full-profile") {
+    $("#profile-card")?.classList.add("hidden");
+    showFullProfile(uid);
+  }
+  else if (action==="ctx-copy-user-id") {
+    navigator.clipboard.writeText(uid||"").catch(()=>{});
+    showToast("User ID copied");
+  }
+  else if (action==="ctx-pc-unfriend") {
+    const fs = state.friends?.find(f=>f.uid===uid);
+    if (fs?.friendshipId) { await deleteDoc(doc(db,"friendships",fs.friendshipId)).catch(()=>{}); showToast("Friend removed"); }
+    $("#profile-card")?.classList.add("hidden");
+  }
+  else if (action==="ctx-pc-block") {
+    blockUser(uid);
+    $("#profile-card")?.classList.add("hidden");
+  }
+  else if (action==="ctx-pc-unblock") {
+    const blocked = (state.user?.blockedUsers||[]).filter(id=>id!==uid);
+    await updateDoc(doc(db,"users",state.user.uid),{blockedUsers:blocked}).catch(()=>{});
+    showToast("User unblocked");
+    $("#profile-card")?.classList.add("hidden");
   }
 });
 
