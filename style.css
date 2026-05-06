@@ -646,6 +646,18 @@ input, textarea { font-family: inherit; font-size: inherit; color: var(--t-prima
   width: 32px; height: 32px; border-radius: 50%;
   background: var(--c-accent); object-fit: cover; flex-shrink: 0; display: block;
 }
+/* Camera edit overlay — appears on hover over the user's own avatar */
+.user-panel-avatar-edit {
+  position: absolute; inset: 0; border-radius: 50%;
+  background: rgba(0,0,0,.55);
+  display: flex; align-items: center; justify-content: center;
+  opacity: 0; transition: opacity .15s;
+  cursor: pointer; z-index: 3; color: #fff;
+  pointer-events: none;
+}
+.user-panel-avatar-area:hover .user-panel-avatar-edit {
+  opacity: 1; pointer-events: auto;
+}
 .user-panel-avatar-fallback {
   width: 32px; height: 32px; border-radius: 50%;
   background: linear-gradient(135deg, var(--c-accent) 0%, #6a5aff 100%);
@@ -1402,20 +1414,59 @@ body.compact-mode .msg-head { gap: 4px; }
    UPDATE NOTIFICATION BANNER
    ================================================= */
 .update-banner {
-  position: fixed; bottom: 20px; right: 20px; z-index: 450;
-  max-width: 340px; background: var(--c-overlay);
-  border: 1px solid var(--c-accent); border-radius: var(--radius-lg);
-  padding: 12px 14px; box-shadow: var(--shadow-2);
-  display: flex; align-items: flex-start; gap: 10px;
-  animation: card-pop .2s ease;
+  position: fixed; bottom: 24px; right: 20px; z-index: 450;
+  max-width: 360px; width: calc(100vw - 40px);
+  background: var(--c-overlay);
+  border: 1px solid rgba(79,124,255,.3);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 8px 32px rgba(0,0,0,.5), 0 0 0 1px rgba(79,124,255,.08),
+              inset 0 1px 0 rgba(255,255,255,.04);
+  overflow: hidden;
+  animation: update-banner-in .4s cubic-bezier(.2,1.3,.4,1) both;
 }
-.update-banner-icon { font-size: 20px; line-height: 1; flex-shrink: 0; margin-top: 2px; }
+@keyframes update-banner-in {
+  from { transform: translateX(calc(100% + 28px)); opacity: 0; }
+  to   { transform: translateX(0); opacity: 1; }
+}
+.update-banner-top-bar {
+  height: 3px;
+  background: linear-gradient(90deg, var(--c-accent) 0%, #a78bfa 60%, #f472b6 100%);
+}
+.update-banner-body {
+  display: flex; align-items: flex-start; gap: 10px;
+  padding: 12px 14px 14px;
+}
+.update-banner-icon {
+  flex-shrink: 0; margin-top: 1px; color: #fbbf24;
+  animation: update-icon-pulse 2.4s ease-in-out infinite;
+}
+@keyframes update-icon-pulse {
+  0%, 100% { transform: scale(1) rotate(0deg); }
+  50%       { transform: scale(1.18) rotate(8deg); }
+}
 .update-banner-content { flex: 1; min-width: 0; }
-.update-banner-title { font-weight: 700; font-size: 13px; color: var(--t-primary); margin-bottom: 3px; }
-.update-banner-msg { font-size: 12px; color: var(--t-secondary); line-height: 1.4; margin-bottom: 10px; }
-.update-banner-btns { display: flex; gap: 6px; align-items: center; }
-.update-banner-dismiss { flex-shrink: 0; align-self: flex-start; color: var(--t-muted); }
-.update-banner-dismiss:hover { color: var(--t-primary); }
+.update-banner-title {
+  font-weight: 800; font-size: 13px; color: var(--t-primary);
+  margin-bottom: 4px; letter-spacing: .01em;
+}
+.update-banner-msg {
+  font-size: 12px; color: var(--t-secondary); line-height: 1.45; margin-bottom: 11px;
+}
+.update-banner-btns { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.update-refresh-btn {
+  display: inline-flex; align-items: center; gap: 5px;
+  background: var(--c-accent); color: #fff;
+  border: none; border-radius: var(--radius-md);
+  padding: 0 14px; height: 28px;
+  font-size: 12px; font-weight: 700; letter-spacing: .01em;
+  cursor: pointer; transition: background .12s, transform .1s, box-shadow .12s;
+  box-shadow: 0 2px 8px rgba(79,124,255,.35);
+}
+.update-refresh-btn:hover {
+  background: var(--c-accent-hover);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 14px rgba(79,124,255,.45);
+}
 
 /* =================================================
    FRIEND REQUEST BADGE
@@ -1468,7 +1519,7 @@ body.compact-mode .msg-head { gap: 4px; }
   .emoji-picker { right: 8px; left: 8px; width: auto; }
   .gif-picker { right: 8px; left: 8px; width: auto; max-width: none; }
   .profile-card { right: 8px !important; left: 8px !important; width: auto !important; top: auto !important; bottom: 8px !important; }
-  .update-banner { left: 8px; right: 8px; max-width: none; bottom: 12px; }
+  .update-banner { left: 8px; right: 8px; max-width: none; width: auto; bottom: 12px; }
   /* Prevent iOS zoom on input focus — min 16px avoids auto-zoom */
   .composer-input { font-size: max(16px, var(--msg-font-size)); }
   input[type="text"], input[type="email"], textarea, select { font-size: 16px; }
@@ -2449,14 +2500,13 @@ body[data-theme="daylight"] .msg-followup:hover { background: rgba(0,0,50,.05); 
 .gif-grid {
   flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden;
   padding: 4px 8px 8px;
-  /* CSS Grid — 2 equal columns, items flow vertically ↓ */
   display: grid;
   grid-template-columns: 1fr 1fr;
+  grid-auto-rows: 110px;   /* fixed row height — images fill with object-fit:cover */
   gap: 4px;
   align-content: start;
 }
 .gif-cell {
-  display: block; width: 100%;
   border-radius: var(--radius-sm); overflow: hidden;
   cursor: pointer; border: 2px solid transparent;
   transition: border-color .12s, opacity .1s;
@@ -2465,7 +2515,7 @@ body[data-theme="daylight"] .msg-followup:hover { background: rgba(0,0,50,.05); 
 }
 .gif-cell:hover { border-color: var(--c-accent); }
 .gif-cell:hover .gif-fav-btn { opacity: 1; }
-.gif-cell img { width: 100%; height: auto; display: block; }
+.gif-cell img { width: 100%; height: 100%; object-fit: cover; display: block; }
 /* Favorite heart button on GIF cell */
 .gif-fav-btn {
   position: absolute; top: 4px; right: 4px;

@@ -399,15 +399,15 @@ export function buildUI() {
               </svg>
             </button>
             <button class="icon-btn composer-gif-btn" id="gif-btn" title="Send a GIF">
-              <!-- GIF badge — rounded rect + clean path letterforms -->
-              <svg viewBox="0 0 36 20" width="28" height="16" aria-hidden="true" fill="currentColor">
-                <rect x="0.8" y="0.8" width="34.4" height="18.4" rx="4" fill="none" stroke="currentColor" stroke-width="1.6"/>
+              <!-- GIF badge — tighter viewBox so the box hugs the letters -->
+              <svg viewBox="0 0 28 20" width="26" height="15" aria-hidden="true" fill="currentColor">
+                <rect x="0.8" y="0.8" width="26.4" height="18.4" rx="4" fill="none" stroke="currentColor" stroke-width="1.6"/>
                 <!-- G -->
                 <path d="M9.1 5.5C6.5 5.5 4.4 7.4 4.4 10s2.1 4.5 4.7 4.5c1.4 0 2.5-.5 3.3-1.4v-3.3H8.3v1.5h2.4v1.2c-.5.4-1.1.6-1.6.6-1.8 0-3-1.3-3-3s1.2-3 3-3c.9 0 1.7.4 2.2 1l1.1-1.1C11.6 6.1 10.4 5.5 9.1 5.5z"/>
                 <!-- I -->
                 <rect x="14.2" y="5.7" width="1.7" height="8.6"/>
-                <!-- F -->
-                <path d="M18.3 5.7h5.6v1.7h-3.9v2.1h3.4v1.7h-3.4v3.1h-1.7z"/>
+                <!-- F (extended to fill box) -->
+                <path d="M18.3 5.7h6.5v1.7h-4.8v2.1h4.2v1.7h-4.2v3.1h-1.7z"/>
               </svg>
             </button>
             <button class="icon-btn composer-send-btn" id="send-btn" title="Send" data-active="false">
@@ -553,13 +553,17 @@ export function buildUI() {
                 <label class="modal-label">Profile Photo</label>
                 <div class="avatar-upload-row">
                   <input type="text" id="settings-photo-input" placeholder="Paste image URL, or upload below…" autocomplete="off" />
+                  <button class="btn-secondary" id="settings-photo-crop-btn" title="Open the crop editor with this URL" style="flex-shrink:0;display:inline-flex;align-items:center;gap:5px;padding:0 10px;height:36px;">
+                    <svg viewBox="0 0 24 24" width="13" height="13"><path fill="currentColor" d="M17 15h2V7c0-1.1-.9-2-2-2H9v2h8v8zM7 17V1H5v4H1v2h4v10c0 1.1.9 2 2 2h10v4h2v-4h4v-2H7z"/></svg>
+                    Crop
+                  </button>
                   <label class="btn-secondary avatar-upload-label" title="Upload a photo from your device">
                     <svg viewBox="0 0 24 24" width="14" height="14" style="flex-shrink:0"><path fill="currentColor" d="M9 16h6v-6h4l-7-7-7 7h4v6zm-4 2h14v2H5v-2z"/></svg>
                     Upload
                     <input type="file" id="settings-photo-file" accept="image/*" style="display:none" />
                   </label>
                 </div>
-                <p class="hint" style="margin:4px 0 0;font-size:11px;">Upload or paste a URL — both work. Use Crop Position below to adjust framing.</p>
+                <p class="hint" style="margin:4px 0 0;font-size:11px;">Paste a URL and click <strong>Crop</strong> to drag-position it, or upload directly. Crop Position buttons also work for URL photos.</p>
               </div>
               <div class="settings-field-group">
                 <label class="modal-label">Avatar Crop Position</label>
@@ -1067,19 +1071,34 @@ export function buildUI() {
   </div>
 
   <!-- Update notification banner (bottom-right, server-pushed) -->
-  <div id="update-banner" class="update-banner hidden" role="status">
-    <div class="update-banner-icon">✨</div>
-    <div class="update-banner-content">
-      <div class="update-banner-title">Update Available</div>
-      <div class="update-banner-msg" id="update-banner-msg">Static Chat has been updated! Refresh for the latest features.</div>
-      <div class="update-banner-btns">
-        <button class="btn-primary" id="update-banner-refresh" style="font-size:12px;padding:5px 14px;">Refresh Now</button>
-        <button class="btn-ghost" id="update-banner-dismiss" style="font-size:12px;padding:5px 10px;">Later</button>
+  <div id="update-banner" class="update-banner hidden" role="status" aria-live="polite">
+    <div class="update-banner-top-bar"></div>
+    <div class="update-banner-body">
+      <div class="update-banner-icon" aria-hidden="true">
+        <!-- Sparkle / stars icon -->
+        <svg viewBox="0 0 24 24" width="24" height="24" fill="none">
+          <path d="M12 2l2.09 6.26L20 10l-5.91 1.74L12 18l-2.09-6.26L4 10l5.91-1.74L12 2z"
+                fill="rgba(251,191,36,.18)" stroke="#fbbf24" stroke-width="1.6" stroke-linejoin="round"/>
+          <circle cx="19" cy="4" r="1.2" fill="#fbbf24" opacity=".7"/>
+          <circle cx="5"  cy="18" r="1"   fill="#fbbf24" opacity=".5"/>
+          <circle cx="20" cy="17" r=".8"  fill="#a78bfa" opacity=".7"/>
+        </svg>
       </div>
+      <div class="update-banner-content">
+        <div class="update-banner-title">✦ Update Available</div>
+        <div class="update-banner-msg" id="update-banner-msg">Static Chat has been updated! Refresh for the latest version.</div>
+        <div class="update-banner-btns">
+          <button class="update-refresh-btn" id="update-banner-refresh">
+            <svg viewBox="0 0 24 24" width="13" height="13" aria-hidden="true"><path fill="currentColor" d="M17.65 6.35A7.96 7.96 0 0012 4c-4.42 0-8 3.58-8 8s3.58 8 8 8c3.73 0 6.84-2.55 7.73-6h-2.08A5.99 5.99 0 0112 18c-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/></svg>
+            Refresh Now
+          </button>
+          <button class="btn-ghost" id="update-banner-dismiss" style="font-size:12px;padding:4px 10px;height:28px;">Later</button>
+        </div>
+      </div>
+      <button class="icon-btn" id="update-banner-x" title="Dismiss" style="flex-shrink:0;align-self:flex-start;color:var(--t-muted);margin-top:1px;">
+        <svg viewBox="0 0 24 24" width="15" height="15"><path fill="currentColor" d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+      </button>
     </div>
-    <button class="update-banner-dismiss icon-btn" id="update-banner-x" title="Dismiss" style="flex-shrink:0;color:var(--t-muted);">
-      <svg viewBox="0 0 24 24" width="14" height="14"><path fill="currentColor" d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
-    </button>
   </div>
 
   <!-- Toast -->

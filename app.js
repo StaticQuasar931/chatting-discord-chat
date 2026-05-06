@@ -793,6 +793,15 @@ function playSound(type="message") {
       gain.gain.setValueAtTime(0.14,ctx.currentTime);
       gain.gain.exponentialRampToValueAtTime(0.001,ctx.currentTime+0.35);
       osc.start(ctx.currentTime); osc.stop(ctx.currentTime+0.35);
+    } else if (type==="update") {
+      // Rising three-note chime: warm, noticeable, not annoying
+      osc.type = "triangle";
+      osc.frequency.setValueAtTime(523, ctx.currentTime);        // C5
+      osc.frequency.setValueAtTime(659, ctx.currentTime+0.12);   // E5
+      osc.frequency.setValueAtTime(784, ctx.currentTime+0.24);   // G5
+      gain.gain.setValueAtTime(0.12, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime+0.55);
+      osc.start(ctx.currentTime); osc.stop(ctx.currentTime+0.55);
     }
   } catch(_){}
 }
@@ -1061,6 +1070,19 @@ function updateUserPanel() {
   // Apply saved avatar crop position to the user's own panel avatar
   const panelImg = $("#user-panel-avatar-wrap img");
   if (panelImg && state.avatarPosition) panelImg.style.objectPosition = state.avatarPosition;
+  // Append edit overlay (camera icon) so clicking it opens avatar settings
+  const existingOverlay = $("#user-panel-avatar-wrap .user-panel-avatar-edit");
+  if (!existingOverlay) {
+    const editBtn = document.createElement("div");
+    editBtn.className = "user-panel-avatar-edit";
+    editBtn.title = "Edit avatar";
+    editBtn.innerHTML = `<svg viewBox="0 0 24 24" width="13" height="13" aria-hidden="true"><path fill="currentColor" d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v1h16v-1c0-2.66-5.33-4-8-4z"/><circle cx="18" cy="18" r="5" fill="var(--c-accent)"/><path fill="#fff" d="M17 17v-1.5h-1.5v-1H17V13h1v1.5h1.5v1H18V17z"/></svg>`;
+    editBtn.addEventListener("click", e => {
+      e.stopPropagation();
+      openSettingsModal("account");
+    });
+    $("#user-panel-avatar-wrap")?.appendChild(editBtn);
+  }
   const dot = $("#user-status-dot");
   if (dot) dot.dataset.status = state.status||"online";
 }
@@ -1352,22 +1374,36 @@ function bootSubscriptions() {
     }, err=>console.error("chats:",err));
 
   // ── Update notification banner ──────────────────────────────────────
+  // Only show if the update was published WHILE the app is already open.
+  // Silently record the current version on first fire (page load) so a
+  // fresh refresh never triggers "you should refresh".
+  let _updateBannerBootDone = false;
   state.unsubscribers.updateBanner = onSnapshot(
     doc(db, "appConfig", "update"),
     snap => {
       const banner = $("#update-banner");
       if (!banner) return;
-      if (!snap.exists()) { banner.classList.add("hidden"); return; }
+      if (!snap.exists() || !snap.data().enabled) {
+        banner.classList.add("hidden");
+        _updateBannerBootDone = true;
+        return;
+      }
       const data = snap.data();
-      if (!data.enabled) { banner.classList.add("hidden"); return; }
-      // Use `version` field if present, otherwise fall back to updatedAt millis
       const version = String(data.version || data.updatedAt?.toMillis?.() || "1");
+      // First fire = page load — just record baseline, never show banner
+      if (!_updateBannerBootDone) {
+        _updateBannerBootDone = true;
+        banner.dataset.version = version;
+        return;
+      }
+      // Already dismissed this exact version
       if (localStorage.getItem("sc_seen_update") === version) return;
       const msgEl = $("#update-banner-msg");
       if (msgEl) msgEl.textContent = data.message ||
-        "Static Chat has been updated! Refresh for the latest features.";
+        "Static Chat has been updated! Refresh for the latest version.";
       banner.dataset.version = version;
       banner.classList.remove("hidden");
+      playSound("update"); // distinctive chime
     },
     err => console.warn("updateBanner:", err)
   );
@@ -2300,9 +2336,10 @@ $("#messages").addEventListener("click", async e=>{
     const gifImg = wrap.querySelector(".gif-embed-live");
     if (!gifImg) return;
     const origSrc = gifImg.dataset.origSrc || gifImg.dataset.gifSrc;
+    // Cancel any pending auto-freeze timer before replaying
+    if (gifImg._autoFreezeTimer) { clearTimeout(gifImg._autoFreezeTimer); gifImg._autoFreezeTimer = null; }
     if (origSrc) { gifImg.src = ""; requestAnimationFrame(() => { gifImg.src = origSrc; }); }
     gifImg.dataset.frozen = "false";
-    gifImg.dataset.loopCount = "0";
     gifImg.style.display = "";
     wrap.querySelector(".gif-freeze-canvas")?.remove();
     wrap.querySelector(".gif-freeze-overlay")?.remove();
@@ -2311,6 +2348,10 @@ $("#messages").addEventListener("click", async e=>{
     if (state.gifKeepFrozen && origSrc) {
       state.frozenGifs.delete(origSrc);
       _saveFrozenGifs();
+    }
+    // Restart auto-freeze timer after a brief delay to let the GIF restart
+    if (state.gifAutoFreeze && gifImg.dataset.autofreeze !== "true") {
+      setTimeout(() => _startAutoFreezeTimer(gifImg), 400);
     }
     return;
   }
@@ -3389,6 +3430,14 @@ document.addEventListener("change",e=>{
   e.target.value=""; // reset so same file can be re-selected
 });
 
+// "Crop" button next to URL input — open crop editor with whatever URL is typed
+document.addEventListener("click",e=>{
+  if(!e.target.closest("#settings-photo-crop-btn")) return;
+  const url=($("#settings-photo-input")?.value||"").trim();
+  if (!url) { showToast("Paste an image URL first, then click Crop."); return; }
+  _initCrop(url);
+});
+
 // "Use This Photo" confirm
 document.addEventListener("click",e=>{
   if(!e.target.closest("#crop-confirm-btn")) return;
@@ -4353,27 +4402,38 @@ function _freezeGifImg(gifImg, manual=false) {
   } catch (_) { /* cross-origin draw error — skip */ }
 }
 
+// Timer-based auto-freeze after ~2 GIF loops.
+// Browsers only fire the img 'load' event once (initial load), not on GIF loop
+// restarts — so the old loop-count approach never reached 2. Use a timeout instead.
+function _startAutoFreezeTimer(gifImg) {
+  if (gifImg._autoFreezeTimer) return; // already running
+  // Use data-gif-duration (seconds) when available, else assume 3.5 s per loop
+  const secs = parseFloat(gifImg.dataset.gifDuration || "3.5");
+  const delay = Math.max(2500, secs * 2 * 1000); // 2 loops, min 2.5 s
+  gifImg._autoFreezeTimer = setTimeout(() => {
+    gifImg._autoFreezeTimer = null;
+    if (gifImg.dataset.frozen !== "true" && gifImg.isConnected) {
+      _freezeGifImg(gifImg, false);
+    }
+  }, delay);
+}
+
 // Called after a GIF img loads. Handles:
 //   • freeze-by-default / keep-frozen (data-autofreeze attr)
-//   • auto-freeze after 2 loops (loop count via repeated load events)
+//   • auto-freeze after 2 loops (timer-based)
 function _onGifImgLoad(gifImg) {
   if (!gifImg || !gifImg.classList.contains("gif-embed-live")) return;
   if (gifImg.dataset.frozen === "true") return;
 
-  // Auto-freeze on load (freeze-default or keep-frozen)
+  // Auto-freeze immediately (freeze-default or keep-frozen)
   if (gifImg.dataset.autofreeze === "true") {
-    // Small delay so the frame is painted before we draw to canvas
     setTimeout(() => _freezeGifImg(gifImg, false), 120);
     return;
   }
 
   // Auto-freeze after 2 loops
   if (state.gifAutoFreeze) {
-    const count = parseInt(gifImg.dataset.loopCount||"0", 10) + 1;
-    gifImg.dataset.loopCount = String(count);
-    if (count >= 2) {
-      setTimeout(() => _freezeGifImg(gifImg, false), 80);
-    }
+    _startAutoFreezeTimer(gifImg);
   }
 }
 
@@ -4442,11 +4502,12 @@ async function fetchGifs(query, isTrending=false, nextPos="") {
   } catch(e){ console.error("GIF:",e); return {results:[], next:""}; }
 }
 
-function _gifCellHtml(insertUrl, previewUrl, title) {
+function _gifCellHtml(insertUrl, previewUrl, title, durationSecs) {
   const isFav = !!state.favGifs[insertUrl];
+  const durAttr = durationSecs ? ` data-gif-duration="${durationSecs}"` : "";
   // No loading="lazy" — lazy prevents images from loading in dynamically shown containers
   return `<div class="gif-cell" role="button" tabindex="0" data-gif-url="${escapeHtml(insertUrl)}"
-    data-gif-preview="${escapeHtml(previewUrl)}" data-gif-title="${escapeHtml(title)}"
+    data-gif-preview="${escapeHtml(previewUrl)}" data-gif-title="${escapeHtml(title)}"${durAttr}
     title="${escapeHtml(title)}">
     <img src="${escapeHtml(previewUrl)}" alt="${escapeHtml(title||"GIF")}" />
     <span class="gif-fav-btn${isFav?" active":""}" data-fav-url="${escapeHtml(insertUrl)}"
@@ -4464,7 +4525,9 @@ function renderGifGrid(results, append=false) {
     const previewUrl=media?.mediumgif?.url||media?.gif?.url||media?.tinygif?.url||"";
     const insertUrl =media?.gif?.url||media?.mediumgif?.url||media?.tinygif?.url||"";
     if (!previewUrl) return "";
-    return _gifCellHtml(insertUrl, previewUrl, r.title||"");
+    // Tenor v1 includes duration in media objects — store for auto-freeze timer
+    const dur = media?.gif?.duration||media?.mediumgif?.duration||null;
+    return _gifCellHtml(insertUrl, previewUrl, r.title||"", dur);
   }).filter(Boolean).join("");
   if (append) {
     grid.insertAdjacentHTML("beforeend", cells);
