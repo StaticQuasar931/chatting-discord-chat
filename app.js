@@ -399,6 +399,8 @@ const state = {
   blockedUsers: new Set(),
   typingNames: [],
   lastReadMarker: {},    // chatId → timestamp ms (from localStorage on open)
+  messageCache: {},      // chatId → messages array (keeps messages loaded between clicks)
+  unreadCounts: {},      // chatId → number of unread messages since last open
   chatScrolledInitial: new Set(), // chatIds that have had their initial scroll done
   silentTyping:      localStorage.getItem("sc_silent_typing") === "true",
   autoSendGif:       localStorage.getItem("sc_autosend_gif") === "true",
@@ -878,6 +880,7 @@ onAuthStateChanged(auth, async firebaseUser => {
       showAppUI();
       bootSubscriptions();
       bootBlocklistCheck();
+      _syncAutoEarnedBadges(); // write OG badge to Firestore if earned
     }
   } else {
     state.user = null;
@@ -897,6 +900,34 @@ async function upsertUserProfile() {
     bio: u.bio||"",
     photoURL: u.photoURL||null
   }, {merge:true});
+}
+
+
+/* =====================================================================
+   AUTO-EARNED BADGE SYNC
+   Writes any auto-earned badges (OG etc.) to Firestore on every sign-in
+   so they're always persisted and visible to other users.
+   ===================================================================== */
+async function _syncAutoEarnedBadges() {
+  if (!state.user?.uid || !state.user.createdAt) return;
+  try {
+    const created = state.user.createdAt?.toDate
+      ? state.user.createdAt.toDate()
+      : new Date(state.user.createdAt);
+    const autoEarned = [];
+    if (created.getTime() < OG_CUTOFF_MS) autoEarned.push("og");
+    if (!autoEarned.length) return;
+
+    // Read current badges to avoid unnecessary writes
+    const snap = await getDoc(doc(db,"users",state.user.uid));
+    if (!snap.exists()) return;
+    const cur = snap.data().badges||[];
+    const missing = autoEarned.filter(b=>!cur.includes(b));
+    if (!missing.length) return;
+
+    await updateDoc(doc(db,"users",state.user.uid),{ badges: arrayUnion(...missing) });
+    console.log("[badges] auto-wrote:", missing);
+  } catch(e){ console.warn("[badges] sync failed:", e); }
 }
 
 
@@ -1238,6 +1269,7 @@ function cleanupAllSubscriptions() {
   state.friends=[]; state.incoming=[]; state.outgoing=[];
   state.chats=[]; state.messages=[];
   state.activeChatId=null; state.activeChat=null;
+  state.messageCache={}; state.unreadCounts={};
   state.chatInitialized.clear(); state.incomingInitialized=false;
 }
 
@@ -1345,15 +1377,17 @@ function bootSubscriptions() {
         }
       }
 
-      // Background notification: play sound if any non-active chat got a new message
-      // from someone OTHER than the current user
+      // Background notification: play sound + track unread count for inactive chats
       if (Object.keys(_prevChatTimes).length > 0) {
+        let soundPlayed=false;
         for (const c of arr) {
           const prev=_prevChatTimes[c.id]||0;
           const cur=c.lastMessageAt?.toMillis?.()||0;
           const sentByMe=c.lastSenderUid===uid;
           if (cur>prev && c.id!==state.activeChatId && !sentByMe && !isChatMuted(c.id) && !c.lastMessageSilent) {
-            playSound("message"); break;
+            // Increment unread count for this chat
+            state.unreadCounts[c.id]=(state.unreadCounts[c.id]||0)+1;
+            if (!soundPlayed) { playSound("message"); soundPlayed=true; }
           }
         }
       }
@@ -1374,10 +1408,10 @@ function bootSubscriptions() {
     }, err=>console.error("chats:",err));
 
   // ── Update notification banner ──────────────────────────────────────
-  // Only show if the update was published WHILE the app is already open.
-  // Silently record the current version on first fire (page load) so a
-  // fresh refresh never triggers "you should refresh".
-  let _updateBannerBootDone = false;
+  // sessionStorage is per-tab and clears when the tab closes.
+  // First snapshot (page load) → record version as baseline silently.
+  // Subsequent snapshots (real-time change while open) → show banner.
+  // Opening a new tab always re-records baseline → never false-positive.
   state.unsubscribers.updateBanner = onSnapshot(
     doc(db, "appConfig", "update"),
     snap => {
@@ -1385,25 +1419,33 @@ function bootSubscriptions() {
       if (!banner) return;
       if (!snap.exists() || !snap.data().enabled) {
         banner.classList.add("hidden");
-        _updateBannerBootDone = true;
+        if (!sessionStorage.getItem("sc_update_boot_ver"))
+          sessionStorage.setItem("sc_update_boot_ver", "__none__");
         return;
       }
       const data = snap.data();
       const version = String(data.version || data.updatedAt?.toMillis?.() || "1");
-      // First fire = page load — just record baseline, never show banner
-      if (!_updateBannerBootDone) {
-        _updateBannerBootDone = true;
+      const bootVer = sessionStorage.getItem("sc_update_boot_ver");
+
+      // First fire this tab session → record baseline, never show
+      if (bootVer === null) {
+        sessionStorage.setItem("sc_update_boot_ver", version);
         banner.dataset.version = version;
         return;
       }
-      // Already dismissed this exact version
+      // Same as what was there when tab opened → already on this version
+      if (version === bootVer) return;
+      // User already dismissed this exact version
       if (localStorage.getItem("sc_seen_update") === version) return;
+
+      // A new version appeared while the app was open → show banner
+      sessionStorage.setItem("sc_update_boot_ver", version);
       const msgEl = $("#update-banner-msg");
       if (msgEl) msgEl.textContent = data.message ||
         "Static Chat has been updated! Refresh for the latest version.";
       banner.dataset.version = version;
       banner.classList.remove("hidden");
-      playSound("update"); // distinctive chime
+      playSound("update");
     },
     err => console.warn("updateBanner:", err)
   );
@@ -1556,18 +1598,35 @@ $("#friends-filter").addEventListener("input", renderFriendsList);
 $("#add-friend-search-btn").addEventListener("click", searchUsers);
 $("#add-friend-input").addEventListener("keydown", e=>{ if(e.key==="Enter") searchUsers(); });
 
+/* Levenshtein distance — bails early if difference exceeds maxDist */
+function levenshtein(a, b, maxDist=5) {
+  if (a===b) return 0;
+  if (Math.abs(a.length-b.length) > maxDist) return maxDist+1;
+  const m=a.length, n=b.length;
+  let prev=Array.from({length:n+1},(_,i)=>i);
+  for (let i=1;i<=m;i++) {
+    const curr=[i];
+    for (let j=1;j<=n;j++) {
+      curr[j]=a[i-1]===b[j-1] ? prev[j-1] : 1+Math.min(prev[j],curr[j-1],prev[j-1]);
+    }
+    prev=curr;
+  }
+  return prev[n];
+}
+
 async function searchUsers() {
   const raw = $("#add-friend-input").value.trim();
   const results = $("#search-results");
   results.innerHTML="";
 
-  const hashMatch = raw.match(/^(.+)#(\d{4})$/);
+  // Support partial discriminator: #27 matches #2706
+  const hashMatch = raw.match(/^(.+)#(\d{1,4})$/);
 
   // Safety gate: require 3+ chars for prefix searches (prevent scraping all users by typing "a")
   if (!hashMatch) {
     if (!raw) { $("#search-hint").textContent="Enter a username to search."; return; }
     if (raw.length < 3) { $("#search-hint").textContent="Type at least 3 characters to search."; return; }
-    if (/^(.)1+$/i.test(raw)) { $("#search-hint").textContent="Enter a more specific username."; return; }
+    if (/^(.)\1+$/i.test(raw)) { $("#search-hint").textContent="Enter a more specific username."; return; }
   }
 
   $("#search-hint").textContent="Searching…";
@@ -1576,18 +1635,50 @@ async function searchUsers() {
     let found=[];
 
     if (hashMatch) {
-      // Exact tag search — very specific, no length restriction
+      // Tag search — partial discriminator supported (#27 matches #2706)
       const [,uname,disc]=hashMatch;
       const term=uname.toLowerCase();
       const q=query(collection(db,"users"),orderBy("displayNameLower"),startAt(term),endAt(term+""),limit(50));
       const snap=await getDocs(q);
-      snap.forEach(d=>{ const u=d.data(); if(u.uid&&u.uid!==state.user.uid&&u.displayNameLower===term&&u.discriminator===disc) found.push(u); });
+      snap.forEach(d=>{
+        const u=d.data();
+        if (u.uid && u.uid!==state.user.uid && u.displayNameLower===term
+            && u.discriminator?.startsWith(disc))
+          found.push(u);
+      });
     } else {
-      // Prefix search — capped at 10 results to avoid enumeration attacks
       const term=raw.toLowerCase();
-      const q=query(collection(db,"users"),orderBy("displayNameLower"),startAt(term),endAt(term+""),limit(10));
-      const snap=await getDocs(q);
-      snap.forEach(d=>{ const u=d.data(); if(u.uid&&u.uid!==state.user.uid) found.push(u); });
+      const seenUids=new Set();
+
+      // ① Exact-prefix query: names starting with exactly what was typed
+      const q1=query(collection(db,"users"),orderBy("displayNameLower"),startAt(term),endAt(term+""),limit(25));
+      const snap1=await getDocs(q1);
+      snap1.forEach(d=>{ const u=d.data(); if(u.uid&&u.uid!==state.user.uid&&!seenUids.has(u.uid)){ seenUids.add(u.uid); found.push(u); } });
+
+      // ② Fuzzy query: broader 4-char prefix pool, filtered client-side by Levenshtein <= 3
+      // Only fires when the term is long enough to be meaningful (>=6 chars)
+      if (term.length>=6) {
+        const fuzzyPrefix=term.slice(0,4);
+        const q2=query(collection(db,"users"),orderBy("displayNameLower"),startAt(fuzzyPrefix),endAt(fuzzyPrefix+""),limit(35));
+        const snap2=await getDocs(q2);
+        snap2.forEach(d=>{
+          const u=d.data();
+          if (!u.uid||u.uid===state.user.uid||seenUids.has(u.uid)) return;
+          const name=u.displayNameLower||"";
+          // Keep only if within 3 edits — compare term against equal-length window of the name
+          const window=name.slice(0,term.length+2);
+          if (levenshtein(term,window)<=3) { seenUids.add(u.uid); found.push(u); }
+        });
+      }
+
+      // Sort: exact/prefix matches first, then by fuzzy score
+      found.sort((a,b)=>{
+        const an=a.displayNameLower||"", bn=b.displayNameLower||"";
+        const aExact=an.startsWith(term)?0:1, bExact=bn.startsWith(term)?0:1;
+        if (aExact!==bExact) return aExact-bExact;
+        return levenshtein(term,an.slice(0,term.length+2))-levenshtein(term,bn.slice(0,term.length+2));
+      });
+      found=found.slice(0,10); // cap display at 10
     }
 
     if (!found.length) { $("#search-hint").textContent="No users found."; return; }
@@ -1675,8 +1766,8 @@ function chatUnreadCount(c) {
   const readAt=parseInt(localStorage.getItem(`sc_read_${c.id}`)||"0",10);
   const lastMsg=c.lastMessageAt?.toMillis?.()||0;
   if (!(lastMsg>readAt && readAt>0)) return 0;
-  // If we have a count stored, use it; otherwise just show 1
-  return c.unreadCount||1;
+  // Use in-memory count if we've been tracking this session, otherwise show 1
+  return state.unreadCounts[c.id]||1;
 }
 function chatHasUnread(c) { return chatUnreadCount(c)>0; }
 
@@ -1819,8 +1910,9 @@ async function openChat(chatId) {
   state.lastReadMarker[chatId]=savedRead;
   // Reset initial-scroll flag so divider scroll fires once on open
   state.chatScrolledInitial.delete(chatId);
-  // Mark this chat as read from this moment forward
+  // Mark this chat as read from this moment forward, clear unread counter
   localStorage.setItem(`sc_read_${chatId}`, String(Date.now()));
+  delete state.unreadCounts[chatId];
 
   showChatView(); renderChatHeader(); renderChatLists();
   clearReplyTo();
@@ -1852,8 +1944,16 @@ async function openChat(chatId) {
   }
 
   if (state.unsubscribers.messages) { state.unsubscribers.messages(); state.unsubscribers.messages=null; }
-  state.messages=[];
-  $("#messages").innerHTML=`<div class="empty" style="margin:24px;">Loading messages…</div>`;
+
+  // Use cached messages immediately if available — no blank/loading flash on re-open
+  const cachedMsgs = state.messageCache[chatId];
+  if (cachedMsgs && cachedMsgs.length > 0) {
+    state.messages = cachedMsgs;
+    renderMessages();
+  } else {
+    state.messages = [];
+    $("#messages").innerHTML=`<div class="empty" style="margin:24px;">Loading messages…</div>`;
+  }
 
   state.unsubscribers.messages=onSnapshot(
     query(collection(db,"chats",chatId,"messages"),orderBy("createdAt","asc"),limit(200)),
@@ -1861,6 +1961,7 @@ async function openChat(chatId) {
       const prevLen=state.messages.length;
       const hadMessages=state.chatInitialized.has(chatId);
       state.messages=snap.docs.map(d=>({id:d.id,...d.data()}));
+      state.messageCache[chatId]=state.messages; // keep in cache for instant re-open
       const isNew=hadMessages&&state.messages.length>prevLen;
       if (isNew) {
         const newest=state.messages[state.messages.length-1];
@@ -2104,10 +2205,12 @@ function renderBadgeLabels(badges=[]) {
 }
 
 function buildReplyPreview(m) {
-  if (!m.replyToMessageId) return "";
-  const ref=state.messages.find(x=>x.id===m.replyToMessageId);
-  const name=m.replyToSenderName||(ref?.senderName)||"Unknown";
-  const rawPreview=m.replyToTextPreview||(ref?.text||"")||"";
+  // Show for normal replies AND for slash-command result messages
+  const isCmd = m.type === "command" && m.replyToTextPreview;
+  if (!m.replyToMessageId && !isCmd) return "";
+  const ref = m.replyToMessageId ? state.messages.find(x=>x.id===m.replyToMessageId) : null;
+  const name = m.replyToSenderName||(ref?.senderName)||"Unknown";
+  const rawPreview = m.replyToTextPreview||(ref?.text||"")||"";
   // Truncate and strip any markdown/emoji syntax for the preview snippet
   // Resolve :name: to actual emoji chars (fall back to the char itself if unknown, not 🔷)
   const preview=rawPreview
@@ -2121,6 +2224,15 @@ function buildReplyPreview(m) {
   const avatarHtml=photo
     ?`<img class="reply-avatar" src="${escapeHtml(photo)}" alt="" />`
     :`<span class="reply-avatar reply-avatar-fallback">${escapeHtml(initial)}</span>`;
+  // Command messages: no jump target, just show the prompt context
+  if (isCmd) {
+    return `<div class="reply-preview reply-preview-cmd" title="Slash command by ${escapeHtml(name)}">
+      <div class="reply-connector"></div>
+      ${avatarHtml}
+      <span class="reply-preview-name">${escapeHtml(name)}</span>
+      <span class="reply-preview-text">${escapeHtml(preview)||"<em>command</em>"}</span>
+    </div>`;
+  }
   return `<div class="reply-preview" data-jump-to="${escapeHtml(m.replyToMessageId)}" title="Jump to original message" role="button" tabindex="0">
     <div class="reply-connector"></div>
     ${avatarHtml}
@@ -2336,23 +2448,48 @@ $("#messages").addEventListener("click", async e=>{
     const gifImg = wrap.querySelector(".gif-embed-live");
     if (!gifImg) return;
     const origSrc = gifImg.dataset.origSrc || gifImg.dataset.gifSrc;
-    // Cancel any pending auto-freeze timer before replaying
+    if (!origSrc) return;
+
+    // Cancel any pending auto-freeze timer
     if (gifImg._autoFreezeTimer) { clearTimeout(gifImg._autoFreezeTimer); gifImg._autoFreezeTimer = null; }
-    if (origSrc) { gifImg.src = ""; requestAnimationFrame(() => { gifImg.src = origSrc; }); }
+
+    // IMPORTANT: remove data-autofreeze so _onGifImgLoad won't instantly re-freeze (120ms)
+    // when the img's load event fires after src is reset.
+    const wasAutoFrozen = gifImg.dataset.autofreeze === "true";
+    delete gifImg.dataset.autofreeze;
+
     gifImg.dataset.frozen = "false";
-    gifImg.style.display = "";
-    wrap.querySelector(".gif-freeze-canvas")?.remove();
-    wrap.querySelector(".gif-freeze-overlay")?.remove();
     gifImg.title = "Click to freeze";
+
     // Remove from persistent frozen set
     if (state.gifKeepFrozen && origSrc) {
-      state.frozenGifs.delete(origSrc);
-      _saveFrozenGifs();
+      state.frozenGifs.delete(origSrc); _saveFrozenGifs();
     }
-    // Restart auto-freeze timer after a brief delay to let the GIF restart
-    if (state.gifAutoFreeze && gifImg.dataset.autofreeze !== "true") {
-      setTimeout(() => _startAutoFreezeTimer(gifImg), 400);
-    }
+
+    // Keep canvas visible until the GIF has fully loaded → no size flash
+    const frozenCanvas  = wrap.querySelector(".gif-freeze-canvas");
+    const frozenOverlay = wrap.querySelector(".gif-freeze-overlay");
+
+    gifImg.addEventListener("load", () => {
+      // Swap: show live GIF, remove the frozen frame canvas
+      frozenCanvas?.remove();
+      frozenOverlay?.remove();
+      gifImg.style.display = "";
+      // Restart auto-freeze timer if applicable
+      if (state.gifAutoFreeze || wasAutoFrozen) {
+        _startAutoFreezeTimer(gifImg);
+      }
+      // Restore data-autofreeze attr for future freeze-by-default checks
+      if (wasAutoFrozen && !state.gifAutoFreeze) {
+        gifImg.dataset.autofreeze = "true";
+      }
+    }, { once: true });
+
+    // Hide the img while loading (canvas still shown → no blank flash)
+    gifImg.style.display = "none";
+    // Reset GIF animation: empty → rAF → real src (forces restart from frame 1)
+    gifImg.src = "";
+    requestAnimationFrame(() => { gifImg.src = origSrc; });
     return;
   }
   // GIF freeze click (check BEFORE profile trigger)
@@ -2507,8 +2644,13 @@ async function sendCurrentMessage() {
       const chatId=state.activeChatId;
       localStorage.removeItem(`sc_draft_${chatId}`);
       try {
+        // Reply-style: result message shows the original slash command as a reply preview
         const cmdRef = await addDoc(collection(db,"chats",chatId,"messages"),{
-          ...baseMsg, text:result, type:"command", commandResult:true, xpValue:0
+          ...baseMsg, text:result, type:"command", commandResult:true, xpValue:0,
+          // Override reply fields to point back at the typed command (Discord-style)
+          replyToMessageId: null,
+          replyToSenderName: state.user.displayName,
+          replyToTextPreview: text,  // e.g. "/8ball will I win?"
         });
         await updateDoc(doc(db,"chats",chatId),{ lastMessage:result.slice(0,200), lastMessageAt:serverTimestamp(), lastSenderUid:state.user.uid });
         _autoFlagCheck(text, cmdRef.id, chatId);
@@ -2817,12 +2959,26 @@ $("#chat-leave-btn")?.addEventListener("click", ()=>{
    ===================================================================== */
 function openModal(id)  { const m=document.getElementById(id); if(m) m.classList.remove("hidden"); }
 function closeModal(id) { const m=document.getElementById(id); if(m) m.classList.add("hidden"); }
-$$("[data-close]").forEach(b=>b.addEventListener("click",()=>closeModal(b.dataset.close)));
-$$(".modal").forEach(m=>m.addEventListener("click",e=>{ if(e.target===m) m.classList.add("hidden"); }));
+$$("[data-close]").forEach(b=>b.addEventListener("click",()=>{
+  // settings-modal has a dirty-check interceptor at the document level — skip here
+  if (b.dataset.close==="settings-modal") return;
+  closeModal(b.dataset.close);
+}));
+$$(".modal").forEach(m=>m.addEventListener("click",e=>{
+  if (e.target===m) {
+    // settings-modal backdrop handled by document listener (dirty-check)
+    if (m.id==="settings-modal") return;
+    m.classList.add("hidden");
+  }
+}));
 
 // Track whether account-pane fields have unsaved changes
 let _settingsDirty = false;
-function _markSettingsDirty() { _settingsDirty = true; }
+function _markSettingsDirty() {
+  _settingsDirty = true;
+  // Add CSS class so Save Changes button pulses to indicate unsaved state
+  $("#settings-modal")?.classList.add("settings-dirty");
+}
 
 // Wire dirty tracking to account form fields
 ["settings-username-input","settings-bio-input","settings-photo-input","settings-custom-status-input"].forEach(id=>{
@@ -2837,11 +2993,16 @@ function onSettingsClose(force=false) {
   if (!force && _settingsDirty) {
     showConfirm("You have unsaved changes. Discard them?", ()=>{
       _settingsDirty=false;
+      $("#settings-modal")?.classList.remove("settings-dirty");
       if (_pendingTheme!==null && _pendingTheme!==state.theme) applyTheme(state.theme);
       closeModal("settings-modal");
-    }, {title:"Unsaved changes", yesLabel:"Discard", danger:true});
+    }, {title:"Unsaved changes", yesLabel:"Discard", danger:true,
+        noLabel:"Keep Editing"  /* Cancel = keep editing */
+    });
     return;
   }
+  _settingsDirty=false;
+  $("#settings-modal")?.classList.remove("settings-dirty");
   if (_pendingTheme!==null && _pendingTheme!==state.theme) applyTheme(state.theme);
 }
 // Intercept close attempts for settings-modal
@@ -2885,6 +3046,7 @@ function openSettingsModal(pane) {
   if (pane==="profile")       pane="account";
   if (pane==="notifications")  pane="appearance";
   _settingsDirty = false; // reset dirty flag each open
+  $("#settings-modal")?.classList.remove("settings-dirty");
   const u=state.user;
   _pendingTheme=state.theme;
   _pendingStatus=state.status;
@@ -2904,7 +3066,6 @@ function openSettingsModal(pane) {
   if($("#settings-gif-autofreeze-toggle"))      $("#settings-gif-autofreeze-toggle").checked=state.gifAutoFreeze;
   if($("#settings-compact-toggle"))            $("#settings-compact-toggle").checked=state.compactMode;
   $$(".text-size-btn").forEach(b=>b.classList.toggle("active", parseFloat(b.dataset.size)===state.textSize));
-  $$(".avatar-pos-btn").forEach(b=>b.classList.toggle("active", b.dataset.pos===state.avatarPosition));
   if($("#settings-dblclick-react-toggle"))     $("#settings-dblclick-react-toggle").checked=state.dblClickReact;
   if($("#settings-dblclick-emoji"))            $("#settings-dblclick-emoji").value=state.dblClickEmoji;
   if($("#dblclick-emoji-preview"))             $("#dblclick-emoji-preview").textContent=state.dblClickEmoji;
@@ -3107,27 +3268,7 @@ $("#settings-gif-autofreeze-toggle")?.addEventListener("change", e => {
   localStorage.setItem("sc_gif_autofreeze", e.target.checked ? "true" : "false");
 });
 
-// Avatar crop position buttons — instant-apply
-document.addEventListener("click", e => {
-  const btn = e.target.closest(".avatar-pos-btn");
-  if (!btn) return;
-  const pos = btn.dataset.pos;
-  if (!pos) return;
-  state.avatarPosition = pos;
-  localStorage.setItem("sc_avatar_pos", pos);
-  // Apply to all avatar images that belong to the current user
-  $$(`img[data-uid="${state.user?.uid}"], .user-panel-avatar img`).forEach(img => {
-    img.style.objectPosition = pos;
-  });
-  // Update panel avatar directly
-  const panelAv = $(".user-panel-avatar img, #user-panel-avatar");
-  if (panelAv) panelAv.style.objectPosition = pos;
-  $$(".avatar-pos-btn").forEach(b => b.classList.toggle("active", b.dataset.pos === pos));
-  // Persist to Firestore (fire-and-forget)
-  if (state.user) {
-    updateDoc(doc(db,"users",state.user.uid),{ avatarPosition: pos }).catch(()=>{});
-  }
-});
+// Avatar position is saved via the crop modal (no preset buttons needed)
 
 // Settings modal interactions (theme/status/banner)
 $("#settings-modal")?.addEventListener("click", e=>{
@@ -3263,6 +3404,7 @@ $("#settings-save-btn")?.addEventListener("click", async ()=>{
     };
     updateUserPanel();
     _settingsDirty=false;
+    $("#settings-modal")?.classList.remove("settings-dirty");
     closeModal("settings-modal"); showToast("Settings saved ✓");
   } catch(err){ showToast("Save failed: "+err.message); }
   finally { btn.disabled=false; btn.textContent="Save Changes"; }
@@ -3273,7 +3415,7 @@ $("#settings-save-btn")?.addEventListener("click", async ()=>{
    AVATAR CROP MODAL
    ===================================================================== */
 let _cropImg=null, _cropOffX=0, _cropOffY=0, _cropZoom=1;
-let _cropDragging=false, _cropDragStart={x:0,y:0}, _cropDragOff={x:0,y:0};
+let _cropDragging=false, _cropDragStart={x:0,y:0}, _cropDragOff={x:0,y:0}, _cropPanScale=1;
 const CROP_CANVAS_SIZE=280, CROP_OUTPUT_SIZE=160;
 
 function _initCrop(src) {
@@ -3357,6 +3499,9 @@ document.addEventListener("DOMContentLoaded", ()=>{}, {once:true});
     canvasWired=true;
     canvas.addEventListener("mousedown",e=>{
       _cropDragging=true;
+      // Compute scale: canvas internal coords vs CSS display size
+      const rect=canvas.getBoundingClientRect();
+      _cropPanScale=canvas.width/Math.max(1,rect.width);
       _cropDragStart={x:e.clientX,y:e.clientY};
       _cropDragOff={x:_cropOffX,y:_cropOffY};
       canvas.style.cursor="grabbing";
@@ -3364,8 +3509,8 @@ document.addEventListener("DOMContentLoaded", ()=>{}, {once:true});
     });
     document.addEventListener("mousemove",e=>{
       if (!_cropDragging) return;
-      _cropOffX=_cropDragOff.x-(e.clientX-_cropDragStart.x);
-      _cropOffY=_cropDragOff.y-(e.clientY-_cropDragStart.y);
+      _cropOffX=_cropDragOff.x-(e.clientX-_cropDragStart.x)*_cropPanScale;
+      _cropOffY=_cropDragOff.y-(e.clientY-_cropDragStart.y)*_cropPanScale;
       _clampCropOffset(); _drawCrop();
     });
     document.addEventListener("mouseup",()=>{ _cropDragging=false; if(canvas) canvas.style.cursor="grab"; });
@@ -3373,6 +3518,8 @@ document.addEventListener("DOMContentLoaded", ()=>{}, {once:true});
     canvas.addEventListener("touchstart",e=>{
       if(e.touches.length!==1) return;
       const t=e.touches[0];
+      const rect=canvas.getBoundingClientRect();
+      _cropPanScale=canvas.width/Math.max(1,rect.width);
       _cropDragging=true;
       _cropDragStart={x:t.clientX,y:t.clientY};
       _cropDragOff={x:_cropOffX,y:_cropOffY};
@@ -3381,8 +3528,8 @@ document.addEventListener("DOMContentLoaded", ()=>{}, {once:true});
     canvas.addEventListener("touchmove",e=>{
       if(!_cropDragging||e.touches.length!==1) return;
       const t=e.touches[0];
-      _cropOffX=_cropDragOff.x-(t.clientX-_cropDragStart.x);
-      _cropOffY=_cropDragOff.y-(t.clientY-_cropDragStart.y);
+      _cropOffX=_cropDragOff.x-(t.clientX-_cropDragStart.x)*_cropPanScale;
+      _cropOffY=_cropDragOff.y-(t.clientY-_cropDragStart.y)*_cropPanScale;
       _clampCropOffset(); _drawCrop(); e.preventDefault();
     },{passive:false});
     canvas.addEventListener("touchend",()=>{ _cropDragging=false; });
@@ -4074,6 +4221,43 @@ async function showFullProfile(uid) {
       fpSince.style.display="";
     } else fpSince.style.display="none";
   }
+  // Friends since
+  const fpFriendsSince = $("#fp-friends-since");
+  if (fpFriendsSince) {
+    if (isFriend && !isSelf) {
+      const fs = state.friends.find(f=>f.uid===uid);
+      if (fs?.friendshipId) {
+        fpFriendsSince.style.display="";
+        fpFriendsSince.textContent = "Friends";
+        getDoc(doc(db,"friendships",fs.friendshipId)).then(snap=>{
+          if (!snap.exists()) return;
+          const fa = snap.data().createdAt;
+          if (fa) {
+            const fd = fa.toDate ? fa.toDate() : new Date(fa);
+            fpFriendsSince.textContent = "Friends since " + fd.toLocaleDateString(undefined,{year:"numeric",month:"long",day:"numeric"});
+          }
+        }).catch(()=>{});
+      } else fpFriendsSince.style.display="none";
+    } else fpFriendsSince.style.display="none";
+  }
+  // Mutual groups (groups both viewer and target are members of)
+  const fpMutualGroups = $("#fp-mutual-groups");
+  const fpMutualList   = $("#fp-mutual-groups-list");
+  if (fpMutualGroups && fpMutualList && !isSelf) {
+    const mutuals = state.chats.filter(c => c.type==="group" && Array.isArray(c.members) && c.members.includes(uid));
+    if (mutuals.length) {
+      fpMutualGroups.style.display="";
+      fpMutualList.innerHTML = mutuals.map(c=>`
+        <div class="fp-mutual-item" data-chat-id="${escapeHtml(c.id)}" title="Open ${escapeHtml(c.name||"Group")}">
+          <div class="fp-mutual-icon">${escapeHtml(groupInitials(c.name||"G"))}</div>
+          <span>${escapeHtml(c.name||"Group")}</span>
+        </div>`).join("");
+      fpMutualList.addEventListener("click", e=>{
+        const item=e.target.closest(".fp-mutual-item");
+        if (item) { closeModal("full-profile-modal"); openChat(item.dataset.chatId); }
+      }, {once:true});
+    } else fpMutualGroups.style.display="none";
+  } else if (fpMutualGroups) fpMutualGroups.style.display="none";
 
   // Badges
   const fpBadges = $("#fp-badges");
@@ -4104,24 +4288,38 @@ async function showFullProfile(uid) {
     }
   }
 
-  // Actions
+  // Actions — bigger buttons, more options
+  const isBlocked = (state.user?.blockedUsers||[]).includes(uid);
   let actionsHtml = "";
   if (isSelf) {
-    actionsHtml = `<button class="btn-ghost" data-fp-action="edit-profile">Edit Profile</button>`;
+    actionsHtml = `<button class="btn-primary fp-action-btn" data-fp-action="edit-profile">
+      <svg viewBox="0 0 24 24" width="15" height="15"><path fill="currentColor" d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04a1 1 0 000-1.41l-2.34-2.34a1 1 0 00-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg>
+      Edit Profile
+    </button>`;
   } else {
     if (!isFriend && !hasPendingOut)
-      actionsHtml += `<button class="btn-primary" data-fp-action="add-friend" data-fp-uid="${escapeHtml(uid)}">Add Friend</button>`;
+      actionsHtml += `<button class="btn-primary fp-action-btn" data-fp-action="add-friend" data-fp-uid="${escapeHtml(uid)}">
+        <svg viewBox="0 0 24 24" width="15" height="15"><path fill="currentColor" d="M15 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm-9-2V7H4v3H1v2h3v3h2v-3h3v-2H6zm9 4c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/></svg>
+        Add Friend
+      </button>`;
     else if (hasPendingOut)
-      actionsHtml += `<span style="font-size:13px;color:var(--t-muted);">Request sent</span>`;
+      actionsHtml += `<span class="fp-action-sent">Request Sent ✓</span>`;
     if (isFriend) {
-      actionsHtml += `<button class="btn-ghost" data-fp-action="message" data-fp-uid="${escapeHtml(uid)}">Message</button>`;
-      actionsHtml += `<button class="btn-ghost" style="color:var(--c-danger);" data-fp-action="remove-friend" data-fp-uid="${escapeHtml(uid)}">Remove Friend</button>`;
+      actionsHtml += `<button class="btn-primary fp-action-btn" data-fp-action="message" data-fp-uid="${escapeHtml(uid)}">
+        <svg viewBox="0 0 24 24" width="15" height="15"><path fill="currentColor" d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2z"/></svg>
+        Message
+      </button>`;
+      actionsHtml += `<button class="btn-ghost fp-action-btn fp-action-danger" data-fp-action="remove-friend" data-fp-uid="${escapeHtml(uid)}">Remove Friend</button>`;
     }
-    const isBlocked = (state.user?.blockedUsers||[]).includes(uid);
     actionsHtml += isBlocked
-      ? `<button class="btn-ghost" data-fp-action="unblock" data-fp-uid="${escapeHtml(uid)}" style="font-size:12px;">Unblock</button>`
-      : `<button class="btn-ghost" style="color:var(--c-danger);font-size:12px;" data-fp-action="block" data-fp-uid="${escapeHtml(uid)}">Block</button>`;
+      ? `<button class="btn-ghost fp-action-btn" data-fp-action="unblock" data-fp-uid="${escapeHtml(uid)}">Unblock</button>`
+      : `<button class="btn-ghost fp-action-btn fp-action-danger" data-fp-action="block" data-fp-uid="${escapeHtml(uid)}">Block</button>`;
   }
+  // Copy user ID — always available
+  actionsHtml += `<button class="btn-ghost fp-action-btn" data-fp-action="copy-id" data-fp-uid="${escapeHtml(uid)}" title="Copy user ID">
+    <svg viewBox="0 0 24 24" width="13" height="13"><path fill="currentColor" d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"/></svg>
+    Copy ID
+  </button>`;
   const fpActions = $("#fp-actions"); if (fpActions) fpActions.innerHTML = actionsHtml;
 
   openModal("full-profile-modal");
@@ -4174,6 +4372,10 @@ document.addEventListener("click", async e=>{
       showToast("User unblocked.");
       renderMessages();
     } catch(err){ btn.disabled=false; showToast("Error: "+err.message); }
+  }
+  else if (action==="copy-id") {
+    navigator.clipboard.writeText(uid||"").catch(()=>{});
+    showToast("User ID copied!");
   }
 });
 

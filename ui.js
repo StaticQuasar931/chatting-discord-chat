@@ -531,10 +531,21 @@ export function buildUI() {
         <div class="settings-search-wrap">
           <input type="text" id="settings-search-input" placeholder="Search settings…" autocomplete="off" />
         </div>
-        <button class="settings-discord-nav-item active" data-pane="account">Account &amp; Profile</button>
-        <button class="settings-discord-nav-item" data-pane="appearance">Appearance</button>
-        <div class="settings-discord-nav-divider"></div>
-        <button class="settings-discord-nav-item danger" id="settings-signout-btn">Sign Out</button>
+        <button class="settings-discord-nav-item active" data-pane="account">
+          <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M12 12c2.7 0 4.8-2.1 4.8-4.8S14.7 2.4 12 2.4 7.2 4.5 7.2 7.2 9.3 12 12 12zm0 2.4c-3.2 0-9.6 1.6-9.6 4.8v2.4h19.2v-2.4c0-3.2-6.4-4.8-9.6-4.8z"/></svg>
+          Account &amp; Profile
+        </button>
+        <button class="settings-discord-nav-item" data-pane="appearance">
+          <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M12 3c-4.97 0-9 4.03-9 9s4.03 9 9 9c.83 0 1.5-.67 1.5-1.5 0-.39-.15-.74-.39-1.01-.23-.26-.38-.61-.38-.99 0-.83.67-1.5 1.5-1.5H16c2.76 0 5-2.24 5-5 0-4.42-4.03-8-9-8zm-5.5 9c-.83 0-1.5-.67-1.5-1.5S5.67 9 6.5 9 8 9.67 8 10.5 7.33 12 6.5 12zm3-4C8.67 8 8 7.33 8 6.5S8.67 5 9.5 5s1.5.67 1.5 1.5S10.33 8 9.5 8zm5 0c-.83 0-1.5-.67-1.5-1.5S13.67 5 14.5 5s1.5.67 1.5 1.5S15.33 8 14.5 8zm3 4c-.83 0-1.5-.67-1.5-1.5S16.67 9 17.5 9s1.5.67 1.5 1.5-.67 1.5-1.5 1.5z"/></svg>
+          Appearance
+        </button>
+        <!-- Spacer pushes sign-out to bottom -->
+        <div class="settings-nav-spacer"></div>
+        <div class="settings-discord-nav-divider settings-signout-divider"></div>
+        <button class="settings-discord-nav-item danger" id="settings-signout-btn">
+          <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M17 7l-1.41 1.41L18.17 11H8v2h10.17l-2.58 2.58L17 17l5-5-5-5zM4 5h8V3H4c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h8v-2H4V5z"/></svg>
+          Sign Out
+        </button>
       </nav>
 
       <!-- Right content -->
@@ -564,17 +575,6 @@ export function buildUI() {
                   </label>
                 </div>
                 <p class="hint" style="margin:4px 0 0;font-size:11px;">Paste a URL and click <strong>Crop</strong> to drag-position it, or upload directly. Crop Position buttons also work for URL photos.</p>
-              </div>
-              <div class="settings-field-group">
-                <label class="modal-label">Avatar Crop Position</label>
-                <div style="display:flex;gap:6px;flex-wrap:wrap;">
-                  <button class="text-size-btn avatar-pos-btn" data-pos="top center">Top</button>
-                  <button class="text-size-btn avatar-pos-btn" data-pos="center center">Center</button>
-                  <button class="text-size-btn avatar-pos-btn" data-pos="bottom center">Bottom</button>
-                  <button class="text-size-btn avatar-pos-btn" data-pos="left center">Left</button>
-                  <button class="text-size-btn avatar-pos-btn" data-pos="right center">Right</button>
-                </div>
-                <p class="hint" style="margin:4px 0 0;font-size:11px;">Choose which part of your photo is shown in the circle crop.</p>
               </div>
               <div class="settings-field-group">
                 <label class="modal-label">Username</label>
@@ -658,7 +658,7 @@ export function buildUI() {
                 <div class="spp-banner" id="settings-preview-banner"></div>
                 <div class="spp-body">
                   <div class="spp-avatar-wrap">
-                    <div class="setup-avatar-preview spp-avatar-pos" id="settings-avatar-preview" style="width:72px;height:72px;font-size:26px;">
+                    <div class="setup-avatar-preview spp-avatar-pos" id="settings-avatar-preview" style="width:84px;height:84px;font-size:30px;">
                       <span id="settings-avatar-initial">?</span>
                     </div>
                     <span class="spp-status-dot" id="settings-preview-status-dot" data-status="online"></span>
@@ -1039,7 +1039,7 @@ export function buildUI() {
       </button>
       <div class="full-profile-banner" id="fp-banner"></div>
       <div class="full-profile-body">
-        <!-- Avatar + name side by side, overlapping the banner -->
+        <!-- Avatar + name row pulled up into banner -->
         <div class="full-profile-header">
           <div class="full-profile-avatar-wrap">
             <div class="full-profile-avatar" id="fp-avatar"></div>
@@ -1055,16 +1055,34 @@ export function buildUI() {
           </div>
         </div>
         <div class="full-profile-badges" id="fp-badges"></div>
-        <div class="full-profile-divider"></div>
-        <div class="full-profile-section-label">About Me</div>
-        <div class="full-profile-bio" id="fp-bio"></div>
-        <div class="full-profile-since" id="fp-since"></div>
-        <!-- Notes — only shown for other people -->
-        <div id="fp-notes-section" style="display:none">
-          <div class="full-profile-divider"></div>
-          <div class="full-profile-section-label">Note <span style="font-weight:400;text-transform:none;letter-spacing:0;font-size:10px;color:var(--t-muted);">Private · only you can see this</span></div>
-          <textarea class="full-profile-notes" id="fp-notes" placeholder="Add a private note about this person…" maxlength="500"></textarea>
+
+        <!-- Two-column layout below header -->
+        <div class="full-profile-cols">
+          <!-- LEFT: bio + meta -->
+          <div class="full-profile-left">
+            <div class="full-profile-divider"></div>
+            <div class="full-profile-section-label">About Me</div>
+            <div class="full-profile-bio" id="fp-bio"></div>
+            <div class="full-profile-since" id="fp-since"></div>
+            <div class="full-profile-since fp-friends-since-row" id="fp-friends-since" style="display:none"></div>
+            <div id="fp-mutual-groups" style="display:none">
+              <div class="full-profile-divider" style="margin:10px 0 8px;"></div>
+              <div class="full-profile-section-label">Mutual Groups</div>
+              <div id="fp-mutual-groups-list" class="fp-mutual-list"></div>
+            </div>
+          </div>
+          <!-- RIGHT: private note -->
+          <div class="full-profile-right" id="fp-notes-section" style="display:none">
+            <div class="full-profile-section-label" style="margin-bottom:6px;">
+              Note
+              <span style="font-weight:400;text-transform:none;letter-spacing:0;font-size:10px;color:var(--t-muted);"> — only you see this</span>
+            </div>
+            <textarea class="full-profile-notes" id="fp-notes"
+              placeholder="Add a private note…" maxlength="500"></textarea>
+          </div>
         </div>
+
+        <!-- Action buttons -->
         <div class="full-profile-actions" id="fp-actions"></div>
       </div>
     </div>
