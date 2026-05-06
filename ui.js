@@ -1097,6 +1097,13 @@ export function buildUI() {
             </ul>
           </div>
 
+          <div class="settings-field-group" style="margin:10px 0 14px;">
+            <label class="modal-label">Optional nickname for school discovery
+              <span class="label-optional">— shown to classmates instead of your username (school context only)</span>
+            </label>
+            <input type="text" id="school-nickname-input" maxlength="32" placeholder="e.g. Alex (Period 4 Bio)" />
+          </div>
+
           <label class="school-consent-row">
             <input type="checkbox" id="school-consent-check" />
             <span>I understand the risks and want my profile to be discoverable to other users in my school domain.</span>
@@ -1118,7 +1125,7 @@ export function buildUI() {
               <button class="btn-primary" id="school-open-chat-btn" title="Open the school-wide group chat">
                 💬 School Chat
               </button>
-              <button class="btn-ghost" id="school-leave-btn" title="Stop being discoverable">
+              <button class="btn-ghost school-leave-btn-red" id="school-leave-btn" title="Stop being discoverable">
                 Leave
               </button>
             </div>

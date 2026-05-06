@@ -1934,7 +1934,8 @@ function renderChatLists() {
     return chatMuteLevel(c.id) !== "all";
   });
   const dms=visibleChats.filter(c=>c.type==="dm");
-  const groups=visibleChats.filter(c=>c.type==="group");
+  // School chats are kept separate — they appear under the rail school button, not in regular groups
+  const groups=visibleChats.filter(c=>c.type==="group" && !c.schoolDomain);
 
   // Helper: does a chat have any cached message matching the filter?
   const _msgMatches = (cId) => {
@@ -1985,9 +1986,12 @@ function renderChatLists() {
     const mutedDot=muteLevel?`<span class="side-row-mute-dot" title="Muted (${muteLevel})">🔕</span>`:"";
     const unreadN2=muteLevel?0:chatUnreadCount(c);
     const unread=unreadN2>0?`<span class="side-item-unread" title="${unreadN2} new">${unreadN2>99?"99+":unreadN2}</span>`:"";
+    const groupAvatar = c.photoURL
+      ? `<img class="side-row-avatar" src="${escapeHtml(c.photoURL)}" alt="" />`
+      : `<div class="side-row-fallback">${escapeHtml(groupInitials(name))}</div>`;
     return `
       <div class="side-row ${active} ${muteLevel?"muted-row":""}" data-chat-id="${escapeHtml(c.id)}" data-type="group">
-        <div class="side-row-fallback">${escapeHtml(groupInitials(name))}</div>
+        ${groupAvatar}
         <div class="side-row-name">${escapeHtml(name)}</div>
         ${matchHint}${mutedDot}${unread}
       </div>`;
@@ -1995,7 +1999,10 @@ function renderChatLists() {
 
   $("#rail-groups").innerHTML=groups.map(c=>{
     const active=state.activeChatId===c.id?"active":"";
-    return `<div class="rail-group-avatar ${active}" data-chat-id="${escapeHtml(c.id)}" title="${escapeHtml(c.name||"Group")}">${escapeHtml(groupInitials(c.name||"G"))}</div>`;
+    const inner = c.photoURL
+      ? `<img class="rail-group-img" src="${escapeHtml(c.photoURL)}" alt="" />`
+      : escapeHtml(groupInitials(c.name||"G"));
+    return `<div class="rail-group-avatar ${active}" data-chat-id="${escapeHtml(c.id)}" title="${escapeHtml(c.name||"Group")}">${inner}</div>`;
   }).join("");
 }
 
@@ -2240,7 +2247,12 @@ async function renderChatHeader() {
   } else {
     const isLeader=Array.isArray(c.leaders)&&c.leaders.includes(state.user.uid);
     const nameEl2=$("#chat-header-name");
-    nameEl2.textContent=c.name||"Group";
+    // For school chats, display "domain · nickname" if a nickname is set
+    if (c.schoolDomain) {
+      nameEl2.textContent = c.chatNickname ? `🎓 ${c.schoolDomain} · ${c.chatNickname}` : (c.name || `🎓 ${c.schoolDomain}`);
+    } else {
+      nameEl2.textContent = c.name || "Group";
+    }
     nameEl2.classList.remove("clickable"); nameEl2.style.cursor="";
     // Show member avatars inline when there's room (≤5 members)
     let memberAvatarsHtml = "";
@@ -3204,6 +3216,14 @@ async function joinByCode(code) {
     const chatDoc=snap.docs[0];
     const chatId=chatDoc.id;
     const chatData=chatDoc.data();
+    // SCHOOL CHAT GUARD: only allow if email domain matches
+    if (chatData.schoolDomain) {
+      const myDom = _userSchoolDomain();
+      if (myDom !== chatData.schoolDomain) {
+        showToast("This is a school chat. You need a matching email domain to join.");
+        return;
+      }
+    }
     if (chatData.members.includes(state.user.uid)) {
       showToast("You're already in that group"); openChat(chatId); return;
     }
@@ -3271,12 +3291,56 @@ async function openGroupInfoModal(chatId) {
   if (!c || c.type!=="group") { showToast("Not a group chat"); return; }
   state._groupInfoChatId = c.id;
 
-  $("#group-info-title").textContent = c.name || "Group";
-  $("#group-info-name-input").value = c.name || "";
+  const isSchoolChat = !!c.schoolDomain;
+  const isFirstMember = isSchoolChat && c.firstMember === state.user.uid;
+
+  // For school chats: Title shows domain + nickname; name is locked
+  if (isSchoolChat) {
+    const display = c.chatNickname ? `🎓 ${c.schoolDomain} · ${c.chatNickname}` : (c.name || `🎓 ${c.schoolDomain}`);
+    $("#group-info-title").textContent = display;
+  } else {
+    $("#group-info-title").textContent = c.name || "Group";
+  }
+  $("#group-info-name-input").value = isSchoolChat ? (c.chatNickname || "") : (c.name || "");
   $("#group-info-photo-input").value = c.photoURL || "";
   $("#group-info-desc-input").value = c.description || "";
-  const code = c.joinCode || "—";
+  const code = c.joinCode || (isSchoolChat ? "(domain-only)" : "—");
   $("#group-info-code").textContent = code;
+
+  // Toggle UI for school chats
+  // - Name input becomes "Chat Nickname" (only firstMember can edit, no one for non-firstMember)
+  // - Description is read-only for non-firstMember
+  // - Invite code section hidden (school chats don't use codes)
+  // - Show governance notice
+  const nameLabel = $("#group-info-modal").querySelector('label[for="group-info-name-input"]') ||
+                    $("#group-info-modal").querySelectorAll(".modal-label")[0];
+  if (nameLabel) nameLabel.textContent = isSchoolChat ? "Chat Nickname (semi-leader only)" : "Group Name";
+  $("#group-info-name-input").placeholder = isSchoolChat ? "e.g. Cool Crew" : "Group name";
+  $("#group-info-name-input").disabled = isSchoolChat && !isFirstMember;
+  $("#group-info-save-name-btn").disabled = isSchoolChat && !isFirstMember;
+  $("#group-info-photo-input").disabled = isSchoolChat && !isFirstMember;
+  $("#group-info-save-photo-btn").disabled = isSchoolChat && !isFirstMember;
+  // Description: school chats are democratic — for now, lock description from edits
+  $("#group-info-desc-input").disabled = isSchoolChat;
+  $("#group-info-save-desc-btn").style.display = isSchoolChat ? "none" : "";
+  // Hide invite code regen for school chats
+  const codeSection = $("#group-info-modal").querySelectorAll(".group-info-section")[0];
+  if (codeSection) codeSection.style.display = isSchoolChat ? "none" : "";
+
+  // School governance notice
+  let notice = $("#group-info-school-notice");
+  if (isSchoolChat) {
+    if (!notice) {
+      notice = document.createElement("div");
+      notice.id = "group-info-school-notice";
+      notice.className = "school-warning";
+      notice.style.cssText = "margin:10px 0;font-size:12.5px;";
+      $("#group-info-modal").querySelector(".modal-body").prepend(notice);
+    }
+    notice.innerHTML = `<strong>🎓 Democratic school chat.</strong> No one owns this chat — all members are equal.${isFirstMember ? " As the first member, you can set the chat photo and nickname." : " Only the first member can set the chat photo & nickname; all other changes will eventually require a vote."}`;
+  } else if (notice) {
+    notice.remove();
+  }
 
   // Render avatar
   const avEl = $("#group-info-avatar");
@@ -3323,12 +3387,25 @@ async function openGroupInfoModal(chatId) {
 // Header gear button → open modal
 $("#chat-group-info-btn")?.addEventListener("click", ()=>openGroupInfoModal());
 
-// Save name
+// Save name (or chatNickname for school chats)
 $("#group-info-save-name-btn")?.addEventListener("click", async ()=>{
   const c = state.chats.find(x=>x.id===state._groupInfoChatId); if (!c) return;
   const newName = $("#group-info-name-input").value.trim();
+  if (newName.length>50) { showToast("Too long (50 max)"); return; }
+
+  if (c.schoolDomain) {
+    // School chat: only firstMember can update chatNickname (chat name is locked)
+    if (c.firstMember !== state.user.uid) { showToast("Only the first member can change the nickname."); return; }
+    try {
+      await updateDoc(doc(db,"chats",c.id), { chatNickname: newName });
+      showToast(newName ? "Nickname updated" : "Nickname cleared");
+      const display = newName ? `🎓 ${c.schoolDomain} · ${newName}` : `🎓 ${c.schoolDomain}`;
+      $("#group-info-title").textContent = display;
+    } catch(err){ showToast("Error: "+err.message); }
+    return;
+  }
+
   if (!newName) { showToast("Name can't be empty"); return; }
-  if (newName.length>50) { showToast("Name too long (50 max)"); return; }
   try {
     await updateDoc(doc(db,"chats",c.id), { name: newName });
     showToast("Group name updated");
@@ -3339,6 +3416,10 @@ $("#group-info-save-name-btn")?.addEventListener("click", async ()=>{
 // Save photo URL
 $("#group-info-save-photo-btn")?.addEventListener("click", async ()=>{
   const c = state.chats.find(x=>x.id===state._groupInfoChatId); if (!c) return;
+  if (c.schoolDomain && c.firstMember !== state.user.uid) {
+    showToast("Only the first member can change the chat photo.");
+    return;
+  }
   const url = $("#group-info-photo-input").value.trim();
   try {
     await updateDoc(doc(db,"chats",c.id), { photoURL: url || null });
@@ -3465,7 +3546,7 @@ async function openSchoolModal() {
   // Check if already opted in
   let optedIn = false;
   try {
-    const snap = await getDoc(doc(db, "schoolDirectories", dom, "members", state.user.uid));
+    const snap = await getDoc(doc(db, "EducationDiscovery", dom, "members", state.user.uid));
     optedIn = snap.exists();
   } catch(_){}
 
@@ -3492,7 +3573,7 @@ async function _showSchoolDirectory(dom) {
 
   try {
     _schoolMembersUnsub = onSnapshot(
-      collection(db, "schoolDirectories", dom, "members"),
+      collection(db, "EducationDiscovery", dom, "members"),
       snap => {
         const members = snap.docs.map(d => d.data());
         $("#school-directory-count").textContent = members.length;
@@ -3501,13 +3582,18 @@ async function _showSchoolDirectory(dom) {
           return;
         }
         list.innerHTML = members.map(m => {
-          const name = m.username || "User";
+          const username = m.username || "User";
+          const displayName = m.nickname ? m.nickname : username;
           const bio = m.bio || "";
           const isMe = m.uid === state.user.uid;
+          // If nickname is set, show username as small subtitle
+          const nameLine = m.nickname
+            ? `${escapeHtml(displayName)} <small style='color:var(--t-muted);font-weight:400;'>(@${escapeHtml(username)})</small>`
+            : escapeHtml(displayName);
           return `<div class="school-member-row" data-profile-uid="${escapeHtml(m.uid)}">
-            ${avatarMarkup(name, m.photoURL, "side-row-avatar", "side-row-fallback")}
+            ${avatarMarkup(displayName, m.photoURL, "side-row-avatar", "side-row-fallback")}
             <div class="school-member-info">
-              <div class="school-member-name">${escapeHtml(name)}${isMe?" <small style='color:var(--t-muted);font-weight:400;'>(you)</small>":""}</div>
+              <div class="school-member-name">${nameLine}${isMe?" <small style='color:var(--t-muted);font-weight:400;'>(you)</small>":""}</div>
               <div class="school-member-bio">${escapeHtml(bio.slice(0,80) || "No bio")}</div>
             </div>
           </div>`;
@@ -3530,23 +3616,23 @@ document.addEventListener("change", e => {
   }
 });
 
-// Opt in
+// Opt in (with optional nickname)
 $("#school-join-btn")?.addEventListener("click", async () => {
   const dom = _userSchoolDomain(); if (!dom || !state.user) return;
   if (!$("#school-consent-check").checked) return;
   const btn = $("#school-join-btn");
   btn.disabled = true; btn.textContent = "Joining…";
   try {
-    // Add to directory
-    await setDoc(doc(db, "schoolDirectories", dom, "members", state.user.uid), {
+    const nickname = ($("#school-nickname-input")?.value || "").trim().slice(0, 32);
+    await setDoc(doc(db, "EducationDiscovery", dom, "members", state.user.uid), {
       uid: state.user.uid,
       username: state.user.username || state.user.displayName,
+      nickname: nickname || null,
       photoURL: state.user.photoURL || null,
       bio: state.user.bio || "",
       joinedAt: serverTimestamp()
     });
-    // Update directory metadata
-    await setDoc(doc(db, "schoolDirectories", dom), {
+    await setDoc(doc(db, "EducationDiscovery", dom), {
       domain: dom, lastJoinedAt: serverTimestamp()
     }, { merge: true });
     showToast("✓ Welcome to the directory!");
@@ -3562,7 +3648,7 @@ $("#school-leave-btn")?.addEventListener("click", () => {
   const dom = _userSchoolDomain(); if (!dom) return;
   showConfirm("Stop being discoverable to other " + dom + " members?", async () => {
     try {
-      await deleteDoc(doc(db, "schoolDirectories", dom, "members", state.user.uid));
+      await deleteDoc(doc(db, "EducationDiscovery", dom, "members", state.user.uid));
       showToast("Left the directory");
       closeModal("school-modal");
       if (_schoolMembersUnsub) { _schoolMembersUnsub(); _schoolMembersUnsub = null; }
@@ -3570,41 +3656,42 @@ $("#school-leave-btn")?.addEventListener("click", () => {
   }, { title: "Leave Directory", yesLabel: "Leave", danger: true });
 });
 
-// Open school chat — find or create a group chat shared by domain
+// Sanitize a domain into a Firestore-safe deterministic chat id
+function _schoolChatId(domain) {
+  return "eduDisc_" + domain.replace(/[^a-z0-9]/gi, "_").toLowerCase();
+}
+
+// Open school chat — find or create the deterministic school chat
 $("#school-open-chat-btn")?.addEventListener("click", async () => {
   const dom = _userSchoolDomain(); if (!dom || !state.user) return;
   const btn = $("#school-open-chat-btn");
   btn.disabled = true;
   try {
-    // Check directory for chatId
-    const dirSnap = await getDoc(doc(db, "schoolDirectories", dom));
-    let chatId = dirSnap.exists() ? dirSnap.data().chatId : null;
-    if (chatId) {
-      // Verify chat exists & user is member
-      const chatSnap = await getDoc(doc(db, "chats", chatId));
-      if (!chatSnap.exists()) chatId = null;
-      else if (!chatSnap.data().members.includes(state.user.uid)) {
-        // Auto-add to school chat
-        await updateDoc(doc(db, "chats", chatId), { members: arrayUnion(state.user.uid) });
-      }
-    }
-    if (!chatId) {
-      // Create the school chat (first joiner)
-      const ref = await addDoc(collection(db, "chats"), {
+    const chatId = _schoolChatId(dom);
+    const chatSnap = await getDoc(doc(db, "chats", chatId));
+    if (!chatSnap.exists()) {
+      // First joiner creates the chat (semi-leader for photo & nickname only)
+      await setDoc(doc(db, "chats", chatId), {
         type: "group",
+        schoolDomain: dom,
+        firstMember: state.user.uid,    // semi-leader: photo + nickname edits only
         members: [state.user.uid],
-        leaders: [state.user.uid],
+        leaders: [],                     // no traditional leaders — democratic
         name: `🎓 ${dom}`,
-        description: `Auto-created school chat for ${dom}. Stay safe — verify identities before sharing personal info.`,
+        chatNickname: "",                // optional nickname set by firstMember
+        description: `Auto-created school chat for ${dom}. Verify identities before sharing personal info — domain match is not identity.`,
         createdBy: state.user.uid,
         createdAt: serverTimestamp(),
         lastMessage: "",
         lastMessageAt: serverTimestamp(),
-        schoolDomain: dom,
-        joinCode: dom.replace(/[^a-z0-9]/gi, "").slice(0, 8).toUpperCase()
+        // No joinCode — school chats are joined only via Discovery
       });
-      chatId = ref.id;
-      await setDoc(doc(db, "schoolDirectories", dom), { chatId, domain: dom }, { merge: true });
+      await setDoc(doc(db, "EducationDiscovery", dom), {
+        chatId, domain: dom, lastJoinedAt: serverTimestamp()
+      }, { merge: true });
+    } else if (!chatSnap.data().members.includes(state.user.uid)) {
+      // Auto-add — already opted in, just join the chat
+      await updateDoc(doc(db, "chats", chatId), { members: arrayUnion(state.user.uid) });
     }
     closeModal("school-modal");
     openChat(chatId);
