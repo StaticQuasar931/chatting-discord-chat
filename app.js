@@ -412,6 +412,7 @@ const state = {
   gifAutoFreeze:     localStorage.getItem("sc_gif_autofreeze") === "true",
   // Set of GIF src URLs that the user has frozen (persists when gifKeepFrozen is on)
   frozenGifs: new Set(JSON.parse(localStorage.getItem("sc_frozen_gifs")||"[]")),
+  avatarPosition:    localStorage.getItem("sc_avatar_pos") || "center center",
   favGifs: {},   // gifUrl → { url, previewUrl, title }
   favEmojis: {}, // emojiName → { name, char }
 };
@@ -423,7 +424,18 @@ const state = {
   if (state.textSize !== 15) document.body.style.setProperty("--msg-font-size", state.textSize + "px");
 })();
 
+// CSS custom properties set by the custom theme (must be cleared when switching away)
+const _CUSTOM_THEME_PROPS = [
+  "--c-rail","--c-sidebar","--c-main","--c-input","--c-input-2",
+  "--c-overlay","--c-border","--c-border-2",
+  "--c-accent","--c-accent-hover","--c-accent-soft","--shadow-accent"
+];
+
 function applyTheme(t) {
+  // Clear inline CSS vars from the previous custom theme before switching
+  if (t !== "custom") {
+    _CUSTOM_THEME_PROPS.forEach(p => document.body.style.removeProperty(p));
+  }
   state.theme = t;
   document.body.dataset.theme = t;
   localStorage.setItem("sc_theme", t);
@@ -1046,6 +1058,9 @@ function updateUserPanel() {
     u.username||u.displayName, u.photoURL,
     "user-panel-avatar","user-panel-avatar-fallback"
   );
+  // Apply saved avatar crop position to the user's own panel avatar
+  const panelImg = $("#user-panel-avatar-wrap img");
+  if (panelImg && state.avatarPosition) panelImg.style.objectPosition = state.avatarPosition;
   const dot = $("#user-status-dot");
   if (dot) dot.dataset.status = state.status||"online";
 }
@@ -1222,6 +1237,10 @@ function bootSubscriptions() {
     if (data.bannerColor!==undefined) state.bannerColor=data.bannerColor||null;
     if (data.isPrivate!==undefined) state.isPrivate=!!data.isPrivate;
     if (data.createdAt) state.user.createdAt=data.createdAt;
+    if (data.avatarPosition) {
+      state.avatarPosition=data.avatarPosition;
+      localStorage.setItem("sc_avatar_pos",data.avatarPosition);
+    }
     state.userCache[uid] = _augmentBadges({ ...state.user, ...data });
     applyBlockedFromProfile(data);
     updateUserPanel();
@@ -1331,6 +1350,27 @@ function bootSubscriptions() {
         if (updated) { state.activeChat=updated; renderChatHeader(); }
       }
     }, err=>console.error("chats:",err));
+
+  // ── Update notification banner ──────────────────────────────────────
+  state.unsubscribers.updateBanner = onSnapshot(
+    doc(db, "appConfig", "update"),
+    snap => {
+      const banner = $("#update-banner");
+      if (!banner) return;
+      if (!snap.exists()) { banner.classList.add("hidden"); return; }
+      const data = snap.data();
+      if (!data.enabled) { banner.classList.add("hidden"); return; }
+      // Use `version` field if present, otherwise fall back to updatedAt millis
+      const version = String(data.version || data.updatedAt?.toMillis?.() || "1");
+      if (localStorage.getItem("sc_seen_update") === version) return;
+      const msgEl = $("#update-banner-msg");
+      if (msgEl) msgEl.textContent = data.message ||
+        "Static Chat has been updated! Refresh for the latest features.";
+      banner.dataset.version = version;
+      banner.classList.remove("hidden");
+    },
+    err => console.warn("updateBanner:", err)
+  );
 }
 
 
@@ -1403,6 +1443,14 @@ function renderPendingLists() {
   const incomingList=$("#incoming-list"), outgoingList=$("#outgoing-list");
   $("#incoming-empty").hidden=state.incoming.length>0;
   $("#outgoing-empty").hidden=state.outgoing.length>0;
+
+  // Update friend-request badges on sidebar button + tab
+  const reqCount = state.incoming.length;
+  const reqLabel = reqCount > 9 ? "9+" : String(reqCount);
+  const sideBadge = $("#friend-req-badge");
+  const tabBadge  = $("#pending-tab-badge");
+  if (sideBadge) { sideBadge.textContent = reqLabel; sideBadge.classList.toggle("hidden", reqCount === 0); }
+  if (tabBadge)  { tabBadge.textContent  = reqLabel; tabBadge.classList.toggle("hidden",  reqCount === 0); }
   incomingList.innerHTML=state.incoming.map(r=>`
     <div class="friend-row">
       ${avatarMarkup(r.fromName,r.fromPhoto,"friend-row-avatar","friend-row-fallback")}
@@ -2815,6 +2863,7 @@ function openSettingsModal(pane) {
   if($("#settings-gif-autofreeze-toggle"))      $("#settings-gif-autofreeze-toggle").checked=state.gifAutoFreeze;
   if($("#settings-compact-toggle"))            $("#settings-compact-toggle").checked=state.compactMode;
   $$(".text-size-btn").forEach(b=>b.classList.toggle("active", parseFloat(b.dataset.size)===state.textSize));
+  $$(".avatar-pos-btn").forEach(b=>b.classList.toggle("active", b.dataset.pos===state.avatarPosition));
   if($("#settings-dblclick-react-toggle"))     $("#settings-dblclick-react-toggle").checked=state.dblClickReact;
   if($("#settings-dblclick-emoji"))            $("#settings-dblclick-emoji").value=state.dblClickEmoji;
   if($("#dblclick-emoji-preview"))             $("#dblclick-emoji-preview").textContent=state.dblClickEmoji;
@@ -3015,6 +3064,28 @@ $("#settings-gif-keep-frozen-toggle")?.addEventListener("change", e => {
 $("#settings-gif-autofreeze-toggle")?.addEventListener("change", e => {
   state.gifAutoFreeze = e.target.checked;
   localStorage.setItem("sc_gif_autofreeze", e.target.checked ? "true" : "false");
+});
+
+// Avatar crop position buttons — instant-apply
+document.addEventListener("click", e => {
+  const btn = e.target.closest(".avatar-pos-btn");
+  if (!btn) return;
+  const pos = btn.dataset.pos;
+  if (!pos) return;
+  state.avatarPosition = pos;
+  localStorage.setItem("sc_avatar_pos", pos);
+  // Apply to all avatar images that belong to the current user
+  $$(`img[data-uid="${state.user?.uid}"], .user-panel-avatar img`).forEach(img => {
+    img.style.objectPosition = pos;
+  });
+  // Update panel avatar directly
+  const panelAv = $(".user-panel-avatar img, #user-panel-avatar");
+  if (panelAv) panelAv.style.objectPosition = pos;
+  $$(".avatar-pos-btn").forEach(b => b.classList.toggle("active", b.dataset.pos === pos));
+  // Persist to Firestore (fire-and-forget)
+  if (state.user) {
+    updateDoc(doc(db,"users",state.user.uid),{ avatarPosition: pos }).catch(()=>{});
+  }
 });
 
 // Settings modal interactions (theme/status/banner)
@@ -3766,15 +3837,17 @@ async function showProfileCard(uid, event) {
   const moreBtn = `<button class="profile-card-more-btn" id="profile-card-more-btn" data-pc-uid="${escapeHtml(uid)}" title="More options">⋯</button>`;
   $("#profile-card-actions").innerHTML = actionsHtml + moreBtn;
 
-  // Notes
+  // Notes — show for non-self, load from Firestore
   const notesArea = $("#profile-card-notes");
   const notesLabel = $("#profile-card-notes-label");
   if (notesArea) {
     if (!isSelf) {
       notesArea.style.display = "";
       if (notesLabel) notesLabel.style.display = "";
-      notesArea.value = localStorage.getItem(`sc_notes_${uid}`) || "";
       notesArea.dataset.noteUid = uid;
+      // Show localStorage value immediately, then update from Firestore
+      notesArea.value = localStorage.getItem(`sc_notes_${uid}`) || "";
+      _loadNote(uid).then(text => { if (notesArea.dataset.noteUid === uid) notesArea.value = text; });
     } else {
       notesArea.style.display = "none";
       if (notesLabel) notesLabel.style.display = "none";
@@ -3822,14 +3895,40 @@ $("#profile-card")?.addEventListener("click", async e=>{
   }
 });
 
-// Notes autosave on input
+// Notes autosave — debounced write to Firestore + instant localStorage fallback
+let _notesSaveTimer = null;
+function _saveNote(targetUid, text) {
+  if (!state.user || !targetUid) return;
+  // Instant localStorage fallback so the value is always readable locally
+  if (text.trim()) localStorage.setItem(`sc_notes_${targetUid}`, text);
+  else localStorage.removeItem(`sc_notes_${targetUid}`);
+  // Debounced Firestore write
+  clearTimeout(_notesSaveTimer);
+  _notesSaveTimer = setTimeout(async () => {
+    try {
+      const noteRef = doc(db, "users", state.user.uid, "notes", targetUid);
+      if (text.trim()) await setDoc(noteRef, { text, updatedAt: serverTimestamp() });
+      else await deleteDoc(noteRef).catch(()=>{});
+    } catch(_){}
+  }, 1200);
+}
+
+// Load a note from Firestore (with localStorage fallback)
+async function _loadNote(targetUid) {
+  if (!state.user || !targetUid) return "";
+  try {
+    const snap = await getDoc(doc(db, "users", state.user.uid, "notes", targetUid));
+    if (snap.exists()) return snap.data().text || "";
+  } catch(_){}
+  return localStorage.getItem(`sc_notes_${targetUid}`) || "";
+}
+
 document.addEventListener("input", e => {
-  if (e.target.id !== "profile-card-notes") return;
+  const isProfileNote = e.target.id === "profile-card-notes" || e.target.id === "fp-notes";
+  if (!isProfileNote) return;
   const uid = e.target.dataset.noteUid;
   if (!uid) return;
-  const val = e.target.value;
-  if (val.trim()) localStorage.setItem(`sc_notes_${uid}`, val);
-  else localStorage.removeItem(`sc_notes_${uid}`);
+  _saveNote(uid, e.target.value);
 });
 
 // 3-dots context menu on profile card
@@ -3890,14 +3989,28 @@ async function showFullProfile(uid) {
     else { avatarEl.innerHTML=""; avatarEl.textContent = (profile.username||profile.displayName||"?").charAt(0).toUpperCase(); }
   }
 
-  // Status dot
+  // Status dot — positioned inside avatar-wrap
   const sdot = $("#fp-status-dot");
+  const statusVal = (isSelf || isFriend) ? resolveStatus(isSelf ? state.userCache[uid]||{} : profile) : "offline";
   if (sdot) {
     if (!isSelf && !isFriend) { sdot.style.display="none"; }
-    else { sdot.style.display=""; sdot.dataset.status = resolveStatus(profile); }
+    else { sdot.style.display=""; sdot.dataset.status = statusVal; }
   }
 
-  // Text fields
+  // Status label text next to name
+  const fpStatusLabel = $("#fp-status-label");
+  if (fpStatusLabel) {
+    const statusMap = { online:"● Online", idle:"● Idle", dnd:"● Do Not Disturb", offline:"● Offline", invisible:"● Invisible" };
+    if (isSelf || isFriend) {
+      fpStatusLabel.textContent = statusMap[statusVal] || "";
+      fpStatusLabel.className = `full-profile-status-label ${statusVal}`;
+      fpStatusLabel.style.display = "";
+    } else {
+      fpStatusLabel.style.display = "none";
+    }
+  }
+
+  // Name / tag / custom status
   $("#fp-name").textContent = profile.username||profile.displayName||"User";
   $("#fp-tag").textContent = profile.discriminator ? `#${profile.discriminator}` : "";
   const cs = isSelf ? state.customStatus : (profile.customStatus||"");
@@ -3926,6 +4039,22 @@ async function showFullProfile(uid) {
     }).catch(()=>{});
   }
 
+  // Notes — only shown for non-self
+  const fpNotesSection = $("#fp-notes-section");
+  const fpNotesArea = $("#fp-notes");
+  if (fpNotesSection) {
+    if (!isSelf && !isPrivate) {
+      fpNotesSection.style.display = "";
+      if (fpNotesArea) {
+        fpNotesArea.dataset.noteUid = uid;
+        fpNotesArea.value = localStorage.getItem(`sc_notes_${uid}`) || "";
+        _loadNote(uid).then(text => { if (fpNotesArea.dataset.noteUid === uid) fpNotesArea.value = text; });
+      }
+    } else {
+      fpNotesSection.style.display = "none";
+    }
+  }
+
   // Actions
   let actionsHtml = "";
   if (isSelf) {
@@ -3935,8 +4064,14 @@ async function showFullProfile(uid) {
       actionsHtml += `<button class="btn-primary" data-fp-action="add-friend" data-fp-uid="${escapeHtml(uid)}">Add Friend</button>`;
     else if (hasPendingOut)
       actionsHtml += `<span style="font-size:13px;color:var(--t-muted);">Request sent</span>`;
-    if (isFriend)
+    if (isFriend) {
       actionsHtml += `<button class="btn-ghost" data-fp-action="message" data-fp-uid="${escapeHtml(uid)}">Message</button>`;
+      actionsHtml += `<button class="btn-ghost" style="color:var(--c-danger);" data-fp-action="remove-friend" data-fp-uid="${escapeHtml(uid)}">Remove Friend</button>`;
+    }
+    const isBlocked = (state.user?.blockedUsers||[]).includes(uid);
+    actionsHtml += isBlocked
+      ? `<button class="btn-ghost" data-fp-action="unblock" data-fp-uid="${escapeHtml(uid)}" style="font-size:12px;">Unblock</button>`
+      : `<button class="btn-ghost" style="color:var(--c-danger);font-size:12px;" data-fp-action="block" data-fp-uid="${escapeHtml(uid)}">Block</button>`;
   }
   const fpActions = $("#fp-actions"); if (fpActions) fpActions.innerHTML = actionsHtml;
 
@@ -3963,7 +4098,52 @@ document.addEventListener("click", async e=>{
       btn.textContent="Sent ✓"; showToast("Friend request sent");
     } catch(err){ btn.disabled=false; btn.textContent="Add Friend"; showToast("Error: "+err.message); }
   }
+  else if (action==="remove-friend") {
+    const fs = state.friends?.find(f=>f.uid===uid);
+    if (!fs?.friendshipId) { showToast("Friendship not found."); return; }
+    showConfirm("Remove this friend?", async ()=>{
+      try {
+        await deleteDoc(doc(db,"friendships",fs.friendshipId));
+        closeModal("full-profile-modal");
+        showToast("Friend removed.");
+      } catch(err){ showToast("Error: "+err.message); }
+    }, { title:"Remove Friend", yesLabel:"Remove", danger:true });
+  }
+  else if (action==="block") {
+    closeModal("full-profile-modal");
+    blockUser(uid);
+  }
+  else if (action==="unblock") {
+    if (!state.user) return;
+    btn.disabled=true;
+    try {
+      const blocked=(state.user.blockedUsers||[]).filter(id=>id!==uid);
+      await updateDoc(doc(db,"users",state.user.uid),{blockedUsers:blocked});
+      state.blockedUsers.delete(uid);
+      state.user.blockedUsers=blocked;
+      closeModal("full-profile-modal");
+      showToast("User unblocked.");
+      renderMessages();
+    } catch(err){ btn.disabled=false; showToast("Error: "+err.message); }
+  }
 });
+
+
+/* =====================================================================
+   UPDATE BANNER
+   ===================================================================== */
+function _dismissUpdateBanner() {
+  const banner = $("#update-banner");
+  const v = banner?.dataset.version || "";
+  if (v) localStorage.setItem("sc_seen_update", v);
+  banner?.classList.add("hidden");
+}
+$("#update-banner-refresh")?.addEventListener("click", () => {
+  _dismissUpdateBanner();
+  location.reload();
+});
+$("#update-banner-dismiss")?.addEventListener("click", _dismissUpdateBanner);
+$("#update-banner-x")?.addEventListener("click", _dismissUpdateBanner);
 
 
 /* =====================================================================

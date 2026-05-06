@@ -183,12 +183,13 @@ export function buildUI() {
         <input type="text" id="sidebar-search" placeholder="Find or start a conversation" />
       </div>
       <div class="sidebar-content">
-        <button class="side-btn" id="open-friends-btn">
+        <button class="side-btn" id="open-friends-btn" style="position:relative;">
           <svg viewBox="0 0 24 24" width="20" height="20" fill="none" aria-hidden="true">
             <path fill="currentColor" d="M13 10a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z"/>
             <path fill="currentColor" d="M3 5v-.75C3 3.56 3.56 3 4.25 3s1.24.56 1.33 1.25C6.12 8.65 9.46 12 13 12h1a8 8 0 0 1 8 8 2 2 0 0 1-2 2 .21.21 0 0 1-.2-.15 7.65 7.65 0 0 0-1.32-2.3c-.15-.2-.42-.06-.39.17l.25 2c.02.15-.1.28-.25.28H9a2 2 0 0 1-2-2v-2.22c0-1.57-.67-3.05-1.53-4.37A15.85 15.85 0 0 1 3 5Z"/>
           </svg>
           <span>Friends</span>
+          <span class="side-btn-badge hidden" id="friend-req-badge" aria-label="pending friend requests"></span>
         </button>
         <a href="https://sites.google.com/view/staticquasar931/google-form" target="_blank" rel="noopener noreferrer" class="side-btn suggestions-link">
           <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
@@ -247,7 +248,7 @@ export function buildUI() {
           </div>
           <nav class="tabs">
             <button class="tab active" data-tab="all">All</button>
-            <button class="tab" data-tab="pending">Pending</button>
+            <button class="tab" data-tab="pending">Pending <span class="tab-badge hidden" id="pending-tab-badge"></span></button>
             <button class="tab tab-cta" data-tab="add">Add Friend</button>
           </nav>
         </header>
@@ -558,7 +559,18 @@ export function buildUI() {
                     <input type="file" id="settings-photo-file" accept="image/*" style="display:none" />
                   </label>
                 </div>
-                <p class="hint" style="margin:4px 0 0;font-size:11px;">Upload will let you crop to a circle. URL input also works.</p>
+                <p class="hint" style="margin:4px 0 0;font-size:11px;">Upload or paste a URL — both work. Use Crop Position below to adjust framing.</p>
+              </div>
+              <div class="settings-field-group">
+                <label class="modal-label">Avatar Crop Position</label>
+                <div style="display:flex;gap:6px;flex-wrap:wrap;">
+                  <button class="text-size-btn avatar-pos-btn" data-pos="top center">Top</button>
+                  <button class="text-size-btn avatar-pos-btn" data-pos="center center">Center</button>
+                  <button class="text-size-btn avatar-pos-btn" data-pos="bottom center">Bottom</button>
+                  <button class="text-size-btn avatar-pos-btn" data-pos="left center">Left</button>
+                  <button class="text-size-btn avatar-pos-btn" data-pos="right center">Right</button>
+                </div>
+                <p class="hint" style="margin:4px 0 0;font-size:11px;">Choose which part of your photo is shown in the circle crop.</p>
               </div>
               <div class="settings-field-group">
                 <label class="modal-label">Username</label>
@@ -1015,27 +1027,59 @@ export function buildUI() {
 
   <!-- Full Profile Modal -->
   <div id="full-profile-modal" class="modal hidden">
-    <div class="modal-card full-profile-modal" role="dialog" aria-label="Full Profile" style="position:relative;overflow:hidden;max-height:92vh;overflow-y:auto;">
+    <div class="modal-card full-profile-modal" role="dialog" aria-label="Full Profile">
+      <!-- Close button overlaps the banner -->
+      <button class="profile-card-close" id="full-profile-close" aria-label="Close"
+        style="position:absolute;top:10px;right:10px;z-index:10;">
+        <svg viewBox="0 0 24 24" width="14" height="14"><path fill="currentColor" d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+      </button>
       <div class="full-profile-banner" id="fp-banner"></div>
       <div class="full-profile-body">
-        <div class="full-profile-avatar-row">
-          <div class="full-profile-avatar" id="fp-avatar"></div>
-          <span class="status-dot full-profile-status" id="fp-status-dot" data-status="offline" style="display:none"></span>
+        <!-- Avatar + name side by side, overlapping the banner -->
+        <div class="full-profile-header">
+          <div class="full-profile-avatar-wrap">
+            <div class="full-profile-avatar" id="fp-avatar"></div>
+            <span class="fp-status-dot" id="fp-status-dot" data-status="offline" style="display:none"></span>
+          </div>
+          <div class="full-profile-header-info">
+            <div class="full-profile-name-tag">
+              <span class="full-profile-name" id="fp-name"></span>
+              <span class="full-profile-tag" id="fp-tag"></span>
+            </div>
+            <div class="full-profile-status-label" id="fp-status-label" style="display:none"></div>
+            <div class="full-profile-custom-status" id="fp-custom-status" style="display:none"></div>
+          </div>
         </div>
-        <div class="full-profile-name" id="fp-name"></div>
-        <div class="full-profile-tag" id="fp-tag"></div>
-        <div class="full-profile-custom-status" id="fp-custom-status" style="display:none"></div>
         <div class="full-profile-badges" id="fp-badges"></div>
         <div class="full-profile-divider"></div>
         <div class="full-profile-section-label">About Me</div>
         <div class="full-profile-bio" id="fp-bio"></div>
         <div class="full-profile-since" id="fp-since"></div>
+        <!-- Notes — only shown for other people -->
+        <div id="fp-notes-section" style="display:none">
+          <div class="full-profile-divider"></div>
+          <div class="full-profile-section-label">Note <span style="font-weight:400;text-transform:none;letter-spacing:0;font-size:10px;color:var(--t-muted);">Private · only you can see this</span></div>
+          <textarea class="full-profile-notes" id="fp-notes" placeholder="Add a private note about this person…" maxlength="500"></textarea>
+        </div>
         <div class="full-profile-actions" id="fp-actions"></div>
       </div>
-      <button class="profile-card-close" id="full-profile-close" aria-label="Close" style="position:absolute;top:8px;right:8px;z-index:2;">
-        <svg viewBox="0 0 24 24" width="14" height="14"><path fill="currentColor" d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
-      </button>
     </div>
+  </div>
+
+  <!-- Update notification banner (bottom-right, server-pushed) -->
+  <div id="update-banner" class="update-banner hidden" role="status">
+    <div class="update-banner-icon">✨</div>
+    <div class="update-banner-content">
+      <div class="update-banner-title">Update Available</div>
+      <div class="update-banner-msg" id="update-banner-msg">Static Chat has been updated! Refresh for the latest features.</div>
+      <div class="update-banner-btns">
+        <button class="btn-primary" id="update-banner-refresh" style="font-size:12px;padding:5px 14px;">Refresh Now</button>
+        <button class="btn-ghost" id="update-banner-dismiss" style="font-size:12px;padding:5px 10px;">Later</button>
+      </div>
+    </div>
+    <button class="update-banner-dismiss icon-btn" id="update-banner-x" title="Dismiss" style="flex-shrink:0;color:var(--t-muted);">
+      <svg viewBox="0 0 24 24" width="14" height="14"><path fill="currentColor" d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+    </button>
   </div>
 
   <!-- Toast -->

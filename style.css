@@ -1331,37 +1331,110 @@ body.compact-mode .msg-head { gap: 4px; }
    FULL PROFILE MODAL
    ================================================= */
 .full-profile-modal {
-  max-width: 480px; width: 96vw; padding: 0; overflow: hidden;
+  max-width: 520px; width: 96vw; padding: 0;
+  max-height: 90vh; overflow-y: auto; overflow-x: hidden;
+  position: relative;
 }
 .full-profile-banner {
-  height: 100px;
+  height: 120px; flex-shrink: 0;
   background: linear-gradient(135deg,var(--c-input-2),var(--c-rail));
 }
-.full-profile-body { padding: 0 24px 24px; }
-.full-profile-avatar-row { display: flex; align-items: flex-end; gap: 12px; margin-top: -36px; margin-bottom: 12px; }
+.full-profile-body { padding: 0 28px 28px; }
+/* Header row: avatar-wrap + name block sit side-by-side, pulled up into the banner */
+.full-profile-header {
+  display: flex; align-items: flex-end; gap: 16px;
+  margin-top: -44px; margin-bottom: 14px;
+}
+.full-profile-avatar-wrap { position: relative; flex-shrink: 0; }
 .full-profile-avatar {
-  width: 72px; height: 72px; border-radius: 50%; border: 4px solid var(--c-surface);
+  width: 88px; height: 88px; border-radius: 50%;
+  border: 4px solid var(--c-sidebar);
   background: var(--c-accent); display: grid; place-items: center;
-  font-weight: 700; font-size: 26px; color: #fff; overflow: hidden; flex-shrink: 0;
+  font-weight: 700; font-size: 30px; color: #fff; overflow: hidden;
 }
 .full-profile-avatar img { width: 100%; height: 100%; object-fit: cover; border-radius: 50%; }
-.full-profile-status {
-  width: 16px; height: 16px; border-radius: 50%; border: 3px solid var(--c-surface);
-  margin-bottom: 8px;
+/* Status dot anchored to bottom-right of avatar */
+.fp-status-dot {
+  position: absolute; bottom: 4px; right: 4px;
+  width: 18px; height: 18px; border-radius: 50%;
+  border: 3px solid var(--c-sidebar);
+  pointer-events: none;
 }
-.full-profile-name-block { padding-top: 40px; }
-.full-profile-name { font-weight: 800; font-size: 22px; color: var(--t-primary); line-height: 1.1; }
-.full-profile-tag { font-size: 14px; color: var(--t-muted); margin-top: 2px; }
-.full-profile-custom-status { font-size: 13px; color: var(--t-secondary); margin-top: 4px; font-style: italic; }
-.full-profile-badges { display: flex; flex-wrap: wrap; gap: 4px; margin: 8px 0; }
-.full-profile-divider { height: 1px; background: var(--c-border-2); margin: 12px 0; }
+.fp-status-dot[data-status="online"]    { background: var(--c-online); }
+.fp-status-dot[data-status="idle"]      { background: var(--c-idle); }
+.fp-status-dot[data-status="dnd"]       { background: var(--c-dnd); }
+.fp-status-dot[data-status="invisible"],
+.fp-status-dot[data-status="offline"]   { background: var(--c-invisible); }
+/* Name block sits on the right, baseline-aligned with avatar bottom */
+.full-profile-header-info { padding-bottom: 6px; min-width: 0; flex: 1; }
+.full-profile-name-tag { display: flex; align-items: baseline; gap: 5px; flex-wrap: wrap; }
+.full-profile-name { font-weight: 800; font-size: 24px; color: var(--t-primary); line-height: 1.1; }
+.full-profile-tag  { font-size: 15px; color: var(--t-muted); }
+.full-profile-status-label {
+  font-size: 12px; font-weight: 700; margin-top: 4px; letter-spacing: 0.02em;
+}
+.full-profile-status-label.online    { color: var(--c-online); }
+.full-profile-status-label.idle      { color: var(--c-idle); }
+.full-profile-status-label.dnd       { color: var(--c-dnd); }
+.full-profile-status-label.offline,
+.full-profile-status-label.invisible { color: var(--t-muted); }
+.full-profile-custom-status { font-size: 13px; color: var(--t-secondary); margin-top: 3px; font-style: italic; }
+.full-profile-badges { display: flex; flex-wrap: wrap; gap: 4px; margin: 10px 0 4px; }
+.full-profile-divider { height: 1px; background: var(--c-border-2); margin: 14px 0; }
 .full-profile-section-label {
   font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em;
-  color: var(--t-muted); margin-bottom: 6px;
+  color: var(--t-muted); margin-bottom: 8px;
 }
-.full-profile-bio { font-size: 14px; color: var(--t-secondary); line-height: 1.5; word-break: break-word; }
-.full-profile-since { font-size: 12px; color: var(--t-muted); margin-top: 4px; }
-.full-profile-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 16px; }
+.full-profile-bio { font-size: 15px; color: var(--t-secondary); line-height: 1.6; word-break: break-word; }
+.full-profile-since { font-size: 13px; color: var(--t-muted); margin-top: 6px; }
+.full-profile-notes {
+  width: 100%; min-height: 64px; max-height: 110px; resize: vertical;
+  background: var(--c-input-2); border: 1px solid var(--c-border-2);
+  border-radius: var(--radius-sm); color: var(--t-primary); font-size: 13px;
+  padding: 8px 10px; box-sizing: border-box; outline: none; font-family: inherit;
+  line-height: 1.5;
+}
+.full-profile-notes:focus { border-color: var(--c-accent); }
+.full-profile-notes::placeholder { color: var(--t-muted); }
+.full-profile-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 16px; align-items: center; }
+
+/* =================================================
+   UPDATE NOTIFICATION BANNER
+   ================================================= */
+.update-banner {
+  position: fixed; bottom: 20px; right: 20px; z-index: 450;
+  max-width: 340px; background: var(--c-overlay);
+  border: 1px solid var(--c-accent); border-radius: var(--radius-lg);
+  padding: 12px 14px; box-shadow: var(--shadow-2);
+  display: flex; align-items: flex-start; gap: 10px;
+  animation: card-pop .2s ease;
+}
+.update-banner-icon { font-size: 20px; line-height: 1; flex-shrink: 0; margin-top: 2px; }
+.update-banner-content { flex: 1; min-width: 0; }
+.update-banner-title { font-weight: 700; font-size: 13px; color: var(--t-primary); margin-bottom: 3px; }
+.update-banner-msg { font-size: 12px; color: var(--t-secondary); line-height: 1.4; margin-bottom: 10px; }
+.update-banner-btns { display: flex; gap: 6px; align-items: center; }
+.update-banner-dismiss { flex-shrink: 0; align-self: flex-start; color: var(--t-muted); }
+.update-banner-dismiss:hover { color: var(--t-primary); }
+
+/* =================================================
+   FRIEND REQUEST BADGE
+   ================================================= */
+.side-btn { position: relative; }
+.side-btn-badge {
+  position: absolute; top: 5px; right: 6px;
+  background: var(--c-danger); color: #fff;
+  border-radius: var(--radius-pill); font-size: 10px; font-weight: 700;
+  padding: 1px 5px; line-height: 1.4; pointer-events: none;
+  min-width: 16px; text-align: center;
+}
+.tab-badge {
+  display: inline-flex; align-items: center; justify-content: center;
+  background: var(--c-danger); color: #fff;
+  border-radius: var(--radius-pill); font-size: 10px; font-weight: 700;
+  padding: 1px 5px; line-height: 1.4; margin-left: 5px;
+  min-width: 16px; vertical-align: middle;
+}
 
 /* =================================================
    TOAST
@@ -1379,7 +1452,7 @@ body.compact-mode .msg-head { gap: 4px; }
 }
 
 /* =================================================
-   RESPONSIVE
+   RESPONSIVE / MOBILE
    ================================================= */
 @media (max-width: 1100px) { :root { --sidebar-w: 220px; } }
 @media (max-width: 768px) {
@@ -1393,16 +1466,51 @@ body.compact-mode .msg-head { gap: 4px; }
   .friends-body { padding: 12px; }
   .tabs .tab { padding: 4px 8px; font-size: 13px; }
   .emoji-picker { right: 8px; left: 8px; width: auto; }
-  .profile-card { right: 8px !important; left: 8px !important; width: auto !important; }
+  .gif-picker { right: 8px; left: 8px; width: auto; max-width: none; }
+  .profile-card { right: 8px !important; left: 8px !important; width: auto !important; top: auto !important; bottom: 8px !important; }
+  .update-banner { left: 8px; right: 8px; max-width: none; bottom: 12px; }
+  /* Prevent iOS zoom on input focus — min 16px avoids auto-zoom */
+  .composer-input { font-size: max(16px, var(--msg-font-size)); }
+  input[type="text"], input[type="email"], textarea, select { font-size: 16px; }
+  /* Larger tap targets on mobile */
+  .action-circle { width: 36px; height: 36px; }
+  .msg-action-btn { width: 32px; height: 32px; }
+  /* Always show message actions on touch (no hover) */
+  .msg-actions { opacity: 1 !important; pointer-events: auto !important; position: static !important;
+    display: flex !important; box-shadow: none !important; border: none !important;
+    background: none !important; padding: 0 !important; margin-top: 4px; }
+  .msg-followup .msg-actions { margin-left: 0; }
+  /* Composer adjustments */
+  .composer { padding: 0 6px 10px; padding-bottom: calc(10px + env(safe-area-inset-bottom)); }
+  .composer-inner { gap: 4px; }
+  /* Header search hidden on mobile to save space */
+  .header-search-wrap { display: none; }
+  .header-divider { display: none; }
+  /* Full profile modal full-width on mobile */
+  .full-profile-modal { max-width: 100%; width: 100%; border-radius: var(--radius-lg) var(--radius-lg) 0 0; }
+  #full-profile-modal .modal-card { align-self: flex-end; margin-top: auto; }
 }
 @media (max-width: 480px) {
-  :root { --rail-w: 56px; }
-  .rail-btn, .rail-group-avatar { width: 40px; height: 40px; border-radius: 20px; }
+  :root { --rail-w: 52px; }
+  .rail-btn, .rail-group-avatar { width: 38px; height: 38px; border-radius: 19px; }
   .rail-btn.active::before, .rail-group-avatar.active::before { left: -10px; }
-  .main-header { padding: 0 10px; }
-  .composer { padding: 0 8px 14px; }
-  .message-group { padding: 4px 10px; }
-  .msg-followup { padding-left: 64px; padding-right: 10px; }
+  .main-header { padding: 0 8px; }
+  .composer { padding: 0 6px 12px; padding-bottom: calc(12px + env(safe-area-inset-bottom)); }
+  .message-group { padding: 4px 8px; gap: 10px; }
+  .msg-followup { padding-left: 58px; padding-right: 8px; }
+  .msg-avatar, .msg-avatar-fallback { width: 34px; height: 34px; }
+  .msg-avatar-fallback { font-size: 13px; }
+  /* Tabs scroll on small screens */
+  .tabs { overflow-x: auto; -webkit-overflow-scrolling: touch; flex-wrap: nowrap; }
+  .tabs::-webkit-scrollbar { display: none; }
+  /* Sender info on message actions */
+  .composer-input { min-height: 40px; }
+  /* Emoji/GIF buttons */
+  .composer-gif-btn, .composer-emoji-btn { width: 32px !important; height: 32px; }
+}
+/* iOS safe-area for devices with home bar */
+@supports (padding-bottom: env(safe-area-inset-bottom)) {
+  .composer { padding-bottom: calc(10px + env(safe-area-inset-bottom)); }
 }
 
 /* =================================================
