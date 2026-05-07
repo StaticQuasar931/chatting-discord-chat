@@ -3104,45 +3104,61 @@ function renderMessages() {
     });
   }
 
+  // ── Pin to bottom — robust against late image/embed loads ──
+  // 1. Direct scrollTop set (covers the immediate case)
+  // 2. Multiple delayed retries (covers most image loads finishing within 600ms)
+  // 3. ResizeObserver watches #messages — if its height changes within 2s of pinning,
+  //    we re-pin automatically (covers very slow image loads)
+  const pinToBottom = () => {
+    if (!wrap) return;
+    wrap.scrollTop = wrap.scrollHeight + 9999; // browser clamps to max scroll
+  };
+  // Set up a one-time ResizeObserver on #messages that re-pins while sticky
+  if (!wrap._sc_stickyObs && typeof ResizeObserver !== "undefined") {
+    wrap._sc_stickyObs = new ResizeObserver(() => {
+      if (state._stickyUntil && Date.now() < state._stickyUntil) pinToBottom();
+    });
+    wrap._sc_stickyObs.observe(wrap);
+    // Also observe every direct child so adding/removing messages triggers repin
+    const childObs = new MutationObserver(muts => {
+      muts.forEach(m => {
+        m.addedNodes.forEach(n => { if (n.nodeType === 1) wrap._sc_stickyObs.observe(n); });
+      });
+    });
+    childObs.observe(wrap, { childList: true });
+    wrap._sc_childObs = childObs;
+  }
+  const pinToBottomRepeated = () => {
+    state._stickyUntil = Date.now() + 2000; // sticky window: ResizeObserver re-pins for 2s
+    pinToBottom();
+    requestAnimationFrame(pinToBottom);
+    setTimeout(pinToBottom, 50);
+    setTimeout(pinToBottom, 150);
+    setTimeout(pinToBottom, 400);
+    setTimeout(pinToBottom, 900);
+    // After this, ResizeObserver still re-pins on any layout shift up to 2s
+    // Re-observe every child currently in the wrap so the resize observer
+    // fires when any of them grow (image loads, etc.)
+    if (wrap._sc_stickyObs) {
+      Array.from(wrap.children).forEach(c => wrap._sc_stickyObs.observe(c));
+    }
+  };
+
   const cid=state.activeChatId;
   const alreadyScrolled=state.chatScrolledInitial.has(cid);
   if (!alreadyScrolled) {
     state.chatScrolledInitial.add(cid);
-    // First render: scroll to unread divider if present, otherwise scroll to bottom
-    if (unreadDividerInserted) {
-      const divider=wrap.querySelector(".unread-divider");
-      if (divider) { divider.scrollIntoView({block:"start"}); wrap.scrollTop-=12; }
-    } else {
-      wrap.scrollTop=wrap.scrollHeight;
-    }
+    // First render — always pin to bottom (newest message visible).
+    // Unread divider still renders inside the message list; user scrolls up to see it.
+    pinToBottomRepeated();
   } else {
     const autoScroll = state.autoScrollNew !== false; // default ON
     if (sentByMe) {
-      // User just sent a message — pin to bottom. Problem: at this exact moment,
-      // images/embeds in the just-rendered HTML haven't finished loading, so
-      // wrap.scrollHeight is SMALLER than it'll be in a few hundred ms. If we
-      // only scroll once, we end up "stuck in the middle" once images load and
-      // push the bottom further down. Solution: re-pin to bottom on the next
-      // animation frame and again after a short delay to catch late layout.
-      const stickToBottom = () => {
-        const last = wrap.lastElementChild;
-        if (last && last.scrollIntoView) {
-          last.scrollIntoView({ block: "end", behavior: "auto" });
-        } else {
-          wrap.scrollTop = wrap.scrollHeight;
-        }
-      };
-      stickToBottom();                          // immediate
-      requestAnimationFrame(stickToBottom);     // after layout
-      setTimeout(stickToBottom, 120);           // after most images load
-      setTimeout(stickToBottom, 350);           // safety for slow loads
+      pinToBottomRepeated();
     } else if (autoScroll && wasAtBottom && hadNewMessages) {
-      // NEW incoming message and user was near the bottom — smooth-scroll down
-      try { wrap.scrollTo({ top: wrap.scrollHeight, behavior: "smooth" }); }
-      catch(_) { wrap.scrollTop = wrap.scrollHeight; }
+      pinToBottomRepeated();
     } else {
-      // No new messages OR user was scrolled up — preserve exact scroll position.
-      // Adjust for any height change (new content / images / link previews).
+      // No new messages OR user scrolled up — preserve exact position.
       wrap.scrollTop = prevScrollTop + (wrap.scrollHeight - prevScrollHeight);
     }
   }
@@ -7654,7 +7670,15 @@ function updateJumpBtn() {
   const wrap=$("#messages");
   const btn=$("#jump-latest");
   if (!wrap||!btn) return;
-  wrap.addEventListener("scroll", updateJumpBtn, {passive:true});
+  wrap.addEventListener("scroll", () => {
+    updateJumpBtn();
+    // If the user has scrolled more than 200px away from the bottom,
+    // cancel the "sticky" window so the ResizeObserver stops pulling them back.
+    if (state._stickyUntil &&
+        wrap.scrollHeight - wrap.scrollTop - wrap.clientHeight > 200) {
+      state._stickyUntil = 0;
+    }
+  }, {passive:true});
   btn.addEventListener("click", ()=>{
     wrap.scrollTo({top:wrap.scrollHeight, behavior:"smooth"});
   });
