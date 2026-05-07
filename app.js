@@ -401,10 +401,14 @@ const state = {
   lastReadMarker: {},    // chatId → timestamp ms (from localStorage on open)
   messageCache: {},      // chatId → messages array (keeps messages loaded between clicks)
   unreadCounts: {},      // chatId → number of unread messages since last open
+  sidebarTyping: {},     // chatId → array of typing names (for live "typing…" in sidebar)
+  sidebarTypingUnsubs: {}, // chatId → onSnapshot unsubscribe
   chatScrolledInitial: new Set(), // chatIds that have had their initial scroll done
   silentTyping:      localStorage.getItem("sc_silent_typing") === "true",
   showLastActive:    localStorage.getItem("sc_show_last_active") === "true",
   pfpAnimate:        localStorage.getItem("sc_pfp_animate") || "always", // "always"|"messages-only"|"never"
+  anonInSchoolChat:  localStorage.getItem("sc_anon_school") === "true",
+  snoozedUsers:      new Set(JSON.parse(localStorage.getItem("sc_snoozed_users")||"[]")),
   autoSendGif:       localStorage.getItem("sc_autosend_gif") === "true",
   dblClickReact:     localStorage.getItem("sc_dblclick_react") === "true",
   dblClickEmoji:     localStorage.getItem("sc_dblclick_emoji") || "👍",
@@ -1425,6 +1429,8 @@ function cleanupAllSubscriptions() {
   state.chats=[]; state.messages=[];
   state.activeChatId=null; state.activeChat=null;
   state.messageCache={}; state.unreadCounts={};
+  for (const fn of Object.values(state.sidebarTypingUnsubs)) { try { fn(); } catch(_){} }
+  state.sidebarTypingUnsubs={}; state.sidebarTyping={};
   state.chatInitialized.clear(); state.incomingInitialized=false;
 }
 
@@ -1556,6 +1562,7 @@ function bootSubscriptions() {
         return bt-at;
       });
       state.chats=arr; renderChatLists();
+      _updateSidebarTypingListeners();
       if (state.activeChatId) {
         const updated=state.chats.find(c=>c.id===state.activeChatId);
         if (updated) { state.activeChat=updated; renderChatHeader(); }
@@ -1926,6 +1933,96 @@ function chatUnreadCount(c) {
 }
 function chatHasUnread(c) { return chatUnreadCount(c)>0; }
 
+/* ---------- Snooze users (local UI hide, not Firestore block) ---------- */
+function _saveSnoozed() {
+  localStorage.setItem("sc_snoozed_users", JSON.stringify([...state.snoozedUsers]));
+}
+function isUserSnoozed(uid) { return state.snoozedUsers.has(uid); }
+function toggleSnoozeUser(uid) {
+  if (!uid) return;
+  if (state.snoozedUsers.has(uid)) state.snoozedUsers.delete(uid);
+  else state.snoozedUsers.add(uid);
+  _saveSnoozed();
+  renderMessages?.();
+  showToast(state.snoozedUsers.has(uid) ? "😴 User snoozed (their messages will be hidden)" : "User unsnoozed");
+}
+
+/* ---------- Pinned chats ---------- */
+function _getPinnedChats() {
+  try { return new Set(JSON.parse(localStorage.getItem("sc_pinned_chats")||"[]")); }
+  catch(_){ return new Set(); }
+}
+function _isChatPinned(id) { return _getPinnedChats().has(id); }
+function _togglePinChat(id) {
+  const set = _getPinnedChats();
+  if (set.has(id)) set.delete(id); else set.add(id);
+  localStorage.setItem("sc_pinned_chats", JSON.stringify([...set]));
+  renderChatLists();
+  showToast(set.has(id) ? "📌 Pinned" : "Unpinned");
+}
+
+/* ---------- Folders ---------- */
+function _getFolders() {
+  try { return JSON.parse(localStorage.getItem("sc_chat_folders")||"{}"); }
+  catch(_){ return {}; }
+}
+function _saveFolders(f) { localStorage.setItem("sc_chat_folders", JSON.stringify(f)); }
+function _chatFolder(chatId) {
+  const f = _getFolders();
+  for (const [name, ids] of Object.entries(f)) if (ids.includes(chatId)) return name;
+  return null;
+}
+function _moveChatToFolder(chatId, folderName) {
+  const f = _getFolders();
+  for (const name of Object.keys(f)) {
+    f[name] = f[name].filter(id => id !== chatId);
+    if (!f[name].length) delete f[name];
+  }
+  if (folderName) {
+    if (!f[folderName]) f[folderName] = [];
+    f[folderName].push(chatId);
+  }
+  _saveFolders(f);
+  renderChatLists();
+}
+
+function _showFolderPicker(chatId, x, y) {
+  document.getElementById("folder-picker")?.remove();
+  const folders = Object.keys(_getFolders());
+  const cur = _chatFolder(chatId);
+  const pop = document.createElement("div");
+  pop.id = "folder-picker";
+  pop.className = "ic-color-popover";
+  pop.style.cssText = `position:fixed;left:${Math.min(window.innerWidth-260, x)}px;top:${Math.min(window.innerHeight-200, y)}px;width:240px;`;
+  pop.innerHTML = `
+    <div style="font-size:11px;color:var(--t-muted);font-weight:700;margin-bottom:6px;text-transform:uppercase;">Move to folder</div>
+    <div style="display:flex;flex-direction:column;gap:2px;max-height:240px;overflow-y:auto;">
+      ${folders.map(f=>`<button class="folder-pick-row ${f===cur?"active":""}" data-folder="${escapeHtml(f)}">📁 ${escapeHtml(f)}${f===cur?" ✓":""}</button>`).join("")}
+      ${cur ? `<button class="folder-pick-row" data-folder=""><span style="color:var(--t-muted);">⊘ Remove from folder</span></button>` : ""}
+    </div>
+    <div style="display:flex;gap:6px;margin-top:8px;padding-top:8px;border-top:1px solid var(--c-border-2);">
+      <input type="text" class="ic-color-hex" id="folder-new-name" placeholder="New folder…" maxlength="24" />
+      <button class="btn-secondary" id="folder-create-btn" style="font-size:12px;">Create</button>
+    </div>
+  `;
+  document.body.appendChild(pop);
+  pop.addEventListener("click", e => {
+    const row = e.target.closest("[data-folder]");
+    if (row) { _moveChatToFolder(chatId, row.dataset.folder); pop.remove(); return; }
+    if (e.target.id === "folder-create-btn") {
+      const name = $("#folder-new-name").value.trim();
+      if (!name) { showToast("Enter a folder name"); return; }
+      _moveChatToFolder(chatId, name); pop.remove();
+    }
+  });
+  $("#folder-new-name")?.addEventListener("keydown", e => {
+    if (e.key === "Enter") $("#folder-create-btn")?.click();
+  });
+  setTimeout(() => document.addEventListener("click", function _close(e2) {
+    if (!pop.contains(e2.target)) { pop.remove(); document.removeEventListener("click", _close); }
+  }), 0);
+}
+
 function renderChatLists() {
   const filterText=state.filters.sidebar.toLowerCase();
   // Filter out fully-muted chats unless searching
@@ -1933,9 +2030,22 @@ function renderChatLists() {
     if (filterText) return true; // search overrides hide
     return chatMuteLevel(c.id) !== "all";
   });
+  const pinned = _getPinnedChats();
+  // Sort: pinned first
+  visibleChats.sort((a,b) => {
+    const ap = pinned.has(a.id) ? 0 : 1;
+    const bp = pinned.has(b.id) ? 0 : 1;
+    if (ap !== bp) return ap - bp;
+    const at = a.lastMessageAt?.toMillis?.() || 0;
+    const bt = b.lastMessageAt?.toMillis?.() || 0;
+    return bt - at;
+  });
   const dms=visibleChats.filter(c=>c.type==="dm");
   // School chats are kept separate — they appear under the rail school button, not in regular groups
   const groups=visibleChats.filter(c=>c.type==="group" && !c.schoolDomain);
+  // Folders: split groups by folder for rendering
+  const folders = _getFolders();
+  const collapsed = new Set(JSON.parse(localStorage.getItem("sc_folders_collapsed")||"[]"));
 
   // Helper: does a chat have any cached message matching the filter?
   const _msgMatches = (cId) => {
@@ -1963,18 +2073,22 @@ function renderChatLists() {
       ${avatarMarkup(name,photo,"side-row-avatar","side-row-fallback")}
       <span class="side-status-dot" data-status="${escapeHtml(onlineStatus)}"></span>
     </div>`;
+    const pinDot = pinned.has(c.id) ? `<span class="side-row-pin-dot" title="Pinned">📌</span>` : "";
+    const typingHere = state.sidebarTyping[c.id]?.length;
+    const typingHint = typingHere ? `<span class="side-row-typing" title="${escapeHtml(state.sidebarTyping[c.id].join(", "))} typing"><span></span><span></span><span></span></span>` : "";
     return `
       <div class="side-row ${active} ${muteLevel?"muted-row":""}" data-chat-id="${escapeHtml(c.id)}" data-type="dm">
         ${dmAvatar}
         <div class="side-row-name">${escapeHtml(name)}</div>
-        ${matchHint}${mutedDot}${unread}
+        ${typingHint}${pinDot}${matchHint}${mutedDot}${unread}
         <button class="icon-btn side-row-close" title="Close" data-action="close-dm" data-chat-id="${escapeHtml(c.id)}">
           <svg viewBox="0 0 24 24" width="14" height="14"><path fill="currentColor" d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
         </button>
       </div>`;
   }).join("");
 
-  $("#group-list").innerHTML=groups.map(c=>{
+  // Separate folder-grouped vs unfolderd
+  const renderRow = (c) => {
     const name=c.name||"Group";
     const lastMsgMatches = (c.lastMessage||"").toLowerCase().includes(filterText||"");
     const cacheMatches = _msgMatches(c.id);
@@ -1989,13 +2103,35 @@ function renderChatLists() {
     const groupAvatar = c.photoURL
       ? `<img class="side-row-avatar" src="${escapeHtml(c.photoURL)}" alt="" />`
       : `<div class="side-row-fallback">${escapeHtml(groupInitials(name))}</div>`;
+    const pinDot = pinned.has(c.id) ? `<span class="side-row-pin-dot" title="Pinned">📌</span>` : "";
+    const typingHere = state.sidebarTyping[c.id]?.length;
+    const typingHint = typingHere ? `<span class="side-row-typing" title="${escapeHtml(state.sidebarTyping[c.id].join(", "))} typing"><span></span><span></span><span></span></span>` : "";
     return `
       <div class="side-row ${active} ${muteLevel?"muted-row":""}" data-chat-id="${escapeHtml(c.id)}" data-type="group">
         ${groupAvatar}
         <div class="side-row-name">${escapeHtml(name)}</div>
-        ${matchHint}${mutedDot}${unread}
+        ${typingHint}${pinDot}${matchHint}${mutedDot}${unread}
+      </div>`;
+  };
+  // Folder sections first
+  const foldersHtml = Object.keys(folders).map(fname => {
+    const ids = folders[fname] || [];
+    const inFolder = groups.filter(c => ids.includes(c.id));
+    if (!inFolder.length) return "";
+    const isOpen = !collapsed.has(fname);
+    return `
+      <div class="folder-section">
+        <div class="folder-header" data-folder-toggle="${escapeHtml(fname)}">
+          <span class="folder-arrow">${isOpen?"▾":"▸"}</span>
+          <span class="folder-name">📁 ${escapeHtml(fname)}</span>
+          <span class="folder-count">${inFolder.length}</span>
+        </div>
+        ${isOpen ? `<div class="folder-rows">${inFolder.map(renderRow).join("")}</div>` : ""}
       </div>`;
   }).join("");
+  // Unfoldered groups list
+  const unfolderedGroups = groups.filter(c => !_chatFolder(c.id));
+  $("#group-list").innerHTML = foldersHtml + unfolderedGroups.map(renderRow).join("");
 
   $("#rail-groups").innerHTML=groups.map(c=>{
     const active=state.activeChatId===c.id?"active":"";
@@ -2024,6 +2160,8 @@ $("#dm-list").addEventListener("contextmenu", e=>{
     {label:"Open",         action:"ctx-open-dm",      data:{chatId}},
     {label:"View Profile", action:"ctx-view-profile",  data:{uid:otherUid||""}},
     "divider",
+    {label: _isChatPinned(chatId)?"📌 Unpin chat":"📌 Pin chat", action:"ctx-pin-chat", data:{chatId}},
+    {label:"📁 Move to folder…", action:"ctx-move-folder", data:{chatId}},
     {label:"🎨 Set chat color", action:"ctx-set-color", data:{chatId}},
     {label: muted?"🔔 Unmute Notifications":"🔕 Mute Notifications",
      action:"ctx-mute-dm", data:{chatId}},
@@ -2032,7 +2170,19 @@ $("#dm-list").addEventListener("contextmenu", e=>{
   ];
   showCtxMenu(e.clientX, e.clientY, items);
 });
-$("#group-list").addEventListener("click", e=>{ const row=e.target.closest(".side-row"); if(row) openChat(row.dataset.chatId); });
+$("#group-list").addEventListener("click", e=>{
+  // Folder header toggle
+  const fh = e.target.closest("[data-folder-toggle]");
+  if (fh) {
+    const fname = fh.dataset.folderToggle;
+    const collapsed = new Set(JSON.parse(localStorage.getItem("sc_folders_collapsed")||"[]"));
+    if (collapsed.has(fname)) collapsed.delete(fname); else collapsed.add(fname);
+    localStorage.setItem("sc_folders_collapsed", JSON.stringify([...collapsed]));
+    renderChatLists();
+    return;
+  }
+  const row=e.target.closest(".side-row"); if(row) openChat(row.dataset.chatId);
+});
 $("#rail-groups").addEventListener("click", e=>{ const av=e.target.closest(".rail-group-avatar"); if(av) openChat(av.dataset.chatId); });
 
 // Right-click on a group row → quick actions
@@ -2043,6 +2193,8 @@ function _showGroupCtxMenu(e, chatId) {
     {label:"Open",                action:"ctx-open-dm",       data:{chatId}},
     {label:"Group Info & Settings", action:"ctx-group-info",  data:{chatId}},
     "divider",
+    {label: _isChatPinned(chatId)?"📌 Unpin chat":"📌 Pin chat", action:"ctx-pin-chat", data:{chatId}},
+    {label:"📁 Move to folder…", action:"ctx-move-folder", data:{chatId}},
     {label:"Add Members",         action:"ctx-add-members",   data:{chatId}},
     {label:"Copy Invite Code",    action:"ctx-copy-invite",   data:{chatId}},
     {label:"🎨 Set chat color",   action:"ctx-set-color",     data:{chatId}},
@@ -2221,6 +2373,7 @@ async function renderChatHeader() {
   const c=state.activeChat; if (!c) return;
   const avatarWrap=$("#chat-header-avatar-wrap");
   const addBtn=$("#chat-add-member-btn"), leaveBtn=$("#chat-leave-btn"), gearBtn=$("#chat-group-info-btn");
+  const anonBtn=$("#chat-anon-toggle-btn");
   const codeBadge=$("#chat-join-code-badge");
   // Refresh pinned panel if it's open
   if (!$("#pins-panel")?.classList.contains("hidden")) renderPinsPanel();
@@ -2242,6 +2395,7 @@ async function renderChatHeader() {
     avatarWrap.dataset.profileUid=otherUid||"";
     if(addBtn) addBtn.hidden=true; if(leaveBtn) leaveBtn.hidden=true;
     if(gearBtn) gearBtn.hidden=true;
+    if(anonBtn) anonBtn.hidden=true;
     if(codeBadge) codeBadge.hidden=true;
     const si=$("#chat-search-input"); if(si) si.placeholder=`Search ${name}`;
   } else {
@@ -2278,6 +2432,14 @@ async function renderChatHeader() {
     delete avatarWrap.dataset.profileUid;
     if(addBtn) addBtn.hidden=false; if(leaveBtn) leaveBtn.hidden=false;
     if(gearBtn) gearBtn.hidden=false;
+    // Anon toggle visible only in school chats
+    if (anonBtn) {
+      anonBtn.hidden = !c.schoolDomain;
+      anonBtn.classList.toggle("active", !!state.anonInSchoolChat);
+      anonBtn.title = state.anonInSchoolChat
+        ? "Anonymous mode ON — your messages hide your identity"
+        : "Anonymous mode OFF — click to send messages anonymously";
+    }
     if (codeBadge) {
       if (c.joinCode) { codeBadge.textContent=c.joinCode; codeBadge.hidden=false; codeBadge.title="Click to copy join code"; }
       else codeBadge.hidden=true;
@@ -2556,6 +2718,8 @@ function renderMessages() {
   for (const m of state.messages) {
     // Hide messages from blocked users (except own)
     if (state.blockedUsers.has(m.senderUid)&&m.senderUid!==state.user?.uid) continue;
+    // Hide messages from snoozed users (local-only UI hide)
+    if (state.snoozedUsers.has(m.senderUid)&&m.senderUid!==state.user?.uid) continue;
 
     const ts=m.createdAt;
     const tms=ts?.toMillis?ts.toMillis():0;
@@ -2602,6 +2766,53 @@ function renderMessages() {
       continue;
     }
 
+    // Poll message
+    if (m.type==="poll" && m.pollData) {
+      const pd = m.pollData || {};
+      const opts = pd.options || [];
+      const votes = pd.votes || {};
+      const myVote = votes[state.user?.uid];
+      const counts = opts.map((_, i) => Object.values(votes).filter(v => v === i).length);
+      const total = counts.reduce((a, b) => a + b, 0);
+      const ended = pd.endsAt && Date.now() > pd.endsAt;
+      const remainMs = pd.endsAt ? Math.max(0, pd.endsAt - Date.now()) : 0;
+      const remainText = ended ? "Ended" : (remainMs < 60000 ? "ending soon"
+        : remainMs < 3600000 ? `${Math.ceil(remainMs/60000)}m left`
+        : remainMs < 86400000 ? `${Math.ceil(remainMs/3600000)}h left`
+        : `${Math.ceil(remainMs/86400000)}d left`);
+      const optsHtml = opts.map((opt, i) => {
+        const c = counts[i];
+        const pct = total ? Math.round((c / total) * 100) : 0;
+        const selected = myVote === i;
+        return `<button class="poll-option ${selected?'selected':''}" data-poll-vote="${i}" data-msg-id="${escapeHtml(m.id)}" ${ended?'disabled':''}>
+          <span class="poll-option-bar" style="width:${pct}%"></span>
+          <span class="poll-option-text">${selected?'✓ ':''}${escapeHtml(opt)}</span>
+          <span class="poll-option-count">${c} · ${pct}%</span>
+        </button>`;
+      }).join("");
+      html.push(`<div class="message-group msg-poll" data-msg-id="${escapeHtml(m.id)}" title="${tsTitle}">
+        <div class="msg-avatar-btn" data-profile-uid="${escapeHtml(m.senderUid)}" role="button" tabindex="0">
+          ${avatarMarkup(m.senderName,m.senderPhoto,"msg-avatar","msg-avatar-fallback","message")}
+        </div>
+        <div class="msg-content">
+          <div class="msg-head">
+            <span class="msg-author" data-profile-uid="${escapeHtml(m.senderUid)}">${escapeHtml(m.senderName||"User")}</span>
+            <span class="msg-time">${escapeHtml(formatTime(ts))}</span>
+          </div>
+          <div class="poll-card">
+            <div class="poll-question">📊 ${escapeHtml(pd.question||"Poll")}</div>
+            <div class="poll-options">${optsHtml}</div>
+            <div class="poll-meta">
+              <span>${total} vote${total===1?"":"s"}</span>
+              <span class="poll-time ${ended?'ended':''}">${remainText}</span>
+            </div>
+          </div>
+        </div>
+      </div>`);
+      lastSenderUid = m.senderUid; lastTime = tms;
+      continue;
+    }
+
     const isCommand=!!(m.commandResult||m.type==="command");
     const extraClass=isCommand?" msg-command-result":"";
 
@@ -2615,14 +2826,18 @@ function renderMessages() {
           ${msgActions}
         </div>`);
     } else {
+      // Anonymous messages: don't link to real profile
+      const profileUidAttr = m.anonymous ? "" : `data-profile-uid="${escapeHtml(m.senderUid)}"`;
       html.push(`
-        <div class="message-group${extraClass}" data-msg-id="${escapeHtml(m.id)}" title="${tsTitle}">
-          <div class="msg-avatar-btn" data-profile-uid="${escapeHtml(m.senderUid)}" role="button" tabindex="0">
-            ${avatarMarkup(m.senderName,m.senderPhoto,"msg-avatar","msg-avatar-fallback","message")}
+        <div class="message-group${extraClass}${m.anonymous?' msg-anonymous':''}" data-msg-id="${escapeHtml(m.id)}" title="${tsTitle}">
+          <div class="msg-avatar-btn" ${profileUidAttr} ${m.anonymous?'':'role="button" tabindex="0"'}>
+            ${m.anonymous
+              ? `<div class="msg-avatar-fallback" style="background:#475569;">?</div>`
+              : avatarMarkup(m.senderName,m.senderPhoto,"msg-avatar","msg-avatar-fallback","message")}
           </div>
           <div class="msg-content">
             <div class="msg-head">
-              <span class="msg-author" data-profile-uid="${escapeHtml(m.senderUid)}">${escapeHtml(m.senderName||"User")}</span>
+              <span class="msg-author" ${profileUidAttr}>${escapeHtml(m.senderName||"User")}</span>
               ${isLeader?`<span class="leader-badge" title="Group leader"><svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path fill="currentColor" d="M5 16L3 5l5.5 5L12 4l3.5 6L21 5l-2 11H5zm14 3c0 .6-.4 1-1 1H6c-.6 0-1-.4-1-1v-1h14v1z"/></svg></span>`:""}
               <span class="msg-time">${escapeHtml(formatTime(ts))}</span>
             </div>
@@ -2935,9 +3150,22 @@ async function sendCurrentMessage() {
 
   if (text.length>2000) { showToast("Message too long (2000 char max)"); return; }
 
+  // Anonymous mode for school chats: replace name/photo per-message with a
+  // fresh random ID. The real senderUid is still stored for moderation/admin.
+  const isSchoolChat = state.activeChat?.schoolDomain;
+  const useAnon = isSchoolChat && state.anonInSchoolChat;
+  let anonName = null, anonId = null;
+  if (useAnon) {
+    anonId = "anon_" + Math.random().toString(36).slice(2, 10);
+    anonName = "Anonymous Student #" + anonId.slice(5, 11);
+  }
   const baseMsg = {
-    senderUid:state.user.uid, senderName:state.user.displayName,
-    senderPhoto:state.user.photoURL||null, createdAt:serverTimestamp(),
+    senderUid: state.user.uid,                 // real uid (admin sees this)
+    senderName: useAnon ? anonName : state.user.displayName,
+    senderPhoto: useAnon ? null : (state.user.photoURL||null),
+    anonymous: useAnon || false,
+    anonMsgId: useAnon ? anonId : null,        // unique-per-message anonymous ID
+    createdAt: serverTimestamp(),
     type:"text", edited:false, editedAt:null, reactions:{},
     replyToMessageId:state.replyTo?.id||null,
     replyToSenderName:state.replyTo?.senderName||null,
@@ -2946,6 +3174,45 @@ async function sendCurrentMessage() {
     xpValue:1, activityType:"message", rewardFlags:[],
     ...(silent ? {silent:true} : {})
   };
+
+  // /poll Question? | Opt A | Opt B [| Opt C ...] [duration:1h|30m|1d]
+  if (/^\/poll\s+/i.test(text)) {
+    const body = text.replace(/^\/poll\s+/i, "");
+    // Optional trailing duration:Xh/Xm/Xd (default 24h)
+    let durMs = 24 * 60 * 60 * 1000;
+    const durMatch = body.match(/\bduration:(\d+)([smhd])\b/i);
+    let pollBody = body;
+    if (durMatch) {
+      const n = parseInt(durMatch[1], 10);
+      const unit = durMatch[2].toLowerCase();
+      const mul = { s: 1000, m: 60000, h: 3600000, d: 86400000 }[unit] || 3600000;
+      durMs = Math.max(60000, Math.min(7 * 86400000, n * mul));
+      pollBody = body.replace(durMatch[0], "").trim();
+    }
+    const parts = pollBody.split("|").map(s => s.trim()).filter(Boolean);
+    if (parts.length < 3) {
+      showToast("Format: /poll Question? | Opt A | Opt B [| Opt C…]");
+      return;
+    }
+    const question = parts[0];
+    const options = parts.slice(1, 11); // max 10
+    composer.value = ""; composer.style.height = "auto"; updateSendBtn(); clearReplyTo();
+    const chatId = state.activeChatId;
+    try {
+      await addDoc(collection(db, "chats", chatId, "messages"), {
+        ...baseMsg, type: "poll", text: question,
+        pollData: {
+          question, options, votes: {},
+          durationMs: durMs, endsAt: Date.now() + durMs,
+          createdAt: Date.now(), createdBy: state.user.uid
+        }
+      });
+      await updateDoc(doc(db, "chats", chatId), {
+        lastMessage: `📊 Poll: ${question.slice(0, 100)}`, lastMessageAt: serverTimestamp(), lastSenderUid: state.user.uid
+      });
+    } catch(err) { showToast("Send failed: " + err.message); composer.value = raw; }
+    return;
+  }
 
   // Check for /command
   if (text.startsWith("/")) {
@@ -3034,7 +3301,7 @@ function handleCommand(cmd, args) {
     case "quote":
       return `📖 **Quote:** ${getRandomTip()}`;
     case "help":
-      return `📋 **Commands**\n/8ball [q] · /tod · /truth · /dare · /joke · /fortune · /advice · /coinflip · /roll [NdN] · /ship [a] [b] · /tip · /quote\n**Aliases:** /cf /flip (coinflip) · /r /dice (roll) · /t (truth) · /d (dare) · /j (joke) · /f (fortune) · /a (advice) · /s (ship)`;
+      return `📋 **Commands**\n/8ball [q] · /tod · /truth · /dare · /joke · /fortune · /advice · /coinflip · /roll [NdN] · /ship [a] [b] · /tip · /quote\n**Polls**: /poll Question? | Opt A | Opt B [| Opt C…] [duration:1h]\n**Aliases:** /cf /flip (coinflip) · /r /dice (roll) · /t (truth) · /d (dare) · /j (joke) · /f (fortune) · /a (advice) · /s (ship)`;
     default: return null; // unknown command — send as plain text
   }
 }
@@ -3387,6 +3654,16 @@ async function openGroupInfoModal(chatId) {
 // Header gear button → open modal
 $("#chat-group-info-btn")?.addEventListener("click", ()=>openGroupInfoModal());
 
+// Anonymous toggle
+$("#chat-anon-toggle-btn")?.addEventListener("click", () => {
+  state.anonInSchoolChat = !state.anonInSchoolChat;
+  localStorage.setItem("sc_anon_school", state.anonInSchoolChat ? "true" : "false");
+  showToast(state.anonInSchoolChat
+    ? "🎭 Anonymous mode ON — admins can still see your real identity for safety reasons"
+    : "Anonymous mode OFF");
+  renderChatHeader();
+});
+
 // Save name (or chatNickname for school chats)
 $("#group-info-save-name-btn")?.addEventListener("click", async ()=>{
   const c = state.chats.find(x=>x.id===state._groupInfoChatId); if (!c) return;
@@ -3714,6 +3991,78 @@ $("#school-members-list")?.addEventListener("click", e => {
   }
 });
 
+/* ---------- Diverge: Create private group from school directory ---------- */
+let _divergeSelections = new Set();
+
+$("#school-diverge-btn")?.addEventListener("click", async () => {
+  const dom = _userSchoolDomain(); if (!dom) return;
+  _divergeSelections.clear();
+  $("#school-diverge-name").value = "";
+  // Pull directory members
+  const list = $("#school-diverge-list");
+  list.innerHTML = `<div class="empty" style="padding:12px;color:var(--t-muted);">Loading…</div>`;
+  try {
+    const snap = await getDocs(collection(db, "EducationDiscovery", dom, "members"));
+    const members = snap.docs.map(d => d.data()).filter(m => m.uid !== state.user.uid);
+    if (!members.length) {
+      list.innerHTML = `<div class="empty" style="padding:12px;">No other classmates in the directory yet.</div>`;
+    } else {
+      list.innerHTML = members.map(m => {
+        const display = m.nickname || m.username || "User";
+        return `<label class="school-member-row" style="cursor:pointer;">
+          <input type="checkbox" data-diverge-uid="${escapeHtml(m.uid)}" data-diverge-name="${escapeHtml(display)}" data-diverge-photo="${escapeHtml(m.photoURL||'')}" style="margin-right:8px;flex-shrink:0;" />
+          ${avatarMarkup(display, m.photoURL, "side-row-avatar", "side-row-fallback")}
+          <div class="school-member-info">
+            <div class="school-member-name">${escapeHtml(display)}</div>
+            <div class="school-member-bio">${escapeHtml((m.bio||"").slice(0,60))}</div>
+          </div>
+        </label>`;
+      }).join("");
+    }
+    openModal("school-diverge-modal");
+  } catch(err) {
+    showToast("Couldn't load directory: " + err.message);
+  }
+});
+
+$("#school-diverge-list")?.addEventListener("change", e => {
+  if (e.target.matches('[data-diverge-uid]')) {
+    const uid = e.target.dataset.divergeUid;
+    if (e.target.checked) _divergeSelections.add(uid);
+    else _divergeSelections.delete(uid);
+  }
+});
+
+$("#school-diverge-create-btn")?.addEventListener("click", async () => {
+  const name = $("#school-diverge-name").value.trim();
+  if (!name) { showToast("Give the group a name"); return; }
+  if (_divergeSelections.size < 1) { showToast("Pick at least one classmate"); return; }
+  const btn = $("#school-diverge-create-btn");
+  btn.disabled = true; btn.textContent = "Creating…";
+  try {
+    const memberUids = [state.user.uid, ..._divergeSelections];
+    const ref = await addDoc(collection(db, "chats"), {
+      type: "group",
+      members: memberUids,
+      leaders: [state.user.uid],
+      name,
+      createdBy: state.user.uid,
+      createdAt: serverTimestamp(),
+      lastMessage: "",
+      lastMessageAt: serverTimestamp(),
+      // No schoolDomain — this is a regular private group, fully separate
+      joinCode: _generateInviteCode()
+    });
+    closeModal("school-diverge-modal");
+    closeModal("school-modal");
+    showToast(`✓ Created "${name}"`);
+    openChat(ref.id);
+  } catch(err) {
+    showToast("Error: " + err.message);
+    btn.disabled = false; btn.textContent = "Create Group";
+  }
+});
+
 
 /* =====================================================================
    MODALS
@@ -3829,6 +4178,12 @@ function openSettingsModal(pane) {
   if($("#settings-compact-toggle"))            $("#settings-compact-toggle").checked=state.compactMode;
   $$(".text-size-btn").forEach(b=>b.classList.toggle("active", parseFloat(b.dataset.size)===state.textSize));
   if($("#settings-show-last-active-toggle"))   $("#settings-show-last-active-toggle").checked=state.showLastActive;
+  // Birthday from cached profile
+  const myProf = state.userCache[state.user?.uid] || {};
+  if (myProf.birthday) {
+    if ($("#settings-birthday-month")) $("#settings-birthday-month").value = String(myProf.birthday.month||"");
+    if ($("#settings-birthday-day")) $("#settings-birthday-day").value = String(myProf.birthday.day||"");
+  }
   // PFP animate mode
   const pfpRadio = document.querySelector(`input[name="pfp-animate"][value="${state.pfpAnimate}"]`);
   if (pfpRadio) pfpRadio.checked = true;
@@ -4041,6 +4396,25 @@ $("#settings-silent-typing-toggle")?.addEventListener("change", e => {
   state.silentTyping = e.target.checked;
   localStorage.setItem("sc_silent_typing", e.target.checked ? "true" : "false");
 });
+// Birthday: save month/day on change to user profile
+async function _saveBirthday() {
+  if (!state.user?.uid) return;
+  const m = parseInt($("#settings-birthday-month")?.value, 10);
+  const d = parseInt($("#settings-birthday-day")?.value, 10);
+  const bday = (m && d) ? { month: m, day: d } : null;
+  try {
+    await updateDoc(doc(db,"users",state.user.uid), { birthday: bday });
+    showToast(bday ? "Birthday saved" : "Birthday cleared");
+  } catch(err) { showToast("Save failed: " + err.message); }
+}
+$("#settings-birthday-month")?.addEventListener("change", _saveBirthday);
+$("#settings-birthday-day")?.addEventListener("change", _saveBirthday);
+$("#settings-birthday-clear")?.addEventListener("click", () => {
+  $("#settings-birthday-month").value = "";
+  $("#settings-birthday-day").value = "";
+  _saveBirthday();
+});
+
 $("#settings-show-last-active-toggle")?.addEventListener("change", async e => {
   state.showLastActive = e.target.checked;
   localStorage.setItem("sc_show_last_active", e.target.checked ? "true" : "false");
@@ -5021,6 +5395,20 @@ async function showFullProfile(uid) {
       fpSince.style.display="";
     } else fpSince.style.display="none";
   }
+  // Birthday (optional — only if user set it)
+  const fpBday = $("#fp-birthday");
+  if (fpBday) {
+    if (profile.birthday && profile.birthday.month && profile.birthday.day && !isPrivate) {
+      const months = ["January","February","March","April","May","June","July","August","September","October","November","December"];
+      const m = months[profile.birthday.month-1] || "";
+      // Today?
+      const today = new Date();
+      const isToday = today.getMonth()+1 === profile.birthday.month && today.getDate() === profile.birthday.day;
+      fpBday.innerHTML = `🎂 Birthday: <strong>${escapeHtml(m)} ${profile.birthday.day}</strong>${isToday ? ' <span style="color:var(--c-accent);font-weight:700;">— Today! 🎉</span>' : ''}`;
+      fpBday.style.display = "";
+    } else fpBday.style.display = "none";
+  }
+
   // Last active timeline (optional — only if profile owner enabled it)
   const fpLastActive = $("#fp-last-active");
   if (fpLastActive) {
@@ -5141,6 +5529,12 @@ async function showFullProfile(uid) {
     actionsHtml += isBlocked
       ? `<button class="btn-ghost fp-action-btn" data-fp-action="unblock" data-fp-uid="${escapeHtml(uid)}">Unblock</button>`
       : `<button class="btn-ghost fp-action-btn fp-action-danger" data-fp-action="block" data-fp-uid="${escapeHtml(uid)}">Block</button>`;
+    // Snooze toggle (local-only UI hide)
+    const isSnoozed = isUserSnoozed(uid);
+    actionsHtml += `<button class="btn-ghost fp-action-btn" data-fp-action="snooze" data-fp-uid="${escapeHtml(uid)}" title="${isSnoozed?'Show their messages again':'Hide their messages from your view (they won\\'t know)'}">
+      <svg viewBox="0 0 24 24" width="13" height="13"><path fill="currentColor" d="M9.5 5.5v3l5.5 5.5h3v-3l-5.5-5.5h-3zm-2 12.5l-1.5-1.5L4 18l1.5 1.5L7.5 18zm6.5-9V5h-2v3h2zm-7 4l-2-2L4 13l2 2 1-1zM12 22c5.52 0 10-4.48 10-10S17.52 2 12 2 2 6.48 2 12s4.48 10 10 10z"/></svg>
+      ${isSnoozed?'Unsnooze':'Snooze'}
+    </button>`;
   }
   // Copy user ID — always available
   actionsHtml += `<button class="btn-ghost fp-action-btn" data-fp-action="copy-id" data-fp-uid="${escapeHtml(uid)}" title="Copy user ID">
@@ -5203,6 +5597,10 @@ document.addEventListener("click", async e=>{
   else if (action==="copy-id") {
     navigator.clipboard.writeText(uid||"").catch(()=>{});
     showToast("User ID copied!");
+  }
+  else if (action==="snooze") {
+    toggleSnoozeUser(uid);
+    closeModal("full-profile-modal");
   }
   else if (action==="invite-group") {
     // Show a small picker with this user's groups (where target is not yet a member)
@@ -5320,6 +5718,32 @@ $("#reply-bar-cancel")?.addEventListener("click", clearReplyTo);
 /* =====================================================================
    MESSAGE REACTIONS
    ===================================================================== */
+async function castPollVote(msgId, optionIdx) {
+  const chatId = state.activeChatId;
+  if (!chatId || !state.user) return;
+  const msg = state.messages.find(m => m.id === msgId);
+  if (!msg || msg.type !== "poll" || !msg.pollData) return;
+  if (msg.pollData.endsAt && Date.now() > msg.pollData.endsAt) {
+    showToast("Poll has ended"); return;
+  }
+  const newVotes = { ...(msg.pollData.votes || {}) };
+  if (newVotes[state.user.uid] === optionIdx) delete newVotes[state.user.uid];
+  else newVotes[state.user.uid] = optionIdx;
+  try {
+    await updateDoc(doc(db, "chats", chatId, "messages", msgId), {
+      "pollData.votes": newVotes
+    });
+  } catch(err) { showToast("Vote failed: " + err.message); }
+}
+
+// Click delegation for poll options
+$("#messages")?.addEventListener("click", e => {
+  const btn = e.target.closest("[data-poll-vote]");
+  if (!btn) return;
+  e.stopPropagation();
+  castPollVote(btn.dataset.msgId, parseInt(btn.dataset.pollVote, 10));
+});
+
 async function toggleReaction(msgId, emoji) {
   const chatId=state.activeChatId;
   if (!chatId||!state.user) return;
@@ -5381,6 +5805,37 @@ function renderTypingIndicator(names=[]) {
   el.classList.remove("hidden");
 }
 
+/* Sidebar typing indicators — listen to top 15 recent chats so we can
+   show "typing…" in DM/group rows without opening them. */
+function _updateSidebarTypingListeners() {
+  if (!state.user) return;
+  const top = state.chats.slice(0, 15);
+  const wanted = new Set(top.map(c => c.id));
+  for (const id of Object.keys(state.sidebarTypingUnsubs)) {
+    if (!wanted.has(id)) {
+      try { state.sidebarTypingUnsubs[id](); } catch(_){}
+      delete state.sidebarTypingUnsubs[id];
+      delete state.sidebarTyping[id];
+    }
+  }
+  for (const c of top) {
+    if (state.sidebarTypingUnsubs[c.id]) continue;
+    try {
+      state.sidebarTypingUnsubs[c.id] = onSnapshot(
+        collection(db, "chats", c.id, "typing"),
+        snap => {
+          const names = snap.docs.filter(d => d.id !== state.user?.uid)
+                                  .map(d => d.data().name || "Someone");
+          if (names.length) state.sidebarTyping[c.id] = names;
+          else delete state.sidebarTyping[c.id];
+          renderChatLists();
+        },
+        () => {}
+      );
+    } catch(_){}
+  }
+}
+
 // Wire up typing listener when a chat is opened (called from openChat)
 function startTypingListener(chatId) {
   if (state.unsubscribers.typing) { state.unsubscribers.typing(); state.unsubscribers.typing=null; }
@@ -5392,6 +5847,30 @@ function startTypingListener(chatId) {
     }
   );
 }
+
+/* Markdown preview toggle */
+let _mdPreviewOn = localStorage.getItem("sc_md_preview") === "true";
+function _renderMdPreview() {
+  const pane = $("#md-preview");
+  if (!pane) return;
+  const txt = ($("#composer-input")?.value || "").trim();
+  if (!_mdPreviewOn || !txt) {
+    pane.classList.add("hidden");
+    return;
+  }
+  pane.classList.remove("hidden");
+  pane.innerHTML = `<div class="md-preview-label">Preview</div><div class="md-preview-body">${formatMessage(txt)}</div>`;
+}
+$("#md-preview-btn")?.addEventListener("click", () => {
+  _mdPreviewOn = !_mdPreviewOn;
+  localStorage.setItem("sc_md_preview", _mdPreviewOn ? "true" : "false");
+  $("#md-preview-btn")?.classList.toggle("active", _mdPreviewOn);
+  _renderMdPreview();
+  showToast(_mdPreviewOn ? "Markdown preview ON" : "Markdown preview OFF");
+});
+$("#composer-input")?.addEventListener("input", _renderMdPreview);
+// Initialize state on load
+if (_mdPreviewOn) $("#md-preview-btn")?.classList.add("active");
 
 // Hook composer input to send typing events
 const _composerEl=$("#composer-input");
@@ -5980,6 +6459,12 @@ document.addEventListener("click", async e=>{
   else if (action==="ctx-set-color") {
     const cid=item.dataset.chatId; if (!cid) return;
     _showChatColorPicker(cid, e.clientX, e.clientY);
+  }
+  else if (action==="ctx-pin-chat") {
+    if (item.dataset.chatId) _togglePinChat(item.dataset.chatId);
+  }
+  else if (action==="ctx-move-folder") {
+    if (item.dataset.chatId) _showFolderPicker(item.dataset.chatId, e.clientX, e.clientY);
   }
   else if (action==="ctx-leave-group") {
     const cid=item.dataset.chatId;

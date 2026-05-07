@@ -323,6 +323,9 @@ export function buildUI() {
             <button class="icon-btn" id="chat-group-info-btn" title="Group info" hidden>
               <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path fill="currentColor" d="M12 8c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm0 2c-1.1 0-2 .9-2 2v6c0 1.1.9 2 2 2s2-.9 2-2v-6c0-1.1-.9-2-2-2z"/></svg>
             </button>
+            <button class="icon-btn" id="chat-anon-toggle-btn" title="Toggle anonymous mode (school chats only)" hidden>
+              <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path fill="currentColor" d="M19 4H5c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm-7 14c-2.21 0-4-1.79-4-4 0-.55.11-1.07.29-1.55l1.32 1.32c-.06.07-.11.15-.11.23 0 .55.45 1 1 1s1-.45 1-1c0-.55-.45-1-1-1-.08 0-.16.05-.23.11l-1.32-1.32C9.93 11.61 10.45 11.5 11 11.5c2.21 0 4 1.79 4 4 0 .55-.11 1.07-.29 1.55-.49.18-1.01.45-1.71.45z"/></svg>
+            </button>
             <!-- Divider line before search -->
             <div class="header-divider"></div>
             <!-- Always-visible compact search — expands on focus -->
@@ -389,10 +392,18 @@ export function buildUI() {
           <!-- Slash command autocomplete -->
           <div id="cmd-autocomplete" class="hidden" role="listbox"></div>
 
+          <!-- Markdown preview (toggleable, shows above composer) -->
+          <div id="md-preview" class="md-preview hidden"></div>
+
           <div class="composer-inner">
             <div class="composer-input-wrap">
               <textarea id="composer-input" placeholder="Message… or /help for commands" rows="1"></textarea>
             </div>
+            <button class="icon-btn composer-md-btn" id="md-preview-btn" title="Toggle Markdown preview">
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" aria-hidden="true">
+                <path fill="currentColor" d="M2.5 5h19c.83 0 1.5.67 1.5 1.5v11c0 .83-.67 1.5-1.5 1.5h-19C1.67 19 1 18.33 1 17.5v-11C1 5.67 1.67 5 2.5 5zm3 11.5v-5L8 14l2.5-2.5v5h-2v-2L8 15l-1.5-1.5v3H5.5zm12 .25 3-3.25h-2v-3h-2v3h-2l3 3.25z"/>
+              </svg>
+            </button>
             <!-- Silent typing toggle — LEFTMOST, before emoji -->
             <button class="icon-btn composer-silent-btn" id="silent-typing-btn"
                     title="Silent typing — others won't see you typing" aria-pressed="false">
@@ -914,6 +925,25 @@ export function buildUI() {
                 <span class="toggle-track"></span>
               </span>
             </label>
+            <div class="settings-field-group" style="margin-top:14px;">
+              <label class="modal-label">Birthday <span class="label-optional">— optional, shows on your profile</span></label>
+              <div style="display:flex;gap:6px;align-items:center;">
+                <select id="settings-birthday-month" style="flex:1;">
+                  <option value="">— Month —</option>
+                  <option value="1">January</option><option value="2">February</option><option value="3">March</option>
+                  <option value="4">April</option><option value="5">May</option><option value="6">June</option>
+                  <option value="7">July</option><option value="8">August</option><option value="9">September</option>
+                  <option value="10">October</option><option value="11">November</option><option value="12">December</option>
+                </select>
+                <select id="settings-birthday-day" style="width:90px;">
+                  <option value="">— Day —</option>
+                  ${Array.from({length:31},(_,i)=>`<option value="${i+1}">${i+1}</option>`).join("")}
+                </select>
+                <button class="btn-secondary" id="settings-birthday-clear" style="padding:0 12px;">Clear</button>
+              </div>
+              <p class="hint">Your year is never stored. Only month + day are shown to others.</p>
+            </div>
+
             <label class="settings-toggle-row" style="margin-top:12px;">
               <div class="settings-toggle-info">
                 <div class="settings-toggle-label">Show Last Active Time</div>
@@ -1125,6 +1155,9 @@ export function buildUI() {
               <button class="btn-primary" id="school-open-chat-btn" title="Open the school-wide group chat">
                 💬 School Chat
               </button>
+              <button class="btn-secondary" id="school-diverge-btn" title="Create your own private group with selected classmates">
+                ✨ New Private Group
+              </button>
               <button class="btn-ghost school-leave-btn-red" id="school-leave-btn" title="Stop being discoverable">
                 Leave
               </button>
@@ -1139,6 +1172,29 @@ export function buildUI() {
             <div class="empty" style="padding:18px;color:var(--t-muted);">Loading…</div>
           </div>
         </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- School: Diverge Into Private Group Modal -->
+  <div class="modal hidden" id="school-diverge-modal">
+    <div class="modal-card" style="max-width:460px;width:96vw;">
+      <div class="modal-head">
+        <h2>✨ New Private Group</h2>
+        <button class="icon-btn modal-close" data-close="school-diverge-modal">
+          <svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </div>
+      <div class="modal-body" style="padding:18px 20px;max-height:70vh;overflow-y:auto;">
+        <p class="hint" style="margin:0 0 12px;">Pick classmates from your school discovery to start a private group with. The group will be a regular group chat — separate from the school-wide chat.</p>
+        <label class="modal-label">Group name</label>
+        <input type="text" id="school-diverge-name" maxlength="50" placeholder="e.g. AP Bio Study Group" />
+        <label class="modal-label" style="margin-top:14px;">Invite from school directory</label>
+        <div id="school-diverge-list" class="school-members-list" style="max-height:300px;"></div>
+      </div>
+      <div class="modal-foot">
+        <button class="btn-secondary" data-close="school-diverge-modal">Cancel</button>
+        <button class="btn-primary" id="school-diverge-create-btn">Create Group</button>
       </div>
     </div>
   </div>
@@ -1301,6 +1357,7 @@ export function buildUI() {
             <div class="full-profile-section-label">About Me</div>
             <div class="full-profile-bio" id="fp-bio"></div>
             <div class="full-profile-since" id="fp-since"></div>
+            <div class="full-profile-since" id="fp-birthday" style="display:none"></div>
             <div class="full-profile-since" id="fp-last-active" style="display:none"></div>
             <div class="full-profile-since fp-friends-since-row" id="fp-friends-since" style="display:none"></div>
             <div id="fp-mutual-groups" style="display:none">
