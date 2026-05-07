@@ -3118,9 +3118,24 @@ function renderMessages() {
   } else {
     const autoScroll = state.autoScrollNew !== false; // default ON
     if (sentByMe) {
-      // User just sent a message — instant hard-scroll to bottom, no animation.
-      // (Animating would visibly jiggle on the second snapshot fire.)
-      wrap.scrollTop = wrap.scrollHeight;
+      // User just sent a message — pin to bottom. Problem: at this exact moment,
+      // images/embeds in the just-rendered HTML haven't finished loading, so
+      // wrap.scrollHeight is SMALLER than it'll be in a few hundred ms. If we
+      // only scroll once, we end up "stuck in the middle" once images load and
+      // push the bottom further down. Solution: re-pin to bottom on the next
+      // animation frame and again after a short delay to catch late layout.
+      const stickToBottom = () => {
+        const last = wrap.lastElementChild;
+        if (last && last.scrollIntoView) {
+          last.scrollIntoView({ block: "end", behavior: "auto" });
+        } else {
+          wrap.scrollTop = wrap.scrollHeight;
+        }
+      };
+      stickToBottom();                          // immediate
+      requestAnimationFrame(stickToBottom);     // after layout
+      setTimeout(stickToBottom, 120);           // after most images load
+      setTimeout(stickToBottom, 350);           // safety for slow loads
     } else if (autoScroll && wasAtBottom && hadNewMessages) {
       // NEW incoming message and user was near the bottom — smooth-scroll down
       try { wrap.scrollTo({ top: wrap.scrollHeight, behavior: "smooth" }); }
