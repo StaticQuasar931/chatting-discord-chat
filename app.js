@@ -5531,9 +5531,10 @@ async function showFullProfile(uid) {
       : `<button class="btn-ghost fp-action-btn fp-action-danger" data-fp-action="block" data-fp-uid="${escapeHtml(uid)}">Block</button>`;
     // Snooze toggle (local-only UI hide)
     const isSnoozed = isUserSnoozed(uid);
-    actionsHtml += `<button class="btn-ghost fp-action-btn" data-fp-action="snooze" data-fp-uid="${escapeHtml(uid)}" title="${isSnoozed?'Show their messages again':'Hide their messages from your view (they won\\'t know)'}">
+    const snoozeTitle = isSnoozed ? "Show their messages again" : "Hide their messages from your view";
+    actionsHtml += `<button class="btn-ghost fp-action-btn" data-fp-action="snooze" data-fp-uid="${escapeHtml(uid)}" title="${snoozeTitle}">
       <svg viewBox="0 0 24 24" width="13" height="13"><path fill="currentColor" d="M9.5 5.5v3l5.5 5.5h3v-3l-5.5-5.5h-3zm-2 12.5l-1.5-1.5L4 18l1.5 1.5L7.5 18zm6.5-9V5h-2v3h2zm-7 4l-2-2L4 13l2 2 1-1zM12 22c5.52 0 10-4.48 10-10S17.52 2 12 2 2 6.48 2 12s4.48 10 10 10z"/></svg>
-      ${isSnoozed?'Unsnooze':'Snooze'}
+      ${isSnoozed?"Unsnooze":"Snooze"}
     </button>`;
   }
   // Copy user ID — always available
