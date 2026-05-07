@@ -34,6 +34,7 @@ const STATIC_EMOJI_URL = "./thumb.jpg";
 
 const EMOJI_CATS = [
   { id: "favorites", label: "♥"  },
+  { id: "special",   label: "⭐" },  // moved next to favorites
   { id: "all",       label: "★"  },
   { id: "smileys",   label: "😄" },
   { id: "gestures",  label: "👍" },
@@ -42,7 +43,6 @@ const EMOJI_CATS = [
   { id: "food",      label: "🍕" },
   { id: "animals",   label: "🐶" },
   { id: "objects",   label: "💻" },
-  { id: "special",   label: "⭐" },
 ];
 
 const EMOJI_DATA = [
@@ -1572,14 +1572,21 @@ function bootSubscriptions() {
         }
       }
       // Update baseline
-      _prevChatTimes={};
-      for (const c of arr) _prevChatTimes[c.id]=c.lastMessageAt?.toMillis?.()||0;
-
-      arr.sort((a,b)=>{
-        const at=a.lastMessageAt?.toMillis?a.lastMessageAt.toMillis():0;
-        const bt=b.lastMessageAt?.toMillis?b.lastMessageAt.toMillis():0;
-        return bt-at;
-      });
+      // When a chat doc is updated with serverTimestamp(), the local cache
+      // briefly returns null until the server confirms — that would yank
+      // the chat to the bottom of the list and snap it back when the
+      // server resolves. Keep the LAST known timestamp as a stand-in.
+      const oldTimes = _prevChatTimes;
+      _prevChatTimes = {};
+      const _now = Date.now();
+      const justSent = state._justSentByMeAt && (_now - state._justSentByMeAt) < 5000;
+      for (const c of arr) {
+        const cur = c.lastMessageAt?.toMillis?.();
+        if (cur) _prevChatTimes[c.id] = cur;
+        else if (c.id === state.activeChatId && justSent) _prevChatTimes[c.id] = _now;
+        else _prevChatTimes[c.id] = oldTimes[c.id] || 0;
+      }
+      arr.sort((a,b) => (_prevChatTimes[b.id]||0) - (_prevChatTimes[a.id]||0));
       state.chats=arr; renderChatLists();
       _updateSidebarTypingListeners();
       if (state.activeChatId) {
@@ -2811,35 +2818,13 @@ function _buildBasicPreview(url) {
 }
 
 async function _fetchLinkPreview(url) {
+  // Use the basic favicon-based card. (External preview APIs all CORS-block
+  // or rate-limit on a static site like ours, so we skip them and just show
+  // a clean card built from the URL itself — never fails, never logs errors.)
   if (_linkPreviewCache[url] !== undefined) return _linkPreviewCache[url];
-  if (_linkPreviewPending[url]) return _linkPreviewPending[url];
-  // Microlink free tier has a daily limit and may CORS-block. Try it but
-  // fall back to a simple favicon-based card so every link gets a preview.
-  const api = `https://api.microlink.io/?url=${encodeURIComponent(url)}`;
-  _linkPreviewPending[url] = (async () => {
-    let result = null;
-    try {
-      const res = await fetch(api);
-      if (res.ok) {
-        const json = await res.json();
-        if (json?.status === "success" && json.data) {
-          const d = json.data;
-          result = {
-            title: d.title || "",
-            description: d.description || "",
-            image: d.image?.url || null,
-            site: d.publisher || (new URL(url)).hostname,
-            basic: false,
-          };
-        }
-      }
-    } catch(_) { /* network/CORS error — fall through to basic */ }
-    if (!result) result = _buildBasicPreview(url);
-    _linkPreviewCache[url] = result;
-    delete _linkPreviewPending[url];
-    return result;
-  })();
-  return _linkPreviewPending[url];
+  const result = _buildBasicPreview(url);
+  _linkPreviewCache[url] = result;
+  return result;
 }
 
 function buildLinkPreviewPlaceholder(msgId, url) {
@@ -3133,14 +3118,9 @@ function renderMessages() {
   } else {
     const autoScroll = state.autoScrollNew !== false; // default ON
     if (sentByMe) {
-      // User just sent a message — ALWAYS jump to the bottom, hard + smooth.
-      // First a hard jump (so we don't briefly show the wrong scroll), then a smooth
-      // settle in case any image/preview loads change the height after.
+      // User just sent a message — instant hard-scroll to bottom, no animation.
+      // (Animating would visibly jiggle on the second snapshot fire.)
       wrap.scrollTop = wrap.scrollHeight;
-      requestAnimationFrame(() => {
-        try { wrap.scrollTo({ top: wrap.scrollHeight, behavior: "smooth" }); }
-        catch(_) { wrap.scrollTop = wrap.scrollHeight; }
-      });
     } else if (autoScroll && wasAtBottom && hadNewMessages) {
       // NEW incoming message and user was near the bottom — smooth-scroll down
       try { wrap.scrollTo({ top: wrap.scrollHeight, behavior: "smooth" }); }
@@ -5151,11 +5131,24 @@ function buildEmojiGrid(filter="") {
       return nameMatch||altMatch;
     });
   } else if (state.activeCat==="favorites") {
-    // Show favorited emojis from state.favEmojis
+    // Favorites includes both standard favs AND personal custom emoji
     const favNames=Object.keys(state.favEmojis);
     items=favNames.length
       ? favNames.map(name=>EMOJI_DATA.find(e=>e.name===name)).filter(Boolean)
       : [];
+    // Append personal custom emoji as virtual entries
+    const personal=_getPersonalEmoji?.()||{};
+    for (const [pname, purl] of Object.entries(personal)) {
+      items.push({ name:pname, char:purl, isPersonal:true, cat:"special" });
+    }
+  } else if (state.activeCat==="special") {
+    // Special: :Static: + all personal custom emoji
+    const staticEntry=EMOJI_DATA.find(e=>e.isStatic);
+    items = staticEntry ? [staticEntry] : [];
+    const personal=_getPersonalEmoji?.()||{};
+    for (const [pname, purl] of Object.entries(personal)) {
+      items.push({ name:pname, char:purl, isPersonal:true, cat:"special" });
+    }
   } else {
     const pool = state.activeCat==="all" ? EMOJI_DATA : EMOJI_DATA.filter(e=>e.cat===state.activeCat);
     // :Static: always first in any listing
@@ -5169,6 +5162,10 @@ function buildEmojiGrid(filter="") {
     return;
   }
   emojiGrid.innerHTML=items.map(e=>{
+    if (e.isPersonal) {
+      const safeUrl = e.char.replace(/"/g,"&quot;");
+      return `<div class="emoji-item-wrap"><button class="emoji-cell" title=":${escapeHtml(e.name)}:" data-insert=":${escapeHtml(e.name)}:"><img src="${safeUrl}" class="static-emoji-square" alt=":${escapeHtml(e.name)}:" onerror="this.outerHTML=':'+this.alt.slice(1,-1)+':'" /></button></div>`;
+    }
     if (e.isStatic) {
       return `<div class="emoji-item-wrap"><button class="emoji-cell" title=":Static:" data-insert=":Static:"><img src="${STATIC_EMOJI_URL}" class="static-emoji-square" alt=":Static:" /></button><button class="emoji-fav-btn${state.favEmojis["Static"]?" active":""}" data-fav-name="Static" title="${state.favEmojis["Static"]?"Remove fav":"Favourite"}">♥</button></div>`;
     }
@@ -5180,6 +5177,10 @@ emojiBtn?.addEventListener("click",()=>{
   emojiOpen=!emojiOpen;
   if (emojiOpen) {
     emojiPicker.classList.remove("hidden");
+    // Default to favorites tab if user has any favorites OR personal emoji
+    const hasFavs = Object.keys(state.favEmojis||{}).length
+                  || Object.keys(_getPersonalEmoji?.()||{}).length;
+    if (hasFavs) state.activeCat = "favorites";
     buildEmojiCatTabs(); buildEmojiGrid(); emojiSearch.value=""; emojiSearch.focus();
   } else {
     emojiPicker.classList.add("hidden");
@@ -5238,7 +5239,9 @@ $("#emoji-picker")?.addEventListener("click", async e=>{
 
 document.addEventListener("click",e=>{
   if (!emojiOpen) return;
-  if (e.target.closest("#emoji-picker")||e.target.closest("#emoji-btn")) return;
+  if (e.target.closest("#emoji-picker")||e.target.closest("#emoji-btn")
+      ||e.target.closest("#dblclick-emoji-pick-btn")
+      ||e.target.closest("#emoji-submit-modal")) return;
   emojiPicker?.classList.add("hidden"); emojiOpen=false;
 });
 
@@ -5328,18 +5331,34 @@ function updateEmojiAutocomplete() {
   const q=match[1].toLowerCase();
   acTriggerStart=pos-match[0].length;
 
-  acItems=EMOJI_DATA.filter(e=>{
+  // Personal custom emoji come FIRST in the autocomplete (user's own come first)
+  const personal = _getPersonalEmoji?.() || {};
+  const personalMatches = Object.entries(personal)
+    .filter(([name]) => name.startsWith(q) || name.includes(q))
+    .map(([name, url]) => ({ name, char: url, isPersonal: true }));
+
+  const standardMatches = EMOJI_DATA.filter(e=>{
     if (e.isStatic) return "static".startsWith(q)||q==="sta";
     return e.name.startsWith(q)||e.name.includes(q)||(e.alt&&e.alt.some(a=>a.toLowerCase().replace(/\s/g,"").includes(q)));
-  }).slice(0,8);
+  });
+
+  acItems = [...personalMatches, ...standardMatches].slice(0, 8);
 
   if (!acItems.length) { hideEmojiAc(); return; }
   state.emojiAcIndex=0;
   ac.innerHTML=acItems.map((e,i)=>{
-    const display=e.isStatic?`<img src="${STATIC_EMOJI_URL}" style="width:18px;height:18px;border-radius:3px;" alt=":Static:">`:e.char;
+    let display;
+    if (e.isPersonal) {
+      const safeUrl = e.char.replace(/"/g,"&quot;");
+      display = `<img src="${safeUrl}" style="width:18px;height:18px;border-radius:3px;object-fit:contain;" alt=":${escapeHtml(e.name)}:" />`;
+    } else if (e.isStatic) {
+      display = `<img src="${STATIC_EMOJI_URL}" style="width:18px;height:18px;border-radius:3px;" alt=":Static:">`;
+    } else {
+      display = e.char;
+    }
     return `<div class="emoji-ac-item${i===0?" active":""}" data-index="${i}">
       <span class="emoji-ac-char">${display}</span>
-      <span class="emoji-ac-name">:${escapeHtml(e.name)}:</span>
+      <span class="emoji-ac-name">:${escapeHtml(e.name)}:${e.isPersonal?' <span style="font-size:10px;color:var(--c-accent);">personal</span>':''}</span>
     </div>`;
   }).join("");
   ac.classList.remove("hidden");
@@ -5359,7 +5378,10 @@ function updateAcHighlight() {
 function insertAcItem(index) {
   if (index<0||index>=acItems.length) return;
   const item=acItems[index];
-  const insert=item.isStatic?":Static:":item.char;
+  // Personal emoji inserts as :name: so formatMessage can render it as <img>
+  const insert = item.isPersonal ? `:${item.name}:`
+               : item.isStatic ? ":Static:"
+               : item.char;
   const val=composer.value, pos=composer.selectionStart;
   composer.value=val.slice(0,acTriggerStart)+insert+val.slice(pos);
   composer.selectionStart=composer.selectionEnd=acTriggerStart+insert.length;
@@ -6458,7 +6480,8 @@ $("#emoji-personal-url")?.addEventListener("input", e => {
   } else { wrap.style.display = "none"; }
 });
 
-// Add personal emoji (no review, instant)
+// Add personal emoji (no review, instant). Also auto-favorites it so it
+// shows up in the Favorites tab without manual action.
 $("#emoji-personal-add-btn")?.addEventListener("click", () => {
   const name = ($("#emoji-personal-name").value||"").trim().toLowerCase();
   const url  = ($("#emoji-personal-url").value||"").trim();
@@ -6469,6 +6492,9 @@ $("#emoji-personal-add-btn")?.addEventListener("click", () => {
   const map = _getPersonalEmoji();
   map[name] = url;
   _savePersonalEmoji(map);
+  // Personal emoji are always considered "favorited" + appear under Special tab.
+  // We don't add to state.favEmojis (which expects unicode chars) — buildEmojiGrid
+  // pulls them in directly from _getPersonalEmoji() for both Favorites and Special.
   $("#emoji-personal-name").value = "";
   $("#emoji-personal-url").value = "";
   $("#emoji-personal-preview").style.display = "none";
