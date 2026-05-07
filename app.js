@@ -2304,6 +2304,7 @@ async function openChat(chatId) {
   state.lastReadMarker[chatId]=savedRead;
   // Reset initial-scroll flag so divider scroll fires once on open
   state.chatScrolledInitial.delete(chatId);
+  state._lastRenderedMsgCount = 0; // reset so first render of new chat doesn't think msgs are "new"
   // Mark this chat as read from this moment forward, clear unread counter
   localStorage.setItem(`sc_read_${chatId}`, String(Date.now()));
   delete state.unreadCounts[chatId];
@@ -2712,10 +2713,19 @@ function buildReplyPreview(m) {
 const _linkPreviewCache = {}; // url -> {title, description, image, ogResolved} or null
 const _linkPreviewPending = {}; // url -> Promise
 
+/* Find the first URL that ISN'T already auto-embedded by formatMessage().
+   formatMessage embeds image URLs (jpg/png/gif/etc.) and GIF CDN URLs (Tenor/Giphy)
+   inline as <img>, so we skip those — no need to also show a microlink card. */
 function _extractFirstUrl(text) {
   if (!text) return null;
-  const m = text.match(/https?:\/\/[^\s<]+/i);
-  return m ? m[0] : null;
+  const matches = text.match(/https?:\/\/[^\s<]+/gi);
+  if (!matches) return null;
+  for (const url of matches) {
+    if (IMAGE_URL_RE.test(url)) continue; // already shown as <img>
+    if (GIF_CDN_RE.test(url))   continue; // already shown as GIF embed
+    return url;
+  }
+  return null;
 }
 
 async function _fetchLinkPreview(url) {
@@ -2869,7 +2879,7 @@ function renderMessages() {
       html.push(`<div class="msg-system" data-msg-id="${escapeHtml(m.id)}">
         <svg viewBox="0 0 24 24" width="14" height="14" style="flex-shrink:0;vertical-align:-2px"><path fill="currentColor" d="M16 12V4h1V2H7v2h1v8l-2 2v2h5.2v6h1.6v-6H18v-2l-2-2z"/></svg>
         <span><strong>${pinnerName}</strong> pinned a message.
-        ${pinnedMsgId?`<a class="msg-system-link" data-pin-jump="${escapeHtml(pinnedMsgId)}" href="#">View it.</a>`:""}</span>
+        ${pinnedMsgId?`<span class="msg-system-link" data-pin-jump="${escapeHtml(pinnedMsgId)}" role="button" tabindex="0">View it.</span>`:""}
       </div>`);
       // system messages don't affect sender grouping
       continue;
@@ -2968,11 +2978,20 @@ function renderMessages() {
   // Capture scroll state BEFORE innerHTML wipe — innerHTML resets scrollTop to 0
   const prevScrollTop    = wrap.scrollTop;
   const prevScrollHeight = wrap.scrollHeight;
-  // Threshold: 60px (tight) — if user is this close to the bottom, treat as "at bottom"
-  const wasAtBottom      = prevScrollHeight - prevScrollTop - wrap.clientHeight < 60;
-  // Did the user just send the newest message? Always scroll for own messages.
-  const newest = state.messages[state.messages.length - 1];
-  const sentByMe = newest && newest.senderUid === state.user?.uid && (Date.now() - (newest.createdAt?.toMillis?.()||0)) < 2000;
+  // Threshold: ~400px (≈ 5-10 messages depending on density). Within this distance from
+  // the bottom, a new incoming message will smoothly auto-scroll the user down.
+  const wasAtBottom      = prevScrollHeight - prevScrollTop - wrap.clientHeight < 400;
+  // Only consider auto-scroll when actual NEW messages arrived in this render —
+  // not on every re-render (poll votes, reactions, edits, typing, etc. shouldn't scroll).
+  const prevMsgCount     = state._lastRenderedMsgCount || 0;
+  const newMsgCount      = state.messages.length;
+  const hadNewMessages   = newMsgCount > prevMsgCount;
+  state._lastRenderedMsgCount = newMsgCount;
+  // Did the user just send a message? `state._justSentByMe` is set in sendCurrentMessage
+  // and cleared after we honor it. This is more reliable than timestamp-based detection
+  // because `serverTimestamp()` returns null until Firestore acknowledges the write.
+  const sentByMe = !!state._justSentByMe;
+  state._justSentByMe = false; // consume the flag
 
   wrap.innerHTML=html.join("");
 
@@ -3000,15 +3019,22 @@ function renderMessages() {
     }
   } else {
     const autoScroll = state.autoScrollNew !== false; // default ON
-    if (sentByMe || (autoScroll && wasAtBottom)) {
-      // Smooth scroll for new content when user is at bottom or just sent a message
-      try {
-        wrap.scrollTo({ top: wrap.scrollHeight, behavior: "smooth" });
-      } catch(_){
-        wrap.scrollTop = wrap.scrollHeight;
-      }
+    if (sentByMe) {
+      // User just sent a message — ALWAYS jump to the bottom, hard + smooth.
+      // First a hard jump (so we don't briefly show the wrong scroll), then a smooth
+      // settle in case any image/preview loads change the height after.
+      wrap.scrollTop = wrap.scrollHeight;
+      requestAnimationFrame(() => {
+        try { wrap.scrollTo({ top: wrap.scrollHeight, behavior: "smooth" }); }
+        catch(_) { wrap.scrollTop = wrap.scrollHeight; }
+      });
+    } else if (autoScroll && wasAtBottom && hadNewMessages) {
+      // NEW incoming message and user was near the bottom — smooth-scroll down
+      try { wrap.scrollTo({ top: wrap.scrollHeight, behavior: "smooth" }); }
+      catch(_) { wrap.scrollTop = wrap.scrollHeight; }
     } else {
-      // Preserve exact scroll position — adjust for any height change (new messages above)
+      // No new messages OR user was scrolled up — preserve exact scroll position.
+      // Adjust for any height change (new content / images / link previews).
       wrap.scrollTop = prevScrollTop + (wrap.scrollHeight - prevScrollHeight);
     }
   }
@@ -3306,6 +3332,8 @@ async function sendCurrentMessage() {
   const raw=composer.value;
   let text=raw.trim();
   if (!text||!state.activeChatId) return;
+  // Mark that the user is sending — the next renderMessages() will force-scroll to bottom.
+  state._justSentByMe = true;
 
   // @silent prefix — send without triggering notification sound for recipients
   let silent=false;
