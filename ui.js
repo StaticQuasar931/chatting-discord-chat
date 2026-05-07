@@ -399,17 +399,12 @@ export function buildUI() {
             <div class="composer-input-wrap">
               <textarea id="composer-input" placeholder="Message… or /help for commands" rows="1"></textarea>
             </div>
-            <button class="icon-btn composer-poll-btn" id="composer-poll-btn" title="Create a poll">
-              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" aria-hidden="true">
-                <path fill="currentColor" d="M3 22V8h4v14H3zm7 0V2h4v20h-4zm7 0v-9h4v9h-4z"/>
-              </svg>
-            </button>
+            <!-- Order (left → right): markdown · silent typing · poll · emoji · gif · send -->
             <button class="icon-btn composer-md-btn" id="md-preview-btn" title="Toggle Markdown preview">
               <svg viewBox="0 0 24 24" width="18" height="18" fill="none" aria-hidden="true">
                 <path fill="currentColor" d="M2.5 5h19c.83 0 1.5.67 1.5 1.5v11c0 .83-.67 1.5-1.5 1.5h-19C1.67 19 1 18.33 1 17.5v-11C1 5.67 1.67 5 2.5 5zm3 11.5v-5L8 14l2.5-2.5v5h-2v-2L8 15l-1.5-1.5v3H5.5zm12 .25 3-3.25h-2v-3h-2v3h-2l3 3.25z"/>
               </svg>
             </button>
-            <!-- Silent typing toggle — LEFTMOST, before emoji -->
             <button class="icon-btn composer-silent-btn" id="silent-typing-btn"
                     title="Silent typing — others won't see you typing" aria-pressed="false">
               <svg viewBox="0 0 24 24" width="20" height="20" fill="none" aria-hidden="true">
@@ -418,6 +413,11 @@ export function buildUI() {
                 <circle fill="currentColor" cx="12" cy="11" r="1.2"/>
                 <circle fill="currentColor" cx="16" cy="11" r="1.2"/>
                 <line class="silent-slash" x1="3" y1="21" x2="21" y2="3" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/>
+              </svg>
+            </button>
+            <button class="icon-btn composer-poll-btn" id="composer-poll-btn" title="Create a poll">
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" aria-hidden="true">
+                <path fill="currentColor" d="M3 22V8h4v14H3zm7 0V2h4v20h-4zm7 0v-9h4v9h-4z"/>
               </svg>
             </button>
             <button class="icon-btn composer-emoji-btn" id="emoji-btn" title="Emoji">
@@ -463,35 +463,70 @@ export function buildUI() {
           </div>
         </div>
 
-        <!-- Custom Emoji Submission Modal -->
+        <!-- Custom Emoji Modal — two flows: personal (immediate) or sticker submission (admin review) -->
         <div class="modal hidden" id="emoji-submit-modal">
-          <div class="modal-card" style="max-width:420px;width:96vw;">
+          <div class="modal-card" style="max-width:460px;width:96vw;">
             <div class="modal-head">
-              <h2>📤 Submit Custom Emoji</h2>
+              <h2>✨ Custom Emoji</h2>
               <button class="icon-btn modal-close" data-close="emoji-submit-modal">
                 <svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
               </button>
             </div>
+
+            <!-- Tabs: Personal vs Submit-as-sticker -->
+            <div class="emoji-modal-tabs">
+              <button class="emoji-modal-tab active" data-emoji-tab="personal">🙂 Personal Emoji</button>
+              <button class="emoji-modal-tab" data-emoji-tab="sticker">📤 Submit as Sticker</button>
+            </div>
+
             <div class="modal-body" style="padding:16px 20px;">
-              <p class="hint" style="margin:0 0 12px;">Submit a custom emoji or sticker for admin review. Approved submissions may be added to the public emoji set later.</p>
+              <!-- Personal tab -->
+              <div class="emoji-tab-pane" data-emoji-pane="personal">
+                <p class="hint" style="margin:0 0 12px;">Add a custom emoji that <strong>only you and people in your chats</strong> can see when you use it. Stays on your account, no review needed.</p>
 
-              <label class="modal-label">Emoji name <span class="label-optional">— letters, numbers, underscores; how it'll be used (:my_emoji:)</span></label>
-              <input type="text" id="emoji-submit-name" maxlength="32" placeholder="my_cool_emoji" />
+                <label class="modal-label">Shortcode <span class="label-optional">— used as <code>:name:</code></span></label>
+                <input type="text" id="emoji-personal-name" maxlength="32" placeholder="my_emoji" />
 
-              <label class="modal-label" style="margin-top:14px;">Image URL <span class="label-optional">— direct .png/.gif/.webp link</span></label>
-              <input type="text" id="emoji-submit-url" placeholder="https://example.com/image.png" />
+                <label class="modal-label" style="margin-top:14px;">Image URL <span class="label-optional">— direct .png/.gif/.webp link</span></label>
+                <input type="text" id="emoji-personal-url" placeholder="https://example.com/image.png" />
 
-              <div id="emoji-submit-preview" style="margin-top:12px;text-align:center;display:none;">
-                <img id="emoji-submit-preview-img" alt="Preview" style="max-width:80px;max-height:80px;border-radius:8px;background:var(--c-input-2);padding:4px;" />
+                <div id="emoji-personal-preview" style="margin-top:12px;text-align:center;display:none;">
+                  <img id="emoji-personal-preview-img" alt="Preview" style="max-width:64px;max-height:64px;border-radius:8px;background:var(--c-input-2);padding:4px;" />
+                </div>
+
+                <!-- Existing personal emojis -->
+                <div style="margin-top:14px;">
+                  <div class="modal-label" style="margin-bottom:6px;">Your custom emoji</div>
+                  <div id="emoji-personal-list" class="emoji-personal-list">
+                    <span class="hint" style="font-size:11px;">— none yet —</span>
+                  </div>
+                </div>
               </div>
 
-              <p class="hint" style="margin-top:12px;color:var(--c-warn);font-size:12px;">
-                ⚠️ Don't submit copyrighted, NSFW, or hateful content. Submissions are reviewed by admin.
-              </p>
+              <!-- Sticker submission tab -->
+              <div class="emoji-tab-pane" data-emoji-pane="sticker" style="display:none;">
+                <p class="hint" style="margin:0 0 12px;">Submit your emoji for admin review. <strong>Approved</strong> stickers may be added for everyone to use later.</p>
+
+                <label class="modal-label">Sticker name <span class="label-optional">— letters, numbers, underscores</span></label>
+                <input type="text" id="emoji-submit-name" maxlength="32" placeholder="my_cool_emoji" />
+
+                <label class="modal-label" style="margin-top:14px;">Image URL <span class="label-optional">— direct .png/.gif/.webp link</span></label>
+                <input type="text" id="emoji-submit-url" placeholder="https://example.com/image.png" />
+
+                <div id="emoji-submit-preview" style="margin-top:12px;text-align:center;display:none;">
+                  <img id="emoji-submit-preview-img" alt="Preview" style="max-width:80px;max-height:80px;border-radius:8px;background:var(--c-input-2);padding:4px;" />
+                </div>
+
+                <p class="hint" style="margin-top:12px;color:var(--c-warn);font-size:12px;">
+                  ⚠️ Don't submit copyrighted, NSFW, or hateful content.
+                </p>
+              </div>
             </div>
+
             <div class="modal-foot">
               <button class="btn-secondary" data-close="emoji-submit-modal">Cancel</button>
-              <button class="btn-primary" id="emoji-submit-confirm-btn">Submit for Review</button>
+              <button class="btn-primary" id="emoji-personal-add-btn">Add to My Emoji</button>
+              <button class="btn-primary" id="emoji-submit-confirm-btn" style="display:none;">Submit for Review</button>
             </div>
           </div>
         </div>
@@ -951,13 +986,14 @@ export function buildUI() {
                   <span>Open emoji picker</span>
                 </label>
               </div>
-              <div id="dblclick-emoji-chooser" style="display:flex;align-items:center;gap:10px;margin-top:8px;">
-                <button class="dblclick-emoji-btn" id="dblclick-emoji-pick-btn" type="button" title="Click to pick an emoji">
+              <div id="dblclick-emoji-chooser" style="display:flex;align-items:center;gap:10px;margin-top:8px;flex-wrap:wrap;">
+                <button class="dblclick-emoji-btn" id="dblclick-emoji-pick-btn" type="button" title="Click to open the emoji picker">
                   <span id="dblclick-emoji-preview">👍</span>
                   <svg viewBox="0 0 24 24" width="14" height="14" style="opacity:.7;"><path fill="currentColor" d="M7 10l5 5 5-5z"/></svg>
                 </button>
-                <span class="hint">Click to choose your double-click reaction emoji</span>
-                <input type="hidden" id="settings-dblclick-emoji" value="👍" />
+                <span class="hint" style="font-size:11px;">— or type up to 4 chars —</span>
+                <input type="text" id="settings-dblclick-emoji" value="👍" maxlength="4"
+                       style="width:70px;text-align:center;font-size:18px;padding:6px;" />
               </div>
             </div>
             <label class="settings-toggle-row" style="margin-top:12px;">

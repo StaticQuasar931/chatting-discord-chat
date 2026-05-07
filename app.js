@@ -885,12 +885,17 @@ function formatMessage(raw) {
   // Emoji :name:  — use a placeholder so the URL regex below can't touch the
   // img tag's src attribute and corrupt it.
   const emojiBlocks = [];
+  const personalEmoji = _getPersonalEmoji?.() || {};
   text = text.replace(/:([A-Za-z0-9_+\-]+):/g,(m,name)=>{
     let html;
     if (name==="Static") {
       html = `<img class="msg-emoji msg-emoji-static" src="${STATIC_EMOJI_URL}" alt="" />`;
     } else if (EMOJI_MAP[name]) {
       return EMOJI_MAP[name];   // plain Unicode char — safe, no URL inside
+    } else if (personalEmoji[name.toLowerCase()]) {
+      // Personal custom emoji — only this user has it stored, but anyone viewing the msg sees the image
+      const safeUrl = personalEmoji[name.toLowerCase()].replace(/"/g,"&quot;");
+      html = `<img class="msg-emoji msg-emoji-personal" src="${safeUrl}" alt=":${escapeHtml(name)}:" title=":${escapeHtml(name)}:" onerror="this.outerHTML=':${escapeHtml(name)}:'" />`;
     } else {
       return m;
     }
@@ -2159,13 +2164,32 @@ function renderChatLists() {
   const unfolderedGroups = groups.filter(c => !_chatFolder(c.id));
   $("#group-list").innerHTML = schoolHtml + foldersHtml + unfolderedGroups.map(renderRow).join("");
 
-  $("#rail-groups").innerHTML=groups.map(c=>{
+  // Rail: folders as avatar-like items, then ungrouped group chats
+  const railFoldersHtml = Object.keys(folders).map(fname => {
+    const ids = folders[fname] || [];
+    const inFolder = groups.filter(c => ids.includes(c.id));
+    if (!inFolder.length) return "";
+    // Active if any chat in this folder is the active chat
+    const active = inFolder.some(c => c.id === state.activeChatId) ? "active" : "";
+    // Show first 2 chat photos as a stacked thumbnail
+    const thumbs = inFolder.slice(0, 4).map(c => {
+      return c.photoURL
+        ? `<img src="${escapeHtml(c.photoURL)}" alt="" />`
+        : `<span>${escapeHtml(groupInitials(c.name||"G"))}</span>`;
+    }).join("");
+    return `<div class="rail-folder-avatar ${active}" data-rail-folder="${escapeHtml(fname)}" title="${escapeHtml(fname)} — ${inFolder.length} chat${inFolder.length===1?"":"s"}">
+      <div class="rail-folder-thumbs rail-folder-thumbs-${Math.min(4, inFolder.length)}">${thumbs}</div>
+      <span class="rail-folder-count">${inFolder.length}</span>
+    </div>`;
+  }).join("");
+  const railUnfoldered = unfolderedGroups.map(c => {
     const active=state.activeChatId===c.id?"active":"";
     const inner = c.photoURL
       ? `<img class="rail-group-img" src="${escapeHtml(c.photoURL)}" alt="" />`
       : escapeHtml(groupInitials(c.name||"G"));
     return `<div class="rail-group-avatar ${active}" data-chat-id="${escapeHtml(c.id)}" title="${escapeHtml(c.name||"Group")}">${inner}</div>`;
   }).join("");
+  $("#rail-groups").innerHTML = railFoldersHtml + railUnfoldered;
 }
 
 $("#dm-list").addEventListener("click", e=>{
@@ -2209,7 +2233,48 @@ $("#group-list").addEventListener("click", e=>{
   }
   const row=e.target.closest(".side-row"); if(row) openChat(row.dataset.chatId);
 });
-$("#rail-groups").addEventListener("click", e=>{ const av=e.target.closest(".rail-group-avatar"); if(av) openChat(av.dataset.chatId); });
+$("#rail-groups").addEventListener("click", e=>{
+  const av=e.target.closest(".rail-group-avatar");
+  if (av) { openChat(av.dataset.chatId); return; }
+  const fav=e.target.closest("[data-rail-folder]");
+  if (fav) { _showRailFolderPopup(fav); return; }
+});
+
+function _showRailFolderPopup(anchorEl) {
+  document.getElementById("rail-folder-popup")?.remove();
+  const fname = anchorEl.dataset.railFolder;
+  const folders = _getFolders();
+  const ids = folders[fname] || [];
+  const chats = state.chats.filter(c => ids.includes(c.id));
+  if (!chats.length) return;
+  const rect = anchorEl.getBoundingClientRect();
+  const pop = document.createElement("div");
+  pop.id = "rail-folder-popup";
+  pop.className = "rail-folder-popup";
+  pop.style.left = (rect.right + 8) + "px";
+  pop.style.top = Math.max(10, Math.min(window.innerHeight - 280, rect.top)) + "px";
+  pop.innerHTML = `
+    <div class="rail-folder-popup-head">📁 ${escapeHtml(fname)}</div>
+    ${chats.map(c => {
+      const name = c.name || "Group";
+      const inner = c.photoURL
+        ? `<img class="side-row-avatar" src="${escapeHtml(c.photoURL)}" alt="" />`
+        : `<div class="side-row-fallback">${escapeHtml(groupInitials(name))}</div>`;
+      return `<div class="rail-folder-popup-row" data-chat-id="${escapeHtml(c.id)}">
+        ${inner}<span>${escapeHtml(name)}</span>
+      </div>`;
+    }).join("")}`;
+  document.body.appendChild(pop);
+  pop.addEventListener("click", e2 => {
+    const row = e2.target.closest("[data-chat-id]");
+    if (row) { openChat(row.dataset.chatId); pop.remove(); }
+  });
+  setTimeout(() => document.addEventListener("click", function _close(e3) {
+    if (!pop.contains(e3.target) && !e3.target.closest("[data-rail-folder]")) {
+      pop.remove(); document.removeEventListener("click", _close);
+    }
+  }), 0);
+}
 
 // Right-click on a group row → quick actions
 function _showGroupCtxMenu(e, chatId) {
@@ -2728,35 +2793,51 @@ function _extractFirstUrl(text) {
   return null;
 }
 
+/* Build a simple favicon-based preview that never requires a network call.
+   This is the reliable fallback shown for every link — no CORS, no rate limits. */
+function _buildBasicPreview(url) {
+  try {
+    const u = new URL(url);
+    const host = u.hostname.replace(/^www\./, "");
+    const path = u.pathname && u.pathname !== "/" ? u.pathname : "";
+    return {
+      title: host,
+      description: path.length > 1 ? path.slice(0, 80) : "",
+      image: `https://www.google.com/s2/favicons?sz=128&domain=${u.hostname}`,
+      site: host,
+      basic: true,
+    };
+  } catch(_) { return null; }
+}
+
 async function _fetchLinkPreview(url) {
   if (_linkPreviewCache[url] !== undefined) return _linkPreviewCache[url];
   if (_linkPreviewPending[url]) return _linkPreviewPending[url];
-  // Use microlink.io free anonymous endpoint — no auth, CORS-friendly
+  // Microlink free tier has a daily limit and may CORS-block. Try it but
+  // fall back to a simple favicon-based card so every link gets a preview.
   const api = `https://api.microlink.io/?url=${encodeURIComponent(url)}`;
   _linkPreviewPending[url] = (async () => {
+    let result = null;
     try {
       const res = await fetch(api);
-      if (!res.ok) throw new Error("preview fetch failed");
-      const json = await res.json();
-      if (json?.status !== "success" || !json.data) {
-        _linkPreviewCache[url] = null;
-        return null;
+      if (res.ok) {
+        const json = await res.json();
+        if (json?.status === "success" && json.data) {
+          const d = json.data;
+          result = {
+            title: d.title || "",
+            description: d.description || "",
+            image: d.image?.url || null,
+            site: d.publisher || (new URL(url)).hostname,
+            basic: false,
+          };
+        }
       }
-      const d = json.data;
-      const out = {
-        title: d.title || "",
-        description: d.description || "",
-        image: d.image?.url || null,
-        site: d.publisher || (new URL(url)).hostname,
-      };
-      _linkPreviewCache[url] = out;
-      return out;
-    } catch(_) {
-      _linkPreviewCache[url] = null;
-      return null;
-    } finally {
-      delete _linkPreviewPending[url];
-    }
+    } catch(_) { /* network/CORS error — fall through to basic */ }
+    if (!result) result = _buildBasicPreview(url);
+    _linkPreviewCache[url] = result;
+    delete _linkPreviewPending[url];
+    return result;
   })();
   return _linkPreviewPending[url];
 }
@@ -2770,6 +2851,39 @@ function buildLinkPreviewPlaceholder(msgId, url) {
 
 // After messages render, hydrate link previews lazily
 function hydrateLinkPreviews() {
+  const placeholders = document.querySelectorAll(".link-preview[data-link-url]:not([data-link-loaded])");
+  placeholders.forEach(async el => {
+    el.setAttribute("data-link-loaded", "1");
+    const url = el.dataset.linkUrl;
+    // Render the basic favicon card immediately so user sees SOMETHING
+    const basic = _buildBasicPreview(url);
+    if (basic) _renderLinkPreview(el, url, basic);
+    // Then try to fetch a richer preview and replace if it succeeded
+    const data = await _fetchLinkPreview(url);
+    if (data && !data.basic) {
+      _renderLinkPreview(el, url, data);
+    }
+    return;
+  });
+}
+
+function _renderLinkPreview(el, url, data) {
+  const img = data.image
+    ? `<img class="link-preview-img" src="${escapeHtml(data.image)}" alt="" referrerpolicy="no-referrer" onerror="this.remove()" />`
+    : "";
+  el.innerHTML = `
+    <a href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer" class="link-preview-card${data.basic?' link-preview-basic':''}">
+      ${img}
+      <div class="link-preview-body">
+        <div class="link-preview-site">${escapeHtml(data.site||"")}</div>
+        <div class="link-preview-title">${escapeHtml(data.title||url)}</div>
+        ${data.description ? `<div class="link-preview-desc">${escapeHtml(data.description.slice(0,160))}</div>` : ""}
+      </div>
+    </a>`;
+}
+
+// Old function kept as no-op for backward references
+function _legacyLinkPreviewHydrate() {
   const placeholders = document.querySelectorAll(".link-preview[data-link-url]:not([data-link-loaded])");
   placeholders.forEach(async el => {
     el.setAttribute("data-link-loaded", "1");
@@ -2987,11 +3101,10 @@ function renderMessages() {
   const newMsgCount      = state.messages.length;
   const hadNewMessages   = newMsgCount > prevMsgCount;
   state._lastRenderedMsgCount = newMsgCount;
-  // Did the user just send a message? `state._justSentByMe` is set in sendCurrentMessage
-  // and cleared after we honor it. This is more reliable than timestamp-based detection
-  // because `serverTimestamp()` returns null until Firestore acknowledges the write.
-  const sentByMe = !!state._justSentByMe;
-  state._justSentByMe = false; // consume the flag
+  // Did the user just send a message? `state._justSentByMeAt` is a timestamp set
+  // in sendCurrentMessage. We keep it active for ~1.5s to handle Firestore's
+  // double-fire (local cache snapshot + server-confirmed snapshot).
+  const sentByMe = !!state._justSentByMeAt && (Date.now() - state._justSentByMeAt) < 1500;
 
   wrap.innerHTML=html.join("");
 
@@ -3082,13 +3195,20 @@ $("#messages").addEventListener("dblclick", async e=>{
 function _openDblclickEmojiPicker(anchorEl) {
   const picker = $("#emoji-picker");
   if (!picker) return;
+  // Ensure the picker contents are built (only built lazily on first open)
+  try { buildEmojiCatTabs?.(); buildEmojiGrid?.(); } catch(_){}
   const rect = anchorEl.getBoundingClientRect();
+  // Use position: fixed-style overrides; the picker normally lives near the
+  // composer but for setting we anchor it to the dblclick button.
+  picker.style.position = "fixed";
   picker.style.left = Math.max(10, Math.min(window.innerWidth-360, rect.left)) + "px";
+  picker.style.right = "auto";
   picker.style.bottom = "auto";
-  picker.style.top = (rect.bottom + 8) + "px";
+  picker.style.top = Math.max(10, Math.min(window.innerHeight-420, rect.bottom + 8)) + "px";
   picker.classList.remove("hidden");
   emojiOpen = true;
   picker.dataset.dblclickPickMode = "1";
+  const search = $("#emoji-search"); if (search) { search.value = ""; setTimeout(()=>search.focus(), 50); }
 }
 
 // Wire up the chooser button
@@ -3115,6 +3235,9 @@ document.addEventListener("click", e => {
   picker.classList.add("hidden");
   emojiOpen = false;
   delete picker.dataset.dblclickPickMode;
+  // Restore default positioning (CSS) so the picker pops in the right place next time
+  picker.style.position = ""; picker.style.left = ""; picker.style.right = "";
+  picker.style.top = ""; picker.style.bottom = "";
 }, true);
 
 /* Open the emoji picker positioned near a message and apply chosen emoji as reaction */
@@ -3332,8 +3455,9 @@ async function sendCurrentMessage() {
   const raw=composer.value;
   let text=raw.trim();
   if (!text||!state.activeChatId) return;
-  // Mark that the user is sending — the next renderMessages() will force-scroll to bottom.
-  state._justSentByMe = true;
+  // Mark that the user is sending — the next ~1.5s of renderMessages() calls will
+  // force-scroll to bottom (handles Firestore's local-cache + server double-fire).
+  state._justSentByMeAt = Date.now();
 
   // @silent prefix — send without triggering notification sound for recipients
   let silent=false;
@@ -6263,14 +6387,105 @@ function _renderMdPreview() {
 // Composer poll button → open builder
 $("#composer-poll-btn")?.addEventListener("click", () => openPollBuilder());
 
-/* ---------- Custom emoji submission ---------- */
+/* ---------- Custom emoji: personal (immediate) + sticker submission ---------- */
+
+// Personal emoji storage in localStorage
+function _getPersonalEmoji() {
+  try { return JSON.parse(localStorage.getItem("sc_personal_emoji")||"{}"); }
+  catch(_){ return {}; }
+}
+function _savePersonalEmoji(map) {
+  localStorage.setItem("sc_personal_emoji", JSON.stringify(map));
+}
+
+function _renderPersonalEmojiList() {
+  const list = $("#emoji-personal-list"); if (!list) return;
+  const map = _getPersonalEmoji();
+  const entries = Object.entries(map);
+  if (!entries.length) {
+    list.innerHTML = `<span class="hint" style="font-size:11px;">— none yet —</span>`;
+    return;
+  }
+  list.innerHTML = entries.map(([name, url]) => `
+    <div class="emoji-personal-item" title=":${escapeHtml(name)}:">
+      <img src="${escapeHtml(url)}" alt=":${escapeHtml(name)}:" onerror="this.style.display='none'" />
+      <span class="emoji-personal-name">:${escapeHtml(name)}:</span>
+      <button class="emoji-personal-del" data-del-emoji="${escapeHtml(name)}" title="Remove">✕</button>
+    </div>
+  `).join("");
+}
+
+function _switchEmojiModalTab(tab) {
+  $$("[data-emoji-tab]").forEach(t => t.classList.toggle("active", t.dataset.emojiTab === tab));
+  $$("[data-emoji-pane]").forEach(p => p.style.display = (p.dataset.emojiPane === tab) ? "" : "none");
+  // Show the correct primary action button
+  const personalBtn = $("#emoji-personal-add-btn");
+  const stickerBtn  = $("#emoji-submit-confirm-btn");
+  if (personalBtn) personalBtn.style.display = (tab === "personal") ? "" : "none";
+  if (stickerBtn)  stickerBtn.style.display  = (tab === "sticker")  ? "" : "none";
+}
+
 $("#emoji-submit-btn")?.addEventListener("click", () => {
+  // Personal pane
+  $("#emoji-personal-name").value = "";
+  $("#emoji-personal-url").value = "";
+  $("#emoji-personal-preview").style.display = "none";
+  // Sticker pane
   $("#emoji-submit-name").value = "";
   $("#emoji-submit-url").value = "";
   $("#emoji-submit-preview").style.display = "none";
+  _renderPersonalEmojiList();
+  _switchEmojiModalTab("personal");
   $("#emoji-picker")?.classList.add("hidden");
   emojiOpen = false;
   openModal("emoji-submit-modal");
+});
+
+// Tab switching
+document.addEventListener("click", e => {
+  const tab = e.target.closest("[data-emoji-tab]");
+  if (tab) _switchEmojiModalTab(tab.dataset.emojiTab);
+});
+
+// Personal-emoji URL preview
+$("#emoji-personal-url")?.addEventListener("input", e => {
+  const url = e.target.value.trim();
+  const wrap = $("#emoji-personal-preview");
+  const img = $("#emoji-personal-preview-img");
+  if (url && /^https?:\/\//i.test(url)) {
+    img.src = url; img.onerror = () => wrap.style.display = "none";
+    img.onload = () => wrap.style.display = "block";
+  } else { wrap.style.display = "none"; }
+});
+
+// Add personal emoji (no review, instant)
+$("#emoji-personal-add-btn")?.addEventListener("click", () => {
+  const name = ($("#emoji-personal-name").value||"").trim().toLowerCase();
+  const url  = ($("#emoji-personal-url").value||"").trim();
+  if (!/^[a-z0-9_]{2,32}$/.test(name)) { showToast("Name: 2-32 letters/numbers/underscores"); return; }
+  if (!/^https?:\/\/.+\.(png|gif|webp|jpe?g)(\?.*)?$/i.test(url)) {
+    showToast("URL must end in .png, .gif, .webp, or .jpg"); return;
+  }
+  const map = _getPersonalEmoji();
+  map[name] = url;
+  _savePersonalEmoji(map);
+  $("#emoji-personal-name").value = "";
+  $("#emoji-personal-url").value = "";
+  $("#emoji-personal-preview").style.display = "none";
+  _renderPersonalEmojiList();
+  showToast(`✓ Added :${name}: — use it in any message`);
+});
+
+// Delete personal emoji
+$("#emoji-personal-list")?.addEventListener("click", e => {
+  const btn = e.target.closest("[data-del-emoji]");
+  if (!btn) return;
+  const name = btn.dataset.delEmoji;
+  const map = _getPersonalEmoji();
+  delete map[name];
+  _savePersonalEmoji(map);
+  _renderPersonalEmojiList();
+  showToast(`Removed :${name}:`);
 });
 
 // Live preview as URL is typed
