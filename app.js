@@ -406,8 +406,14 @@ const state = {
   chatScrolledInitial: new Set(), // chatIds that have had their initial scroll done
   silentTyping:      localStorage.getItem("sc_silent_typing") === "true",
   showLastActive:    localStorage.getItem("sc_show_last_active") === "true",
-  pfpAnimate:        localStorage.getItem("sc_pfp_animate") || "always", // "always"|"messages-only"|"never"
+  pfpAnimate:        (function(){
+    const v = localStorage.getItem("sc_pfp_animate");
+    // Migrate legacy "messages-only" → "sidebar-only" (semantics flipped to reduce spam)
+    if (v === "messages-only") { localStorage.setItem("sc_pfp_animate","sidebar-only"); return "sidebar-only"; }
+    return v || "always";
+  })(), // "always"|"sidebar-only"|"never"
   anonInSchoolChat:  localStorage.getItem("sc_anon_school") === "true",
+  autoScrollNew:     localStorage.getItem("sc_auto_scroll") !== "false", // default ON
   snoozedUsers:      new Set(JSON.parse(localStorage.getItem("sc_snoozed_users")||"[]")),
   autoSendGif:       localStorage.getItem("sc_autosend_gif") === "true",
   dblClickReact:     localStorage.getItem("sc_dblclick_react") === "true",
@@ -738,26 +744,34 @@ async function _autoFlagCheck(text, msgId, chatId, senderUid, senderName) {
 }
 
 /* Should an animated PFP be allowed in this context?
-   state.pfpAnimate: "always" | "messages-only" | "never" */
+   state.pfpAnimate: "always" | "sidebar-only" | "never"
+   "sidebar-only" = animate in sidebar/headers/cards but NOT in individual messages
+                    (reduces spam/movement from many message avatars).
+   Backward-compat: legacy "messages-only" maps to "sidebar-only" with flipped meaning.
+*/
 function _shouldAnimatePfp(context) {
   const mode = state.pfpAnimate || "always";
   if (mode === "always") return true;
   if (mode === "never") return false;
-  if (mode === "messages-only") return context === "message";
+  // "sidebar-only" — animate everywhere EXCEPT inside chat messages
+  if (mode === "sidebar-only" || mode === "messages-only") {
+    return context !== "message";
+  }
   return true;
 }
 
 function avatarMarkup(displayName, photoURL, sizeClass="side-row-avatar", fallbackClass="side-row-fallback", context) {
-  if (photoURL) {
-    const isGif = /\.gif(\?|$)/i.test(photoURL);
-    if (isGif && !_shouldAnimatePfp(context)) {
-      // Replace animated GIF with static fallback (initials)
-      const initial = (displayName||"?").trim().charAt(0).toUpperCase()||"?";
-      return `<div class="${fallbackClass}" title="GIF avatar (animation paused)">${escapeHtml(initial)}</div>`;
-    }
-    return `<img class="${sizeClass}" src="${escapeHtml(photoURL)}" alt="" />`;
-  }
   const initial = (displayName||"?").trim().charAt(0).toUpperCase()||"?";
+  if (photoURL) {
+    const isGif = /\.(gif|webp)(\?|$)/i.test(photoURL) || /tenor\.com|giphy\.com/i.test(photoURL);
+    if (isGif && !_shouldAnimatePfp(context)) {
+      return `<div class="${fallbackClass}" title="Animated avatar (paused)">${escapeHtml(initial)}</div>`;
+    }
+    // onerror fallback: swap broken image for initials so Tenor/CORS failures don't show broken icons
+    const safeInitial = escapeHtml(initial).replace(/"/g, "&quot;");
+    const safeFallback = escapeHtml(fallbackClass).replace(/"/g, "&quot;");
+    return `<img class="${sizeClass}" src="${escapeHtml(photoURL)}" alt="" referrerpolicy="no-referrer" onerror="this.outerHTML='&lt;div class=&quot;${safeFallback}&quot; title=&quot;Could not load image&quot;&gt;${safeInitial}&lt;/div&gt;'" />`;
+  }
   return `<div class="${fallbackClass}">${escapeHtml(initial)}</div>`;
 }
 
@@ -2041,8 +2055,10 @@ function renderChatLists() {
     return bt - at;
   });
   const dms=visibleChats.filter(c=>c.type==="dm");
-  // School chats are kept separate — they appear under the rail school button, not in regular groups
+  // Regular groups (no school domain)
   const groups=visibleChats.filter(c=>c.type==="group" && !c.schoolDomain);
+  // School chats — shown in their own section ABOVE the regular groups
+  const schoolChats=visibleChats.filter(c=>c.type==="group" && c.schoolDomain);
   // Folders: split groups by folder for rendering
   const folders = _getFolders();
   const collapsed = new Set(JSON.parse(localStorage.getItem("sc_folders_collapsed")||"[]"));
@@ -2113,6 +2129,16 @@ function renderChatLists() {
         ${typingHint}${pinDot}${matchHint}${mutedDot}${unread}
       </div>`;
   };
+  // School chats section (separate from regular groups)
+  const schoolHtml = schoolChats.length ? `
+    <div class="folder-section school-section">
+      <div class="folder-header" style="color:#a78bfa;">
+        <span class="folder-arrow">🎓</span>
+        <span class="folder-name">School Chats</span>
+        <span class="folder-count">${schoolChats.length}</span>
+      </div>
+      <div class="folder-rows">${schoolChats.map(renderRow).join("")}</div>
+    </div>` : "";
   // Folder sections first
   const foldersHtml = Object.keys(folders).map(fname => {
     const ids = folders[fname] || [];
@@ -2131,7 +2157,7 @@ function renderChatLists() {
   }).join("");
   // Unfoldered groups list
   const unfolderedGroups = groups.filter(c => !_chatFolder(c.id));
-  $("#group-list").innerHTML = foldersHtml + unfolderedGroups.map(renderRow).join("");
+  $("#group-list").innerHTML = schoolHtml + foldersHtml + unfolderedGroups.map(renderRow).join("");
 
   $("#rail-groups").innerHTML=groups.map(c=>{
     const active=state.activeChatId===c.id?"active":"";
@@ -2682,6 +2708,82 @@ function buildReplyPreview(m) {
   </div>`;
 }
 
+/* ---------- Link previews (OpenGraph via microlink.io free tier) ---------- */
+const _linkPreviewCache = {}; // url -> {title, description, image, ogResolved} or null
+const _linkPreviewPending = {}; // url -> Promise
+
+function _extractFirstUrl(text) {
+  if (!text) return null;
+  const m = text.match(/https?:\/\/[^\s<]+/i);
+  return m ? m[0] : null;
+}
+
+async function _fetchLinkPreview(url) {
+  if (_linkPreviewCache[url] !== undefined) return _linkPreviewCache[url];
+  if (_linkPreviewPending[url]) return _linkPreviewPending[url];
+  // Use microlink.io free anonymous endpoint — no auth, CORS-friendly
+  const api = `https://api.microlink.io/?url=${encodeURIComponent(url)}`;
+  _linkPreviewPending[url] = (async () => {
+    try {
+      const res = await fetch(api);
+      if (!res.ok) throw new Error("preview fetch failed");
+      const json = await res.json();
+      if (json?.status !== "success" || !json.data) {
+        _linkPreviewCache[url] = null;
+        return null;
+      }
+      const d = json.data;
+      const out = {
+        title: d.title || "",
+        description: d.description || "",
+        image: d.image?.url || null,
+        site: d.publisher || (new URL(url)).hostname,
+      };
+      _linkPreviewCache[url] = out;
+      return out;
+    } catch(_) {
+      _linkPreviewCache[url] = null;
+      return null;
+    } finally {
+      delete _linkPreviewPending[url];
+    }
+  })();
+  return _linkPreviewPending[url];
+}
+
+function buildLinkPreviewPlaceholder(msgId, url) {
+  if (!url) return "";
+  return `<div class="link-preview" data-link-msg-id="${escapeHtml(msgId)}" data-link-url="${escapeHtml(url)}">
+    <div class="link-preview-loading">Loading preview…</div>
+  </div>`;
+}
+
+// After messages render, hydrate link previews lazily
+function hydrateLinkPreviews() {
+  const placeholders = document.querySelectorAll(".link-preview[data-link-url]:not([data-link-loaded])");
+  placeholders.forEach(async el => {
+    el.setAttribute("data-link-loaded", "1");
+    const url = el.dataset.linkUrl;
+    const data = await _fetchLinkPreview(url);
+    if (!data) {
+      el.remove();
+      return;
+    }
+    const img = data.image
+      ? `<img class="link-preview-img" src="${escapeHtml(data.image)}" alt="" referrerpolicy="no-referrer" onerror="this.remove()" />`
+      : "";
+    el.innerHTML = `
+      <a href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer" class="link-preview-card">
+        ${img}
+        <div class="link-preview-body">
+          <div class="link-preview-site">${escapeHtml(data.site||"")}</div>
+          <div class="link-preview-title">${escapeHtml(data.title||url)}</div>
+          ${data.description ? `<div class="link-preview-desc">${escapeHtml(data.description.slice(0,160))}</div>` : ""}
+        </div>
+      </a>`;
+  });
+}
+
 function buildReactionBar(reactions={}, msgId) {
   const entries=Object.entries(reactions).filter(([,uids])=>uids.length>0);
   if (!entries.length) return "";
@@ -2700,7 +2802,7 @@ function renderMessages() {
     return;
   }
   const html=[];
-  let lastSenderUid=null, lastTime=0;
+  let lastSenderUid=null, lastTime=0, lastWasAnon=false, lastAnonId=null;
   const c=state.activeChat;
   const leaders=Array.isArray(c?.leaders)?c.leaders:[];
   const lastRead=state.lastReadMarker[state.activeChatId]||0;
@@ -2731,7 +2833,14 @@ function renderMessages() {
       html.push(`<div class="unread-divider" role="separator" id="unread-divider-bar" title="Click to dismiss"><span>${label}</span></div>`);
       unreadDividerInserted=true;
     }
-    const sameSender=m.senderUid===lastSenderUid;
+    // Group consecutive messages — but break the group whenever:
+    //   1) sender uid changes
+    //   2) anonymous state changes (anon→named or named→anon)
+    //   3) anon message uses a different anonId than the previous anon message
+    const isAnon = !!m.anonymous;
+    const anonStateChanged = lastWasAnon !== isAnon;
+    const anonIdChanged = isAnon && lastAnonId && (m.anonMsgId !== lastAnonId);
+    const sameSender = (m.senderUid===lastSenderUid) && !anonStateChanged && !anonIdChanged;
     const closeInTime=tms-lastTime<5*60*1000;
     const isSelf=m.senderUid===state.user?.uid;
     const isLeader=leaders.includes(m.senderUid);
@@ -2810,18 +2919,22 @@ function renderMessages() {
         </div>
       </div>`);
       lastSenderUid = m.senderUid; lastTime = tms;
+      lastWasAnon = !!m.anonymous; lastAnonId = m.anonymous ? (m.anonMsgId || null) : null;
       continue;
     }
 
     const isCommand=!!(m.commandResult||m.type==="command");
     const extraClass=isCommand?" msg-command-result":"";
 
+    const linkUrl = _extractFirstUrl(m.text || "");
+    const linkPreview = linkUrl ? buildLinkPreviewPlaceholder(m.id, linkUrl) : "";
     if (sameSender&&closeInTime&&lastSenderUid!==null) {
       html.push(`
         <div class="msg-followup${extraClass}" data-msg-id="${escapeHtml(m.id)}" title="${tsTitle}">
           <span class="msg-time-inline">${escapeHtml(shortTime(ts))}</span>
           ${replyHtml}
           <div class="msg-body">${formatMessage(m.text||"")}${editedLabel}</div>
+          ${linkPreview}
           ${reactionsHtml}
           ${msgActions}
         </div>`);
@@ -2843,17 +2956,23 @@ function renderMessages() {
             </div>
             ${replyHtml}
             <div class="msg-body">${formatMessage(m.text||"")}${editedLabel}</div>
+            ${linkPreview}
             ${reactionsHtml}
             ${msgActions}
           </div>
         </div>`);
     }
     lastSenderUid=m.senderUid; lastTime=tms;
+    lastWasAnon = !!m.anonymous; lastAnonId = m.anonymous ? (m.anonMsgId || null) : null;
   }
   // Capture scroll state BEFORE innerHTML wipe — innerHTML resets scrollTop to 0
   const prevScrollTop    = wrap.scrollTop;
   const prevScrollHeight = wrap.scrollHeight;
-  const wasAtBottom      = prevScrollHeight - prevScrollTop - wrap.clientHeight < 120;
+  // Threshold: 60px (tight) — if user is this close to the bottom, treat as "at bottom"
+  const wasAtBottom      = prevScrollHeight - prevScrollTop - wrap.clientHeight < 60;
+  // Did the user just send the newest message? Always scroll for own messages.
+  const newest = state.messages[state.messages.length - 1];
+  const sentByMe = newest && newest.senderUid === state.user?.uid && (Date.now() - (newest.createdAt?.toMillis?.()||0)) < 2000;
 
   wrap.innerHTML=html.join("");
 
@@ -2880,8 +2999,14 @@ function renderMessages() {
       wrap.scrollTop=wrap.scrollHeight;
     }
   } else {
-    if (wasAtBottom) {
-      wrap.scrollTop=wrap.scrollHeight;
+    const autoScroll = state.autoScrollNew !== false; // default ON
+    if (sentByMe || (autoScroll && wasAtBottom)) {
+      // Smooth scroll for new content when user is at bottom or just sent a message
+      try {
+        wrap.scrollTo({ top: wrap.scrollHeight, behavior: "smooth" });
+      } catch(_){
+        wrap.scrollTop = wrap.scrollHeight;
+      }
     } else {
       // Preserve exact scroll position — adjust for any height change (new messages above)
       wrap.scrollTop = prevScrollTop + (wrap.scrollHeight - prevScrollHeight);
@@ -2890,6 +3015,8 @@ function renderMessages() {
   // Store unread count so jump button can show it
   state._unreadDisplayCount = unreadCount;
   updateJumpBtn();
+  // Lazy-hydrate any link previews in the just-rendered batch
+  hydrateLinkPreviews();
 }
 
 // Unread divider dismiss — click to clear the marker and hide the bar
@@ -2923,6 +3050,46 @@ $("#messages").addEventListener("dblclick", async e=>{
   group.classList.add("dbl-react-flash");
   setTimeout(()=>group.classList.remove("dbl-react-flash"), 400);
 });
+
+/* Open emoji picker in "select-emoji" mode for double-click react setting.
+   The next emoji click is captured and stored as the user's preferred dblclick emoji. */
+function _openDblclickEmojiPicker(anchorEl) {
+  const picker = $("#emoji-picker");
+  if (!picker) return;
+  const rect = anchorEl.getBoundingClientRect();
+  picker.style.left = Math.max(10, Math.min(window.innerWidth-360, rect.left)) + "px";
+  picker.style.bottom = "auto";
+  picker.style.top = (rect.bottom + 8) + "px";
+  picker.classList.remove("hidden");
+  emojiOpen = true;
+  picker.dataset.dblclickPickMode = "1";
+}
+
+// Wire up the chooser button
+document.addEventListener("click", e => {
+  const btn = e.target.closest("#dblclick-emoji-pick-btn");
+  if (btn) { e.stopPropagation(); _openDblclickEmojiPicker(btn); }
+});
+// Capture next emoji click while in dblclick-pick mode
+document.addEventListener("click", e => {
+  const picker = $("#emoji-picker");
+  if (!picker || picker.classList.contains("hidden")) return;
+  if (!picker.dataset.dblclickPickMode) return;
+  const cell = e.target.closest(".emoji-cell");
+  if (!cell) return;
+  e.stopImmediatePropagation();
+  const emoji = cell.dataset.emoji || cell.textContent.trim();
+  if (emoji) {
+    state.dblClickEmoji = emoji;
+    localStorage.setItem("sc_dblclick_emoji", emoji);
+    if ($("#dblclick-emoji-preview")) $("#dblclick-emoji-preview").textContent = emoji;
+    if ($("#settings-dblclick-emoji")) $("#settings-dblclick-emoji").value = emoji;
+    showToast(`Reaction emoji set to ${emoji}`);
+  }
+  picker.classList.add("hidden");
+  emojiOpen = false;
+  delete picker.dataset.dblclickPickMode;
+}, true);
 
 /* Open the emoji picker positioned near a message and apply chosen emoji as reaction */
 function _openReactionPicker(msgId, x, y) {
@@ -3594,7 +3761,7 @@ async function openGroupInfoModal(chatId) {
   const codeSection = $("#group-info-modal").querySelectorAll(".group-info-section")[0];
   if (codeSection) codeSection.style.display = isSchoolChat ? "none" : "";
 
-  // School governance notice
+  // School governance notice + propose-vote button
   let notice = $("#group-info-school-notice");
   if (isSchoolChat) {
     if (!notice) {
@@ -3604,7 +3771,12 @@ async function openGroupInfoModal(chatId) {
       notice.style.cssText = "margin:10px 0;font-size:12.5px;";
       $("#group-info-modal").querySelector(".modal-body").prepend(notice);
     }
-    notice.innerHTML = `<strong>🎓 Democratic school chat.</strong> No one owns this chat — all members are equal.${isFirstMember ? " As the first member, you can set the chat photo and nickname." : " Only the first member can set the chat photo & nickname; all other changes will eventually require a vote."}`;
+    notice.innerHTML = `<strong>🎓 Democratic school chat.</strong> ${isFirstMember ? "As the first member, you can set the chat photo and nickname directly." : "Anyone can propose a change with a poll — if 50%+ of voters vote yes within the time window, it'll auto-apply."}
+      <div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap;">
+        <button class="btn-secondary" data-school-propose="nickname" style="font-size:12px;">📝 Propose nickname change</button>
+        <button class="btn-secondary" data-school-propose="photoURL" style="font-size:12px;">🖼️ Propose photo change</button>
+        <button class="btn-secondary" data-school-propose="description" style="font-size:12px;">📄 Propose description change</button>
+      </div>`;
   } else if (notice) {
     notice.remove();
   }
@@ -3839,9 +4011,12 @@ function _showSchoolOptin(dom) {
   $("#school-join-btn").disabled = true;
 }
 
+let _schoolGradeFilter = "";
+
 async function _showSchoolDirectory(dom) {
   $("#school-optin-view").classList.add("hidden");
   $("#school-directory-view").classList.remove("hidden");
+  $("#school-filters-row")?.classList.remove("hidden");
 
   // Listen to members
   if (_schoolMembersUnsub) { _schoolMembersUnsub(); _schoolMembersUnsub = null; }
@@ -3852,25 +4027,30 @@ async function _showSchoolDirectory(dom) {
     _schoolMembersUnsub = onSnapshot(
       collection(db, "EducationDiscovery", dom, "members"),
       snap => {
-        const members = snap.docs.map(d => d.data());
-        $("#school-directory-count").textContent = members.length;
+        const allMembers = snap.docs.map(d => d.data());
+        const members = _schoolGradeFilter
+          ? allMembers.filter(m => m.grade === _schoolGradeFilter)
+          : allMembers;
+        $("#school-directory-count").textContent = `${members.length}${_schoolGradeFilter ? ` of ${allMembers.length}` : ""}`;
         if (!members.length) {
-          list.innerHTML = `<div class="empty" style="padding:18px;color:var(--t-muted);">No other members yet — be the first!</div>`;
+          list.innerHTML = `<div class="empty" style="padding:18px;color:var(--t-muted);">${_schoolGradeFilter?"No members match that grade.":"No other members yet — be the first!"}</div>`;
           return;
         }
+        const GRADE_LABELS = { freshman:"🌱 Freshman", sophomore:"📗 Sophomore", junior:"🎒 Junior", senior:"🎓 Senior", grad:"🎓 Grad", staff:"👨‍🏫 Staff" };
         list.innerHTML = members.map(m => {
           const username = m.username || "User";
           const displayName = m.nickname ? m.nickname : username;
           const bio = m.bio || "";
           const isMe = m.uid === state.user.uid;
-          // If nickname is set, show username as small subtitle
+          const gradeChip = m.grade && GRADE_LABELS[m.grade]
+            ? `<span class="school-grade-chip" title="Self-reported — anyone can claim any grade">${escapeHtml(GRADE_LABELS[m.grade])}</span>` : "";
           const nameLine = m.nickname
             ? `${escapeHtml(displayName)} <small style='color:var(--t-muted);font-weight:400;'>(@${escapeHtml(username)})</small>`
             : escapeHtml(displayName);
           return `<div class="school-member-row" data-profile-uid="${escapeHtml(m.uid)}">
             ${avatarMarkup(displayName, m.photoURL, "side-row-avatar", "side-row-fallback")}
             <div class="school-member-info">
-              <div class="school-member-name">${nameLine}${isMe?" <small style='color:var(--t-muted);font-weight:400;'>(you)</small>":""}</div>
+              <div class="school-member-name">${nameLine}${gradeChip}${isMe?" <small style='color:var(--t-muted);font-weight:400;'>(you)</small>":""}</div>
               <div class="school-member-bio">${escapeHtml(bio.slice(0,80) || "No bio")}</div>
             </div>
           </div>`;
@@ -3901,10 +4081,12 @@ $("#school-join-btn")?.addEventListener("click", async () => {
   btn.disabled = true; btn.textContent = "Joining…";
   try {
     const nickname = ($("#school-nickname-input")?.value || "").trim().slice(0, 32);
+    const grade = ($("#school-grad-input")?.value || "").trim();
     await setDoc(doc(db, "EducationDiscovery", dom, "members", state.user.uid), {
       uid: state.user.uid,
       username: state.user.username || state.user.displayName,
       nickname: nickname || null,
+      grade: grade || null,
       photoURL: state.user.photoURL || null,
       bio: state.user.bio || "",
       joinedAt: serverTimestamp()
@@ -3981,6 +4163,19 @@ $("#school-open-chat-btn")?.addEventListener("click", async () => {
 
 // Rail button click
 $("#rail-school")?.addEventListener("click", openSchoolModal);
+
+// Grade-filter chip clicks
+document.addEventListener("click", e => {
+  const chip = e.target.closest("[data-grade-filter]");
+  if (!chip) return;
+  $$("[data-grade-filter]").forEach(b => b.classList.remove("active"));
+  chip.classList.add("active");
+  _schoolGradeFilter = chip.dataset.gradeFilter || "";
+  // Re-render via the existing onSnapshot — trigger by toggling the filter; the listener will fire fresh on next change.
+  // For immediate feedback, manually re-fetch:
+  const dom = _userSchoolDomain(); if (!dom) return;
+  if (_schoolMembersUnsub) { _schoolMembersUnsub(); _schoolMembersUnsub = null; _showSchoolDirectory(dom); }
+});
 
 // Member row click → full profile
 $("#school-members-list")?.addEventListener("click", e => {
@@ -4178,6 +4373,7 @@ function openSettingsModal(pane) {
   if($("#settings-compact-toggle"))            $("#settings-compact-toggle").checked=state.compactMode;
   $$(".text-size-btn").forEach(b=>b.classList.toggle("active", parseFloat(b.dataset.size)===state.textSize));
   if($("#settings-show-last-active-toggle"))   $("#settings-show-last-active-toggle").checked=state.showLastActive;
+  if($("#settings-autoscroll-toggle"))         $("#settings-autoscroll-toggle").checked=state.autoScrollNew;
   // Birthday from cached profile
   const myProf = state.userCache[state.user?.uid] || {};
   if (myProf.birthday) {
@@ -4395,6 +4591,10 @@ $("#settings-dblclick-emoji")?.addEventListener("input", e => {
 $("#settings-silent-typing-toggle")?.addEventListener("change", e => {
   state.silentTyping = e.target.checked;
   localStorage.setItem("sc_silent_typing", e.target.checked ? "true" : "false");
+});
+$("#settings-autoscroll-toggle")?.addEventListener("change", e => {
+  state.autoScrollNew = e.target.checked;
+  localStorage.setItem("sc_auto_scroll", e.target.checked ? "true" : "false");
 });
 // Birthday: save month/day on change to user profile
 async function _saveBirthday() {
@@ -5040,6 +5240,7 @@ const SLASH_CMD_LIST = [
   { name:"tip",      aliases:["loadingtip"],         desc:"Show a random tip" },
   { name:"quote",    aliases:["q"],                  desc:"Show a random quote" },
   { name:"shrug",    aliases:[],                     desc:"Send a shrug ¯\\_(ツ)_/¯" },
+  { name:"poll",     aliases:[],                     desc:"Start a poll — /poll Question? | A | B [duration:1h]", openPoll: true },
   { name:"help",     aliases:["h"],                  desc:"List all commands" },
 ];
 
@@ -5075,6 +5276,13 @@ function hideCmdAc() {
 function insertCmdAcItem(idx) {
   if (idx<0||idx>=_cmdAcItems.length) return;
   const cmd=_cmdAcItems[idx];
+  // /poll opens the visual poll builder instead of inserting raw text
+  if (cmd.openPoll) {
+    composer.value = "";
+    hideCmdAc(); updateSendBtn();
+    openPollBuilder();
+    return;
+  }
   composer.value="/"+cmd.name+" ";
   composer.selectionStart=composer.selectionEnd=composer.value.length;
   hideCmdAc(); updateSendBtn(); composer.focus();
@@ -5719,6 +5927,89 @@ $("#reply-bar-cancel")?.addEventListener("click", clearReplyTo);
 /* =====================================================================
    MESSAGE REACTIONS
    ===================================================================== */
+/* Poll builder modal — friendly UI for creating polls */
+function _renderPollBuilderOptions(opts) {
+  const wrap = $("#poll-builder-options");
+  if (!wrap) return;
+  wrap.innerHTML = opts.map((v, i) => `
+    <div class="poll-builder-option-row">
+      <span class="poll-builder-option-num">${i+1}.</span>
+      <input type="text" class="poll-builder-option" data-poll-opt-idx="${i}" maxlength="80" value="${escapeHtml(v||"")}" placeholder="Option ${i+1}" />
+      ${opts.length > 2 ? `<button class="icon-btn poll-builder-remove-opt" data-poll-opt-idx="${i}" title="Remove" style="color:var(--c-danger);">✕</button>` : ""}
+    </div>
+  `).join("");
+}
+
+function openPollBuilder() {
+  if (!state.activeChatId) { showToast("Open a chat first"); return; }
+  $("#poll-builder-question").value = "";
+  $("#poll-builder-duration").value = "86400000";
+  $$(".poll-dur-chip").forEach(b => b.classList.toggle("active", b.dataset.pollDur === "86400000"));
+  _renderPollBuilderOptions(["", ""]);
+  openModal("poll-builder-modal");
+  setTimeout(() => $("#poll-builder-question")?.focus(), 100);
+}
+
+// Add/remove option rows
+$("#poll-builder-add-option")?.addEventListener("click", () => {
+  const opts = [...document.querySelectorAll(".poll-builder-option")].map(i => i.value);
+  if (opts.length >= 10) { showToast("Max 10 options"); return; }
+  opts.push("");
+  _renderPollBuilderOptions(opts);
+});
+$("#poll-builder-options")?.addEventListener("click", e => {
+  const rm = e.target.closest(".poll-builder-remove-opt");
+  if (!rm) return;
+  const idx = +rm.dataset.pollOptIdx;
+  const opts = [...document.querySelectorAll(".poll-builder-option")].map(i => i.value);
+  opts.splice(idx, 1);
+  _renderPollBuilderOptions(opts);
+});
+
+// Duration chips
+document.addEventListener("click", e => {
+  const chip = e.target.closest(".poll-dur-chip");
+  if (!chip) return;
+  $$(".poll-dur-chip").forEach(b => b.classList.remove("active"));
+  chip.classList.add("active");
+  $("#poll-builder-duration").value = chip.dataset.pollDur;
+});
+
+// Create poll
+$("#poll-builder-create-btn")?.addEventListener("click", async () => {
+  const question = $("#poll-builder-question").value.trim();
+  if (!question) { showToast("Add a question"); return; }
+  const optionEls = [...document.querySelectorAll(".poll-builder-option")];
+  const options = optionEls.map(i => i.value.trim()).filter(Boolean);
+  if (options.length < 2) { showToast("Need at least 2 non-empty options"); return; }
+  const durMs = parseInt($("#poll-builder-duration").value, 10) || 86400000;
+  const chatId = state.activeChatId; if (!chatId || !state.user) return;
+  const btn = $("#poll-builder-create-btn");
+  btn.disabled = true; btn.textContent = "Posting…";
+  try {
+    await addDoc(collection(db, "chats", chatId, "messages"), {
+      senderUid: state.user.uid, senderName: state.user.displayName,
+      senderPhoto: state.user.photoURL || null, createdAt: serverTimestamp(),
+      type: "poll", text: question, reactions: {},
+      pollData: {
+        question, options, votes: {},
+        durationMs: durMs, endsAt: Date.now() + durMs,
+        createdAt: Date.now(), createdBy: state.user.uid
+      }
+    });
+    await updateDoc(doc(db, "chats", chatId), {
+      lastMessage: `📊 Poll: ${question.slice(0, 100)}`,
+      lastMessageAt: serverTimestamp(), lastSenderUid: state.user.uid
+    });
+    closeModal("poll-builder-modal");
+    showToast("✓ Poll posted");
+  } catch(err) {
+    showToast("Error: " + err.message);
+  } finally {
+    btn.disabled = false; btn.textContent = "📊 Post Poll";
+  }
+});
+
 async function castPollVote(msgId, optionIdx) {
   const chatId = state.activeChatId;
   if (!chatId || !state.user) return;
@@ -5744,6 +6035,85 @@ $("#messages")?.addEventListener("click", e => {
   e.stopPropagation();
   castPollVote(btn.dataset.msgId, parseInt(btn.dataset.pollVote, 10));
 });
+
+/* ---------- School governance: propose a change as a poll ---------- */
+$("#group-info-modal")?.addEventListener("click", async e => {
+  const btn = e.target.closest("[data-school-propose]");
+  if (!btn) return;
+  const c = state.chats.find(x => x.id === state._groupInfoChatId);
+  if (!c || !c.schoolDomain) return;
+  const field = btn.dataset.schoolPropose;
+  const fieldLabel = { nickname:"nickname", photoURL:"photo URL", description:"description" }[field] || field;
+  const newVal = prompt(`Propose new ${fieldLabel} for the school chat:`, c[field === "nickname" ? "chatNickname" : field] || "");
+  if (newVal === null) return;
+  const trimmed = (newVal||"").trim();
+  if (trimmed.length > 1000) { showToast("Too long"); return; }
+  // Decide poll duration: 1 hour by default
+  const durMs = 60 * 60 * 1000;
+  try {
+    await addDoc(collection(db, "chats", c.id, "messages"), {
+      senderUid: state.user.uid,
+      senderName: state.user.displayName,
+      senderPhoto: state.user.photoURL || null,
+      createdAt: serverTimestamp(),
+      type: "poll", text: `Proposal: change ${fieldLabel}`, reactions: {},
+      pollData: {
+        question: `Change ${fieldLabel} to: "${trimmed.slice(0,140)}"?`,
+        options: ["Yes — apply", "No — keep current"],
+        votes: {}, durationMs: durMs, endsAt: Date.now() + durMs,
+        createdAt: Date.now(), createdBy: state.user.uid,
+        // Governance metadata
+        kind: "governance",
+        govField: field === "nickname" ? "chatNickname" : field,
+        govValue: trimmed,
+        govThresholdPct: 50, // 50%+ of voters voting Yes
+        govApplied: false
+      }
+    });
+    await updateDoc(doc(db, "chats", c.id), {
+      lastMessage: `📊 Proposal: change ${fieldLabel}`,
+      lastMessageAt: serverTimestamp(), lastSenderUid: state.user.uid
+    });
+    closeModal("group-info-modal");
+    showToast("✓ Proposal posted as a poll");
+  } catch(err) { showToast("Error: " + err.message); }
+});
+
+/* ---------- Auto-apply governance polls when they end ---------- */
+async function _autoApplyGovernancePoll(msg, chatId) {
+  const pd = msg.pollData; if (!pd) return;
+  if (pd.kind !== "governance" || pd.govApplied) return;
+  if (!pd.endsAt || Date.now() < pd.endsAt) return;
+  const votes = Object.values(pd.votes || {});
+  const total = votes.length;
+  if (total === 0) return; // no quorum, skip
+  const yes = votes.filter(v => v === 0).length;
+  const yesPct = (yes / total) * 100;
+  const passed = yesPct >= (pd.govThresholdPct || 50);
+  // Only one client should apply — use a simple write that's idempotent on `govApplied`
+  try {
+    if (passed && pd.govField && pd.govValue !== undefined) {
+      await updateDoc(doc(db, "chats", chatId), { [pd.govField]: pd.govValue });
+    }
+    await updateDoc(doc(db, "chats", chatId, "messages", msg.id), {
+      "pollData.govApplied": true,
+      "pollData.govPassed": passed,
+      "pollData.govYesPct": yesPct
+    });
+    if (passed) showToast(`✓ Vote passed: ${pd.govField} updated`);
+  } catch(_) { /* race / permission — ignore */ }
+}
+
+// Run periodically while on a school chat
+setInterval(() => {
+  if (!state.activeChat?.schoolDomain) return;
+  const cid = state.activeChatId;
+  for (const m of state.messages || []) {
+    if (m.type === "poll" && m.pollData?.kind === "governance" && !m.pollData.govApplied) {
+      _autoApplyGovernancePoll(m, cid);
+    }
+  }
+}, 30 * 1000);
 
 async function toggleReaction(msgId, emoji) {
   const chatId=state.activeChatId;
@@ -5862,6 +6232,61 @@ function _renderMdPreview() {
   pane.classList.remove("hidden");
   pane.innerHTML = `<div class="md-preview-label">Preview</div><div class="md-preview-body">${formatMessage(txt)}</div>`;
 }
+// Composer poll button → open builder
+$("#composer-poll-btn")?.addEventListener("click", () => openPollBuilder());
+
+/* ---------- Custom emoji submission ---------- */
+$("#emoji-submit-btn")?.addEventListener("click", () => {
+  $("#emoji-submit-name").value = "";
+  $("#emoji-submit-url").value = "";
+  $("#emoji-submit-preview").style.display = "none";
+  $("#emoji-picker")?.classList.add("hidden");
+  emojiOpen = false;
+  openModal("emoji-submit-modal");
+});
+
+// Live preview as URL is typed
+$("#emoji-submit-url")?.addEventListener("input", e => {
+  const url = e.target.value.trim();
+  const previewWrap = $("#emoji-submit-preview");
+  const img = $("#emoji-submit-preview-img");
+  if (url && /^https?:\/\//i.test(url)) {
+    img.src = url; img.onerror = () => previewWrap.style.display = "none";
+    img.onload = () => previewWrap.style.display = "block";
+  } else {
+    previewWrap.style.display = "none";
+  }
+});
+
+$("#emoji-submit-confirm-btn")?.addEventListener("click", async () => {
+  const name = ($("#emoji-submit-name").value||"").trim().toLowerCase();
+  const url  = ($("#emoji-submit-url").value||"").trim();
+  if (!/^[a-z0-9_]{2,32}$/.test(name)) {
+    showToast("Name must be 2-32 chars: letters, numbers, underscores"); return;
+  }
+  if (!/^https?:\/\/.+\.(png|gif|webp|jpe?g)(\?.*)?$/i.test(url)) {
+    showToast("URL must end in .png, .gif, .webp, or .jpg"); return;
+  }
+  const btn = $("#emoji-submit-confirm-btn");
+  btn.disabled = true; btn.textContent = "Submitting…";
+  try {
+    await addDoc(collection(db, "customEmojiSubmissions"), {
+      name, url,
+      submittedBy: state.user.uid,
+      submittedByName: state.user.displayName,
+      chatId: state.activeChatId || null,
+      submittedAt: serverTimestamp(),
+      status: "pending"
+    });
+    closeModal("emoji-submit-modal");
+    showToast("✓ Submitted! Admin will review.");
+  } catch(err) {
+    showToast("Error: " + err.message);
+  } finally {
+    btn.disabled = false; btn.textContent = "Submit for Review";
+  }
+});
+
 $("#md-preview-btn")?.addEventListener("click", () => {
   _mdPreviewOn = !_mdPreviewOn;
   localStorage.setItem("sc_md_preview", _mdPreviewOn ? "true" : "false");
@@ -6413,6 +6838,8 @@ document.addEventListener("contextmenu", e=>{
     items.push(isPinned
       ?{label:"Unpin Message", action:"ctx-unpin", data:{msgId}}
       :{label:"Pin Message",   action:"ctx-pin",   data:{msgId}});
+    items.push("divider");
+    items.push({label:"📊 Create Poll", action:"ctx-create-poll"});
     if (!isSelf) {
       items.push("divider");
       items.push({label:"Report",  action:"ctx-report", data:{msgId, uid:msg.senderUid, name:msg.senderName||"User"}, danger:true});
@@ -6498,6 +6925,7 @@ document.addEventListener("click", async e=>{
   else if (action==="ctx-block")  { await blockUser(uid); }
   else if (action==="ctx-pin")    { await pinMessage(msgId); }
   else if (action==="ctx-unpin")  { await unpinMessage(msgId); }
+  else if (action==="ctx-create-poll") { openPollBuilder(); }
   else if (action==="ctx-reply")  { const m=state.messages.find(x=>x.id===msgId); if(m) setReplyTo(m); }
   else if (action==="ctx-copy-text") {
     const m=state.messages.find(x=>x.id===msgId);

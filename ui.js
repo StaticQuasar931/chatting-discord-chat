@@ -399,6 +399,11 @@ export function buildUI() {
             <div class="composer-input-wrap">
               <textarea id="composer-input" placeholder="Message… or /help for commands" rows="1"></textarea>
             </div>
+            <button class="icon-btn composer-poll-btn" id="composer-poll-btn" title="Create a poll">
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" aria-hidden="true">
+                <path fill="currentColor" d="M3 22V8h4v14H3zm7 0V2h4v20h-4zm7 0v-9h4v9h-4z"/>
+              </svg>
+            </button>
             <button class="icon-btn composer-md-btn" id="md-preview-btn" title="Toggle Markdown preview">
               <svg viewBox="0 0 24 24" width="18" height="18" fill="none" aria-hidden="true">
                 <path fill="currentColor" d="M2.5 5h19c.83 0 1.5.67 1.5 1.5v11c0 .83-.67 1.5-1.5 1.5h-19C1.67 19 1 18.33 1 17.5v-11C1 5.67 1.67 5 2.5 5zm3 11.5v-5L8 14l2.5-2.5v5h-2v-2L8 15l-1.5-1.5v3H5.5zm12 .25 3-3.25h-2v-3h-2v3h-2l3 3.25z"/>
@@ -451,6 +456,44 @@ export function buildUI() {
           </div>
           <div class="emoji-picker-cats" id="emoji-picker-cats" role="tablist"></div>
           <div class="emoji-picker-grid" id="emoji-grid"></div>
+          <div class="emoji-picker-footer">
+            <button class="emoji-picker-submit-btn" id="emoji-submit-btn" type="button" title="Submit a custom emoji for review">
+              + Submit custom emoji
+            </button>
+          </div>
+        </div>
+
+        <!-- Custom Emoji Submission Modal -->
+        <div class="modal hidden" id="emoji-submit-modal">
+          <div class="modal-card" style="max-width:420px;width:96vw;">
+            <div class="modal-head">
+              <h2>📤 Submit Custom Emoji</h2>
+              <button class="icon-btn modal-close" data-close="emoji-submit-modal">
+                <svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+              </button>
+            </div>
+            <div class="modal-body" style="padding:16px 20px;">
+              <p class="hint" style="margin:0 0 12px;">Submit a custom emoji or sticker for admin review. Approved submissions may be added to the public emoji set later.</p>
+
+              <label class="modal-label">Emoji name <span class="label-optional">— letters, numbers, underscores; how it'll be used (:my_emoji:)</span></label>
+              <input type="text" id="emoji-submit-name" maxlength="32" placeholder="my_cool_emoji" />
+
+              <label class="modal-label" style="margin-top:14px;">Image URL <span class="label-optional">— direct .png/.gif/.webp link</span></label>
+              <input type="text" id="emoji-submit-url" placeholder="https://example.com/image.png" />
+
+              <div id="emoji-submit-preview" style="margin-top:12px;text-align:center;display:none;">
+                <img id="emoji-submit-preview-img" alt="Preview" style="max-width:80px;max-height:80px;border-radius:8px;background:var(--c-input-2);padding:4px;" />
+              </div>
+
+              <p class="hint" style="margin-top:12px;color:var(--c-warn);font-size:12px;">
+                ⚠️ Don't submit copyrighted, NSFW, or hateful content. Submissions are reviewed by admin.
+              </p>
+            </div>
+            <div class="modal-foot">
+              <button class="btn-secondary" data-close="emoji-submit-modal">Cancel</button>
+              <button class="btn-primary" id="emoji-submit-confirm-btn">Submit for Review</button>
+            </div>
+          </div>
         </div>
 
         <!-- GIF picker -->
@@ -908,13 +951,25 @@ export function buildUI() {
                   <span>Open emoji picker</span>
                 </label>
               </div>
-              <div id="dblclick-emoji-chooser" style="display:flex;align-items:center;gap:8px;margin-top:8px;">
-                <span id="dblclick-emoji-preview" style="font-size:22px;cursor:pointer;" title="Click to change">👍</span>
-                <input type="text" id="settings-dblclick-emoji" placeholder="👍" maxlength="4"
-                  style="width:60px;text-align:center;font-size:18px;" />
-                <span class="hint">Any emoji character or shortcode</span>
+              <div id="dblclick-emoji-chooser" style="display:flex;align-items:center;gap:10px;margin-top:8px;">
+                <button class="dblclick-emoji-btn" id="dblclick-emoji-pick-btn" type="button" title="Click to pick an emoji">
+                  <span id="dblclick-emoji-preview">👍</span>
+                  <svg viewBox="0 0 24 24" width="14" height="14" style="opacity:.7;"><path fill="currentColor" d="M7 10l5 5 5-5z"/></svg>
+                </button>
+                <span class="hint">Click to choose your double-click reaction emoji</span>
+                <input type="hidden" id="settings-dblclick-emoji" value="👍" />
               </div>
             </div>
+            <label class="settings-toggle-row" style="margin-top:12px;">
+              <div class="settings-toggle-info">
+                <div class="settings-toggle-label">Auto-scroll on new messages</div>
+                <div class="settings-toggle-sub">Smoothly jump to bottom when a new message arrives (only if you're near the bottom)</div>
+              </div>
+              <span class="toggle-switch">
+                <input type="checkbox" id="settings-autoscroll-toggle" />
+                <span class="toggle-track"></span>
+              </span>
+            </label>
             <label class="settings-toggle-row" style="margin-top:12px;">
               <div class="settings-toggle-info">
                 <div class="settings-toggle-label">Hide Typing Indicator</div>
@@ -962,8 +1017,8 @@ export function buildUI() {
                   <span>Animate everywhere <small style="color:var(--t-muted);">(default)</small></span>
                 </label>
                 <label class="radio-row">
-                  <input type="radio" name="pfp-animate" value="messages-only" id="pfp-anim-msg" />
-                  <span>Only animate in messages <small style="color:var(--t-muted);">(static in sidebar/headers)</small></span>
+                  <input type="radio" name="pfp-animate" value="sidebar-only" id="pfp-anim-sidebar" />
+                  <span>Animate in sidebar only <small style="color:var(--t-muted);">(static in chat messages — reduces movement)</small></span>
                 </label>
                 <label class="radio-row">
                   <input type="radio" name="pfp-animate" value="never" id="pfp-anim-never" />
@@ -1134,6 +1189,37 @@ export function buildUI() {
             <input type="text" id="school-nickname-input" maxlength="32" placeholder="e.g. Alex (Period 4 Bio)" />
           </div>
 
+          <div class="settings-field-group" style="margin:10px 0 14px;">
+            <label class="modal-label">Grade / graduation year
+              <span class="label-optional">— optional, helps classmates find peers in the same year</span>
+            </label>
+            <select id="school-grad-input" style="width:100%;">
+              <option value="">— Prefer not to say —</option>
+              <option value="freshman">Freshman</option>
+              <option value="sophomore">Sophomore</option>
+              <option value="junior">Junior</option>
+              <option value="senior">Senior</option>
+              <option value="grad">Graduate / Alumni</option>
+              <option value="staff">Staff / Teacher</option>
+            </select>
+            <p class="hint" style="color:var(--c-warn);margin-top:4px;">
+              ⚠️ Anyone can lie about this. Don't fully trust grade tags — verify in person before sharing personal info.
+            </p>
+          </div>
+
+          <div id="school-filters-row" class="hidden">
+            <label class="modal-label" style="margin-top:10px;">Filter directory by grade</label>
+            <div class="poll-builder-duration-row">
+              <button class="poll-dur-chip active" data-grade-filter="">All</button>
+              <button class="poll-dur-chip" data-grade-filter="freshman">Freshman</button>
+              <button class="poll-dur-chip" data-grade-filter="sophomore">Sophomore</button>
+              <button class="poll-dur-chip" data-grade-filter="junior">Junior</button>
+              <button class="poll-dur-chip" data-grade-filter="senior">Senior</button>
+              <button class="poll-dur-chip" data-grade-filter="grad">Grad/Alumni</button>
+              <button class="poll-dur-chip" data-grade-filter="staff">Staff</button>
+            </div>
+          </div>
+
           <label class="school-consent-row">
             <input type="checkbox" id="school-consent-check" />
             <span>I understand the risks and want my profile to be discoverable to other users in my school domain.</span>
@@ -1195,6 +1281,42 @@ export function buildUI() {
       <div class="modal-foot">
         <button class="btn-secondary" data-close="school-diverge-modal">Cancel</button>
         <button class="btn-primary" id="school-diverge-create-btn">Create Group</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Poll Builder Modal -->
+  <div class="modal hidden" id="poll-builder-modal">
+    <div class="modal-card" style="max-width:480px;width:96vw;">
+      <div class="modal-head">
+        <h2>📊 Create Poll</h2>
+        <button class="icon-btn modal-close" data-close="poll-builder-modal">
+          <svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </div>
+      <div class="modal-body" style="padding:16px 20px;max-height:75vh;overflow-y:auto;">
+        <label class="modal-label">Question</label>
+        <input type="text" id="poll-builder-question" maxlength="200" placeholder="Pizza or burgers tonight?" />
+
+        <label class="modal-label" style="margin-top:14px;">Options <span class="label-optional">— at least 2, max 10</span></label>
+        <div id="poll-builder-options"></div>
+        <button class="btn-secondary" id="poll-builder-add-option" style="margin-top:6px;font-size:12px;">+ Add option</button>
+
+        <label class="modal-label" style="margin-top:14px;">How long is the poll open?</label>
+        <div class="poll-builder-duration-row">
+          <button class="poll-dur-chip" data-poll-dur="900000">15 min</button>
+          <button class="poll-dur-chip" data-poll-dur="3600000">1 hour</button>
+          <button class="poll-dur-chip active" data-poll-dur="86400000">24 hours</button>
+          <button class="poll-dur-chip" data-poll-dur="259200000">3 days</button>
+          <button class="poll-dur-chip" data-poll-dur="604800000">1 week</button>
+        </div>
+        <input type="hidden" id="poll-builder-duration" value="86400000" />
+
+        <p class="hint" style="margin-top:14px;">Anyone in this chat can vote. You'll see live results as votes come in.</p>
+      </div>
+      <div class="modal-foot">
+        <button class="btn-secondary" data-close="poll-builder-modal">Cancel</button>
+        <button class="btn-primary" id="poll-builder-create-btn">📊 Post Poll</button>
       </div>
     </div>
   </div>
