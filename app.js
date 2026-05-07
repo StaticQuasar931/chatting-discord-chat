@@ -7647,7 +7647,12 @@ function updateJumpBtn() {
   const wrap=$("#messages");
   const btn=$("#jump-latest");
   if (!wrap||!btn) return;
-  const atBottom=wrap.scrollHeight-wrap.scrollTop-wrap.clientHeight<80;
+  // Threshold raised to 400px (~5-10 messages) so brief layout shifts during
+  // image loading don't flash the button on/off. Also: while the "sticky to
+  // bottom" window is active, never show the button — it'd flicker.
+  const stickyActive = state._stickyUntil && Date.now() < state._stickyUntil;
+  const atBottom = stickyActive
+    || (wrap.scrollHeight - wrap.scrollTop - wrap.clientHeight < 400);
   btn.classList.toggle("hidden", atBottom);
   if (atBottom) {
     // Auto-dismiss the unread divider when the user has scrolled to the bottom
