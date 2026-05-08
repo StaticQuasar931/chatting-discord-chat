@@ -4,8 +4,11 @@
    Call this ONCE at the very top of app.js before any DOM queries.
    ===================================================================== */
 
-const LOGO = "./staticcord.png";
-const LOGO_FALLBACK = "https://cdn.jsdelivr.net/gh/StaticQuasar931/Images@main/icon.png";
+// Always load the logo from jsDelivr (CDN-served, works on any host including
+// Google Sites / Apps Script embeds). Local file kept as final-fallback for
+// offline dev only.
+const LOGO = "https://cdn.jsdelivr.net/gh/StaticQuasar931/chatting-discord-chat@main/staticcord.png";
+const LOGO_FALLBACK = "./staticcord.png";
 
 export function buildUI() {
   document.body.insertAdjacentHTML("beforeend", /* html */`
@@ -557,7 +560,7 @@ export function buildUI() {
 
       <!-- EMPTY STATE -->
       <section id="empty-view" class="view hidden empty-view">
-        <img src="${LOGO}" alt="" />
+        <img src="${LOGO}" alt="" onerror="this.src='${LOGO_FALLBACK}'" />
         <h2>Select a conversation</h2>
         <p>Pick a friend or group from the sidebar to start chatting.</p>
       </section>
@@ -572,12 +575,12 @@ export function buildUI() {
       <!-- 3-column header: icon left · title center · icon right -->
       <div class="tos-header">
         <div class="tos-header-row">
-          <img src="${LOGO}" alt="" class="tos-side-icon tos-side-icon-left" />
+          <img src="${LOGO}" alt="" class="tos-side-icon tos-side-icon-left" onerror="this.src='${LOGO_FALLBACK}'" />
           <div class="tos-header-center">
             <h2 id="tos-title">Before You Continue</h2>
             <p class="tos-sub">Please read carefully before entering Static Chat.</p>
           </div>
-          <img src="${LOGO}" alt="" class="tos-side-icon tos-side-icon-right" />
+          <img src="${LOGO}" alt="" class="tos-side-icon tos-side-icon-right" onerror="this.src='${LOGO_FALLBACK}'" />
         </div>
         <div class="tos-author">
           <a href="https://sites.google.com/view/staticquasar931/gm3z" target="_blank" rel="noopener noreferrer">
@@ -607,15 +610,15 @@ export function buildUI() {
       <div class="tos-foot">
         <button class="btn-primary" id="tos-agree-btn">I Agree — Let Me In</button>
       </div>
-
-      <!-- Where's Epstein plug — bottom right corner -->
-      <a class="tos-epstein-plug"
-         href="https://sites.google.com/view/staticquasar931/static-gmes/wheres-epstein"
-         target="_blank" rel="noopener noreferrer"
-         title="Play Where's Epstein? — by StaticQuasar931">
-        🎮 Play Where's Epstein?
-      </a>
     </div>
+
+    <!-- Where's Epstein plug — fixed to bottom-right of the entire viewport -->
+    <a class="tos-epstein-plug"
+       href="https://sites.google.com/view/staticquasar931/static-gmes/wheres-epstein"
+       target="_blank" rel="noopener noreferrer"
+       title="Play Where's Epstein? — by StaticQuasar931">
+      🎮 Play Where's Epstein?
+    </a>
   </div>
 
   <!-- ====== MODALS ====== -->
@@ -637,8 +640,8 @@ export function buildUI() {
         </div>
         <label class="modal-label" style="margin-top:18px;">Username <span class="label-optional">letters, numbers, underscores · 3–32 chars</span></label>
         <input type="text" id="setup-username-input" placeholder="cooluser" maxlength="32" autocomplete="off" spellcheck="false" />
-        <label class="modal-label" style="margin-top:14px;">Bio <span class="label-optional">optional · up to 200 chars</span></label>
-        <textarea id="setup-bio-input" class="modal-textarea" placeholder="Tell people a little about yourself…" maxlength="500" rows="3"></textarea>
+        <label class="modal-label" style="margin-top:14px;">Bio <span class="label-optional">optional · up to 400 chars</span></label>
+        <textarea id="setup-bio-input" class="modal-textarea" placeholder="Tell people a little about yourself…" maxlength="400" rows="3"></textarea>
         <p class="field-error" id="setup-error"></p>
       </div>
       <div class="modal-foot">
@@ -708,8 +711,8 @@ export function buildUI() {
                 <p class="hint" style="margin:5px 0 0;">Your full tag: <strong id="settings-tag-display">#0000</strong></p>
               </div>
               <div class="settings-field-group">
-                <label class="modal-label">Bio <span class="label-optional">up to 200 chars</span></label>
-                <textarea id="settings-bio-input" maxlength="500" rows="3" placeholder="Tell people a bit about yourself…"></textarea>
+                <label class="modal-label">Bio <span class="label-optional">up to 400 chars</span></label>
+                <textarea id="settings-bio-input" maxlength="400" rows="3" placeholder="Tell people a bit about yourself…"></textarea>
               </div>
               <div class="settings-field-group">
                 <label class="modal-label">Status Phrase <span class="label-optional">up to 60 chars</span></label>

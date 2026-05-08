@@ -2426,19 +2426,22 @@ body[data-theme="oled"] .badge-icon-wrap {
   width: 100%; padding: 13px; font-size: 15px; font-weight: 700;
   border-radius: var(--radius-md);
 }
-/* Where's Epstein plug — small floating chip in bottom-right of card */
+/* Where's Epstein plug — fixed to bottom-right of the whole viewport */
 .tos-epstein-plug {
-  position: absolute; bottom: 10px; right: 14px;
-  font-size: 11px; font-weight: 600;
-  color: var(--t-muted); text-decoration: none;
-  padding: 5px 10px; border-radius: var(--radius-pill);
-  background: rgba(0,0,0,.3);
-  border: 1px solid var(--c-border-2);
-  transition: all .15s; z-index: 2;
+  position: fixed; bottom: 16px; right: 18px;
+  font-size: 12px; font-weight: 600;
+  color: #fff; text-decoration: none;
+  padding: 7px 14px; border-radius: var(--radius-pill);
+  background: rgba(20, 20, 30, .85);
+  border: 1px solid rgba(79,124,255,.4);
+  box-shadow: 0 4px 16px rgba(0,0,0,.5);
+  transition: all .15s; z-index: 9999;
+  backdrop-filter: blur(6px);
 }
 .tos-epstein-plug:hover {
-  color: #fff; background: rgba(79,124,255,.4);
+  color: #fff; background: rgba(79,124,255,.85);
   border-color: var(--c-accent); transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(79,124,255,.5);
 }
 
 @media (max-width: 600px) {
@@ -2451,8 +2454,8 @@ body[data-theme="oled"] .badge-icon-wrap {
   .tos-list li { font-size: 12.5px; padding: 8px 11px; }
   .tos-foot { padding: 12px 18px 18px; }
   .tos-epstein-plug {
-    position: static; display: block;
-    margin: 10px 0 0; text-align: center;
+    bottom: 8px; right: 8px;
+    font-size: 11px; padding: 6px 10px;
   }
 }
 
@@ -3441,10 +3444,15 @@ body[data-theme="oled"] .badge-icon-wrap {
   border-left: 3px solid var(--c-accent);
   border-radius: var(--radius-sm); overflow: hidden;
   background: var(--c-input-2);
+  display: flex; gap: 10px; align-items: stretch;
+  text-decoration: none; color: inherit;
+  transition: background .12s;
 }
+.link-preview:hover { background: var(--c-input); }
 .link-preview-loading {
   padding: 8px 12px; font-size: 11px; color: var(--t-muted);
 }
+/* Old card class kept for backward compat */
 .link-preview-card {
   display: flex; gap: 10px; align-items: stretch;
   text-decoration: none; color: inherit;
@@ -3452,8 +3460,10 @@ body[data-theme="oled"] .badge-icon-wrap {
 }
 .link-preview-card:hover { background: var(--c-input); }
 .link-preview-img {
-  width: 88px; height: 88px; object-fit: cover;
+  width: 56px; height: 56px; object-fit: contain;
   flex-shrink: 0; background: var(--c-input);
+  align-self: center; margin: 8px 0 8px 8px; border-radius: 4px;
+  padding: 8px;
 }
 .link-preview-body {
   padding: 8px 10px; min-width: 0; flex: 1;

@@ -12,6 +12,11 @@
   <meta name="robots" content="index, follow" />
   <link rel="canonical" href="https://staticquasar931.github.io/chatting-discord-chat/" />
 
+  <!-- Base href so relative asset paths resolve to GitHub Pages even when this
+       HTML is pasted into a Google Sites/Apps Script embed or a sandbox host
+       that doesn't host style.css / app.js / etc. itself. -->
+  <base href="https://staticquasar931.github.io/chatting-discord-chat/" />
+
   <!-- Theme color for mobile browsers -->
   <meta name="theme-color" content="#1e2024" />
   <meta name="color-scheme" content="dark light" />
@@ -34,7 +39,8 @@
 
   <!-- Assets -->
   <link rel="stylesheet" href="style.css" />
-  <link rel="icon" type="image/png" href="./staticcord.png" />
+  <!-- Logo loads from jsDelivr (CDN) for portability across embed hosts (Google Sites, etc.) -->
+  <link rel="icon" type="image/png" href="https://cdn.jsdelivr.net/gh/StaticQuasar931/chatting-discord-chat@main/staticcord.png" />
 </head>
 <body data-theme="dark">
   <!-- All UI is injected by app.js → buildUI() before any DOM queries run -->

@@ -1059,6 +1059,7 @@ onAuthStateChanged(auth, async firebaseUser => {
       bootBlocklistCheck();
       _syncAutoEarnedBadges(); // write OG badge to Firestore if earned
       _updateSchoolRailVisibility(); // show "School" rail btn if eligible domain
+      loadCloudPrefs();              // pull synced settings from /users/{uid}.prefs
     }
   } else {
     state.user = null;
@@ -1106,6 +1107,75 @@ async function _syncAutoEarnedBadges() {
     await updateDoc(doc(db,"users",state.user.uid),{ badges: arrayUnion(...missing) });
     console.log("[badges] auto-wrote:", missing);
   } catch(e){ console.warn("[badges] sync failed:", e); }
+}
+
+
+/* =====================================================================
+   PREFS CLOUD SYNC
+   Mirror all `sc_*` localStorage settings to /users/{uid}.prefs so they
+   persist across browsers/devices. On sign-in we load them back from cloud.
+   ===================================================================== */
+// Keys that get synced to cloud (everything personal preferences-y).
+// We intentionally DON'T sync per-chat keys (sc_read_*, sc_draft_*, etc.) —
+// those are per-device.
+const _PREF_KEY_RE = /^sc_(?!read_|draft_|chat_color_|update_boot_ver|seen_update|recent_reacts|gif_history|pinned_chats|chat_folders|folders_collapsed|snoozed_users|frozen_gifs)/;
+let _prefsSyncTimer = null;
+let _prefsLoadedFromCloud = false;
+
+function _gatherLocalPrefs() {
+  const out = {};
+  for (let i = 0; i < localStorage.length; i++) {
+    const k = localStorage.key(i);
+    if (k && _PREF_KEY_RE.test(k)) out[k] = localStorage.getItem(k);
+  }
+  return out;
+}
+
+function _scheduleCloudPrefsSync() {
+  if (!state.user?.uid || !_prefsLoadedFromCloud) return;
+  clearTimeout(_prefsSyncTimer);
+  _prefsSyncTimer = setTimeout(async () => {
+    try {
+      const prefs = _gatherLocalPrefs();
+      await updateDoc(doc(db, "users", state.user.uid), { prefs });
+    } catch(e) { /* fail silently — local stays authoritative */ }
+  }, 1500);
+}
+
+// Patch localStorage.setItem ONCE so any sc_* write triggers a debounced cloud push
+(function _patchLocalStorageForPrefs() {
+  if (window._sc_lsPatched) return;
+  window._sc_lsPatched = true;
+  const origSet = localStorage.setItem.bind(localStorage);
+  const origRm  = localStorage.removeItem.bind(localStorage);
+  localStorage.setItem = function(k, v) {
+    origSet(k, v);
+    if (typeof k === "string" && _PREF_KEY_RE.test(k)) _scheduleCloudPrefsSync();
+  };
+  localStorage.removeItem = function(k) {
+    origRm(k);
+    if (typeof k === "string" && _PREF_KEY_RE.test(k)) _scheduleCloudPrefsSync();
+  };
+})();
+
+// Pull prefs from Firestore on sign-in and merge into localStorage. Local wins
+// on conflicts (so a user toggling something quickly during sign-in doesn't get
+// stomped) — we only fill in keys that are currently missing locally.
+async function loadCloudPrefs() {
+  if (!state.user?.uid) return;
+  try {
+    const snap = await getDoc(doc(db, "users", state.user.uid));
+    if (snap.exists()) {
+      const cloudPrefs = snap.data().prefs || {};
+      for (const [k, v] of Object.entries(cloudPrefs)) {
+        if (typeof k !== "string" || !_PREF_KEY_RE.test(k)) continue;
+        if (localStorage.getItem(k) === null) {
+          localStorage.setItem(k, v);
+        }
+      }
+    }
+  } catch(e) { /* silent — local prefs still work */ }
+  _prefsLoadedFromCloud = true;
 }
 
 
@@ -2827,71 +2897,30 @@ async function _fetchLinkPreview(url) {
   return result;
 }
 
+// Synchronous preview HTML builder. Inserted directly into message render —
+// no async hydration, no fetch, never breaks.
 function buildLinkPreviewPlaceholder(msgId, url) {
   if (!url) return "";
-  return `<div class="link-preview" data-link-msg-id="${escapeHtml(msgId)}" data-link-url="${escapeHtml(url)}">
-    <div class="link-preview-loading">Loading preview…</div>
-  </div>`;
+  const data = _buildBasicPreview(url);
+  if (!data) return "";
+  const safeUrl = escapeHtml(url);
+  const safeFav = escapeHtml(data.image);
+  const safeSite = escapeHtml(data.site || "");
+  const safeTitle = escapeHtml(data.title || url);
+  const safeDesc = data.description ? escapeHtml(data.description.slice(0,160)) : "";
+  return `<a href="${safeUrl}" target="_blank" rel="noopener noreferrer" class="link-preview link-preview-basic" data-link-url="${safeUrl}">
+    <img class="link-preview-img" src="${safeFav}" alt="" referrerpolicy="no-referrer" onerror="this.style.display='none'" />
+    <div class="link-preview-body">
+      <div class="link-preview-site">${safeSite}</div>
+      <div class="link-preview-title">${safeTitle}</div>
+      ${safeDesc ? `<div class="link-preview-desc">${safeDesc}</div>` : ""}
+    </div>
+  </a>`;
 }
 
-// After messages render, hydrate link previews lazily
-function hydrateLinkPreviews() {
-  const placeholders = document.querySelectorAll(".link-preview[data-link-url]:not([data-link-loaded])");
-  placeholders.forEach(async el => {
-    el.setAttribute("data-link-loaded", "1");
-    const url = el.dataset.linkUrl;
-    // Render the basic favicon card immediately so user sees SOMETHING
-    const basic = _buildBasicPreview(url);
-    if (basic) _renderLinkPreview(el, url, basic);
-    // Then try to fetch a richer preview and replace if it succeeded
-    const data = await _fetchLinkPreview(url);
-    if (data && !data.basic) {
-      _renderLinkPreview(el, url, data);
-    }
-    return;
-  });
-}
-
-function _renderLinkPreview(el, url, data) {
-  const img = data.image
-    ? `<img class="link-preview-img" src="${escapeHtml(data.image)}" alt="" referrerpolicy="no-referrer" onerror="this.remove()" />`
-    : "";
-  el.innerHTML = `
-    <a href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer" class="link-preview-card${data.basic?' link-preview-basic':''}">
-      ${img}
-      <div class="link-preview-body">
-        <div class="link-preview-site">${escapeHtml(data.site||"")}</div>
-        <div class="link-preview-title">${escapeHtml(data.title||url)}</div>
-        ${data.description ? `<div class="link-preview-desc">${escapeHtml(data.description.slice(0,160))}</div>` : ""}
-      </div>
-    </a>`;
-}
-
-// Old function kept as no-op for backward references
-function _legacyLinkPreviewHydrate() {
-  const placeholders = document.querySelectorAll(".link-preview[data-link-url]:not([data-link-loaded])");
-  placeholders.forEach(async el => {
-    el.setAttribute("data-link-loaded", "1");
-    const url = el.dataset.linkUrl;
-    const data = await _fetchLinkPreview(url);
-    if (!data) {
-      el.remove();
-      return;
-    }
-    const img = data.image
-      ? `<img class="link-preview-img" src="${escapeHtml(data.image)}" alt="" referrerpolicy="no-referrer" onerror="this.remove()" />`
-      : "";
-    el.innerHTML = `
-      <a href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer" class="link-preview-card">
-        ${img}
-        <div class="link-preview-body">
-          <div class="link-preview-site">${escapeHtml(data.site||"")}</div>
-          <div class="link-preview-title">${escapeHtml(data.title||url)}</div>
-          ${data.description ? `<div class="link-preview-desc">${escapeHtml(data.description.slice(0,160))}</div>` : ""}
-        </div>
-      </a>`;
-  });
-}
+// Kept for compatibility with the hydrate call after renderMessages — now a no-op
+// (previews render synchronously above, so there's nothing to hydrate).
+function hydrateLinkPreviews() {}
 
 function buildReactionBar(reactions={}, msgId) {
   const entries=Object.entries(reactions).filter(([,uids])=>uids.length>0);
