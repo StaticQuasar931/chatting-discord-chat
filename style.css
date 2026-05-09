@@ -1743,6 +1743,12 @@ body.compact-mode .msg-head { gap: 4px; }
 }
 .full-profile-bio { font-size: 15px; color: var(--t-secondary); line-height: 1.6; word-break: break-word; }
 .full-profile-since { font-size: 13px; color: var(--t-muted); margin-top: 6px; }
+.fp-favgame { font-size: 13px; color: var(--t-secondary); margin-top: 6px; }
+.fp-favgame-link {
+  color: var(--c-accent); text-decoration: none; font-weight: 700;
+  border-bottom: 1px dashed var(--c-accent);
+}
+.fp-favgame-link:hover { color: #fff; background: var(--c-accent); padding: 0 4px; border-radius: 3px; border: none; }
 .full-profile-notes {
   width: 100%; min-height: 180px; max-height: 320px; resize: vertical;
   background: var(--c-input-2); border: 1px solid var(--c-border-2);
@@ -3357,6 +3363,129 @@ body[data-theme="oled"] .badge-icon-wrap {
   font-size: 11px; color: var(--t-muted);
 }
 .poll-time.ended { color: var(--c-warn); font-weight: 700; }
+
+/* =================================================
+   ACTIVITIES (mini-games) MODAL + CARDS
+   ================================================= */
+.activities-grid {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 10px;
+}
+.activity-card {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 4px;
+  padding: 14px 14px; border-radius: var(--radius-md);
+  background: var(--c-input-2); border: 1.5px solid var(--c-border-2);
+  cursor: pointer; text-align: left; transition: all .12s;
+}
+.activity-card:hover {
+  border-color: var(--c-accent); transform: translateY(-2px);
+  box-shadow: 0 6px 18px rgba(0,0,0,.3);
+}
+.activity-icon { font-size: 28px; line-height: 1; }
+.activity-name { font-size: 14px; font-weight: 700; color: var(--t-primary); }
+.activity-desc { font-size: 11px; color: var(--t-muted); line-height: 1.3; }
+@media (max-width: 480px) { .activities-grid { grid-template-columns: 1fr; } }
+
+/* Game card (rendered inside chat message) */
+.game-card {
+  background: var(--c-input-2);
+  border: 1.5px solid rgba(167,139,250,.3);
+  border-radius: var(--radius-md);
+  padding: 14px; margin-top: 4px;
+  max-width: 380px;
+}
+.game-title {
+  font-size: 14px; font-weight: 800; color: var(--t-primary);
+  margin-bottom: 10px;
+}
+.game-status {
+  font-size: 12px; color: var(--t-secondary); margin-top: 8px;
+  text-align: center;
+}
+.game-tag {
+  font-size: 10px; color: #a78bfa; font-weight: 700;
+  text-transform: uppercase; letter-spacing: .04em; margin-left: 4px;
+}
+.game-join-btn { font-size: 12px; padding: 6px 14px; }
+
+/* Tic-Tac-Toe */
+.ttt-board {
+  display: grid; grid-template-columns: repeat(3, 64px); gap: 4px;
+  justify-content: center;
+}
+.ttt-cell {
+  width: 64px; height: 64px; border-radius: 8px;
+  background: var(--c-input); border: 2px solid var(--c-border-2);
+  font-size: 30px; font-weight: 900; cursor: pointer;
+  color: var(--t-primary); transition: all .12s;
+  display: flex; align-items: center; justify-content: center;
+}
+.ttt-cell:hover:not(:disabled) { border-color: var(--c-accent); transform: scale(1.05); }
+.ttt-cell:disabled { cursor: default; }
+.ttt-cell.tttx { color: #4f7cff; }
+.ttt-cell.ttto { color: #f43f5e; }
+
+/* Rock Paper Scissors */
+.rps-moves { display: flex; gap: 6px; justify-content: center; margin-top: 8px; }
+.rps-btn {
+  flex: 1; padding: 8px 6px; border-radius: var(--radius-sm);
+  background: var(--c-input); border: 1.5px solid var(--c-border-2);
+  cursor: pointer; font-size: 12px; color: var(--t-primary); font-weight: 600;
+}
+.rps-btn:hover { border-color: var(--c-accent); transform: translateY(-1px); }
+
+/* Dice */
+.dice-list { display: flex; flex-direction: column; gap: 4px; margin: 8px 0; }
+.dice-row {
+  display: flex; justify-content: space-between; padding: 4px 8px;
+  border-radius: var(--radius-sm); background: var(--c-input);
+  font-size: 13px;
+}
+.dice-row.me { background: var(--c-accent-soft); }
+.dice-row strong { color: var(--c-accent); font-size: 16px; }
+
+/* Number Guess + Trivia */
+.numguess-list { display: flex; flex-direction: column; gap: 3px; margin: 8px 0; max-height: 100px; overflow-y: auto; }
+.numguess-row {
+  display: flex; align-items: center; gap: 6px; padding: 3px 8px;
+  font-size: 12px; color: var(--t-secondary);
+  border-radius: var(--radius-sm); background: var(--c-input);
+}
+.numguess-row strong { color: var(--t-primary); }
+.numguess-hint { margin-left: auto; font-size: 11px; color: var(--t-muted); }
+.numguess-input-row { display: flex; gap: 6px; margin-top: 6px; }
+.numguess-input {
+  flex: 1; padding: 6px 10px; border-radius: var(--radius-sm);
+  background: var(--c-input); border: 1px solid var(--c-border-2);
+  color: var(--t-primary);
+}
+.game-question {
+  font-size: 14px; color: var(--t-primary); font-weight: 600;
+  padding: 10px; background: var(--c-input); border-radius: var(--radius-sm);
+  margin-bottom: 8px;
+}
+
+/* Would You Rather */
+.wyr-option {
+  position: relative; overflow: hidden;
+  display: flex; align-items: center; width: 100%;
+  padding: 10px 12px; border-radius: var(--radius-sm);
+  background: var(--c-input); border: 1.5px solid transparent;
+  cursor: pointer; color: var(--t-primary); font-size: 13px;
+  margin: 4px 0; text-align: left; transition: border-color .12s;
+}
+.wyr-option:hover { border-color: var(--c-accent); }
+.wyr-option.selected { border-color: var(--c-accent); background: var(--c-accent-soft); }
+.wyr-bar {
+  position: absolute; left: 0; top: 0; bottom: 0;
+  background: rgba(167,139,250,.2); z-index: 0;
+  transition: width .35s ease;
+}
+.wyr-text { position: relative; z-index: 1; flex: 1; padding-right: 10px; }
+.wyr-count {
+  position: relative; z-index: 1; font-size: 11px; color: var(--t-muted);
+  font-variant-numeric: tabular-nums;
+}
+.wyr-option.selected .wyr-count { color: var(--c-accent); font-weight: 700; }
 
 /* Poll builder modal */
 .poll-builder-option-row {

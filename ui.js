@@ -721,6 +721,17 @@ export function buildUI() {
                 <p class="hint" style="margin:4px 0 0;font-size:11px;">Short message shown on your profile and in chat.</p>
               </div>
 
+              <div class="settings-field-group">
+                <label class="modal-label">Favorite Game on StaticQuasar931
+                  <span class="label-optional">— shows on your profile, links to a game</span></label>
+                <input type="text" id="settings-favgame-name" maxlength="50"
+                  placeholder="Game name (e.g. Where's Epstein)" spellcheck="false" autocomplete="off" />
+                <input type="text" id="settings-favgame-url" maxlength="200"
+                  placeholder="https://sites.google.com/view/staticquasar931/..." spellcheck="false" autocomplete="off"
+                  style="margin-top:6px;" />
+                <p class="hint" id="settings-favgame-hint" style="margin:4px 0 0;font-size:11px;">URL must include <code>sites.google.com/view</code></p>
+              </div>
+
               <!-- Banner section -->
               <div class="settings-section-title" style="margin-top:20px;margin-bottom:8px;">Banner</div>
               <div class="banner-type-row">
@@ -737,11 +748,19 @@ export function buildUI() {
                   <button class="banner-swatch" data-color="#1a91da,#1060a0" title="Sky" style="background:linear-gradient(135deg,#1a91da,#1060a0)"></button>
                   <button class="banner-swatch" data-color="#e91e8c,#b5166e" title="Pink" style="background:linear-gradient(135deg,#e91e8c,#b5166e)"></button>
                   <button class="banner-swatch" data-color="#7c3aed,#5b1fb5" title="Purple" style="background:linear-gradient(135deg,#7c3aed,#5b1fb5)"></button>
-                  <!-- Custom gradient swatches -->
+                  <!-- Custom gradient swatches (in-app pickers) -->
                   <div class="banner-custom-row" style="grid-column:1/-1;margin-top:6px;">
                     <label class="banner-custom-label">Custom:</label>
-                    <input type="color" id="banner-custom-color1" value="#4f7cff" title="Start color" />
-                    <input type="color" id="banner-custom-color2" value="#7c3aed" title="End color" />
+                    <button class="ic-color-btn" data-ic-target="banner1" type="button">
+                      <span class="ic-color-swatch" id="banner-custom-color1-swatch" style="background:#4f7cff"></span>
+                      <span id="banner-custom-color1-text">#4f7cff</span>
+                    </button>
+                    <button class="ic-color-btn" data-ic-target="banner2" type="button">
+                      <span class="ic-color-swatch" id="banner-custom-color2-swatch" style="background:#7c3aed"></span>
+                      <span id="banner-custom-color2-text">#7c3aed</span>
+                    </button>
+                    <input type="hidden" id="banner-custom-color1" value="#4f7cff" />
+                    <input type="hidden" id="banner-custom-color2" value="#7c3aed" />
                     <button class="banner-swatch" id="banner-custom-apply" style="width:auto;padding:0 10px;height:28px;font-size:11px;background:var(--c-input-2);color:var(--t-secondary);" title="Apply custom gradient">Apply</button>
                   </div>
                 </div>
@@ -749,8 +768,11 @@ export function buildUI() {
               <div id="banner-solid-section" style="display:none;">
                 <div class="banner-custom-row">
                   <label class="banner-custom-label">Color:</label>
-                  <input type="color" id="banner-solid-color" value="#4f7cff" title="Banner solid color" />
-                  <input type="text" id="banner-solid-hex" class="hex-input" placeholder="#4f7cff" maxlength="7" />
+                  <button class="ic-color-btn" data-ic-target="bannerSolid" type="button">
+                    <span class="ic-color-swatch" id="banner-solid-swatch" style="background:#4f7cff"></span>
+                    <span id="banner-solid-text">#4f7cff</span>
+                  </button>
+                  <input type="hidden" id="banner-solid-color" value="#4f7cff" />
                 </div>
               </div>
 
@@ -1324,6 +1346,53 @@ export function buildUI() {
     </div>
   </div>
 
+  <!-- Activities (mini-games) Picker Modal -->
+  <div class="modal hidden" id="activities-modal">
+    <div class="modal-card" style="max-width:500px;width:96vw;">
+      <div class="modal-head">
+        <h2>🎮 Activities</h2>
+        <button class="icon-btn modal-close" data-close="activities-modal">
+          <svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </div>
+      <div class="modal-body" style="padding:16px 20px;">
+        <p class="hint" style="margin:0 0 14px;">Pick a game to play with everyone in this chat. The game will be posted as a message — anyone can take their turn.</p>
+        <div class="activities-grid">
+          <button class="activity-card" data-activity="tictactoe">
+            <div class="activity-icon">⨯⭘</div>
+            <div class="activity-name">Tic-Tac-Toe</div>
+            <div class="activity-desc">Classic 3-in-a-row, 2 players</div>
+          </button>
+          <button class="activity-card" data-activity="rps">
+            <div class="activity-icon">✊✋✌️</div>
+            <div class="activity-name">Rock Paper Scissors</div>
+            <div class="activity-desc">Best-of-five, 2 players</div>
+          </button>
+          <button class="activity-card" data-activity="dice">
+            <div class="activity-icon">🎲</div>
+            <div class="activity-name">Dice Duel</div>
+            <div class="activity-desc">Roll the highest, anyone can play</div>
+          </button>
+          <button class="activity-card" data-activity="numguess">
+            <div class="activity-icon">🔢</div>
+            <div class="activity-name">Number Guess</div>
+            <div class="activity-desc">Higher or lower, race to guess</div>
+          </button>
+          <button class="activity-card" data-activity="trivia">
+            <div class="activity-icon">❓</div>
+            <div class="activity-name">Trivia</div>
+            <div class="activity-desc">First-to-answer wins the round</div>
+          </button>
+          <button class="activity-card" data-activity="wouldyou">
+            <div class="activity-icon">🤔</div>
+            <div class="activity-name">Would You Rather</div>
+            <div class="activity-desc">Vote on a hard choice</div>
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- Poll Builder Modal -->
   <div class="modal hidden" id="poll-builder-modal">
     <div class="modal-card" style="max-width:480px;width:96vw;">
@@ -1521,6 +1590,7 @@ export function buildUI() {
             <div class="full-profile-since" id="fp-birthday" style="display:none"></div>
             <div class="full-profile-since" id="fp-last-active" style="display:none"></div>
             <div class="full-profile-since fp-friends-since-row" id="fp-friends-since" style="display:none"></div>
+            <div class="fp-favgame" id="fp-favgame" style="display:none"></div>
             <div id="fp-mutual-groups" style="display:none">
               <div class="full-profile-divider" style="margin:10px 0 8px;"></div>
               <div class="full-profile-section-label">Mutual Groups</div>
