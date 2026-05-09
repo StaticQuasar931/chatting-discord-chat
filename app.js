@@ -4294,23 +4294,59 @@ $("#school-join-btn")?.addEventListener("click", async () => {
   }
 });
 
-// Leave directory
-$("#school-leave-btn")?.addEventListener("click", () => {
-  const dom = _userSchoolDomain(); if (!dom) return;
-  showConfirm("Stop being discoverable to other " + dom + " members?", async () => {
-    try {
-      await deleteDoc(doc(db, "EducationDiscovery", dom, "members", state.user.uid));
-      showToast("Left the directory");
-      closeModal("school-modal");
-      if (_schoolMembersUnsub) { _schoolMembersUnsub(); _schoolMembersUnsub = null; }
-    } catch(err) { showToast("Error: " + err.message); }
-  }, { title: "Leave Directory", yesLabel: "Leave", danger: true });
-});
-
 // Sanitize a domain into a Firestore-safe deterministic chat id
 function _schoolChatId(domain) {
   return "eduDisc_" + domain.replace(/[^a-z0-9]/gi, "_").toLowerCase();
 }
+
+/* When a user opts out of school discovery, also auto-remove them from any
+   school-domain group chat(s) they're in for that domain. Best-effort: errors
+   are swallowed so the directory delete still feels successful. */
+async function _leaveAllSchoolChatsFor(domain) {
+  if (!domain || !state.user?.uid) return;
+  try {
+    // Primary deterministic school chat
+    const chatId = _schoolChatId(domain);
+    try {
+      const snap = await getDoc(doc(db, "chats", chatId));
+      if (snap.exists() && snap.data().members?.includes(state.user.uid)) {
+        const members = snap.data().members.filter(m => m !== state.user.uid);
+        const leaders = (snap.data().leaders||[]).filter(m => m !== state.user.uid);
+        await updateDoc(doc(db, "chats", chatId), { members, leaders });
+        // If we were currently viewing it, leave the view
+        if (state.activeChatId === chatId) showFriendsView();
+      }
+    } catch(_){}
+    // Also any other chats with the same schoolDomain (e.g. legacy auto-created ones)
+    const others = state.chats.filter(c =>
+      c.schoolDomain === domain && c.id !== chatId && c.members?.includes(state.user.uid)
+    );
+    for (const c of others) {
+      try {
+        const newMembers = c.members.filter(m => m !== state.user.uid);
+        const newLeaders = (c.leaders||[]).filter(m => m !== state.user.uid);
+        await updateDoc(doc(db, "chats", c.id), { members: newMembers, leaders: newLeaders });
+        if (state.activeChatId === c.id) showFriendsView();
+      } catch(_){}
+    }
+  } catch(_){}
+}
+
+// Leave directory — also auto-leaves the school group chat(s)
+$("#school-leave-btn")?.addEventListener("click", () => {
+  const dom = _userSchoolDomain(); if (!dom) return;
+  showConfirm("Stop being discoverable to other " + dom + " members? You'll also leave the school group chat.", async () => {
+    try {
+      // Leave the school chats first so we don't keep getting messages from them
+      await _leaveAllSchoolChatsFor(dom);
+      // Then remove from the directory
+      await deleteDoc(doc(db, "EducationDiscovery", dom, "members", state.user.uid));
+      showToast("Left the school directory + chat");
+      closeModal("school-modal");
+      if (_schoolMembersUnsub) { _schoolMembersUnsub(); _schoolMembersUnsub = null; }
+    } catch(err) { showToast("Error: " + err.message); }
+  }, { title: "Leave Discovery", yesLabel: "Leave", danger: true });
+});
 
 // Open school chat — find or create the deterministic school chat
 $("#school-open-chat-btn")?.addEventListener("click", async () => {
