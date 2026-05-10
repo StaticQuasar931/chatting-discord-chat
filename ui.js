@@ -402,7 +402,12 @@ export function buildUI() {
             <div class="composer-input-wrap">
               <textarea id="composer-input" placeholder="Message… or /help for commands" rows="1"></textarea>
             </div>
-            <!-- Order (left → right): markdown · silent typing · poll · emoji · gif · send -->
+            <!-- + button (consolidates polls, activities, commands, silent message) -->
+            <button class="icon-btn composer-plus-btn" id="composer-plus-btn" title="More — polls, games, commands, silent">
+              <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
+                <path fill="currentColor" d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6z"/>
+              </svg>
+            </button>
             <button class="icon-btn composer-md-btn" id="md-preview-btn" title="Toggle Markdown preview">
               <svg viewBox="0 0 24 24" width="18" height="18" fill="none" aria-hidden="true">
                 <path fill="currentColor" d="M2.5 5h19c.83 0 1.5.67 1.5 1.5v11c0 .83-.67 1.5-1.5 1.5h-19C1.67 19 1 18.33 1 17.5v-11C1 5.67 1.67 5 2.5 5zm3 11.5v-5L8 14l2.5-2.5v5h-2v-2L8 15l-1.5-1.5v3H5.5zm12 .25 3-3.25h-2v-3h-2v3h-2l3 3.25z"/>
@@ -416,11 +421,6 @@ export function buildUI() {
                 <circle fill="currentColor" cx="12" cy="11" r="1.2"/>
                 <circle fill="currentColor" cx="16" cy="11" r="1.2"/>
                 <line class="silent-slash" x1="3" y1="21" x2="21" y2="3" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/>
-              </svg>
-            </button>
-            <button class="icon-btn composer-poll-btn" id="composer-poll-btn" title="Create a poll">
-              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" aria-hidden="true">
-                <path fill="currentColor" d="M3 22V8h4v14H3zm7 0V2h4v20h-4zm7 0v-9h4v9h-4z"/>
               </svg>
             </button>
             <button class="icon-btn composer-emoji-btn" id="emoji-btn" title="Emoji">
@@ -1387,6 +1387,21 @@ export function buildUI() {
             <div class="activity-icon">🤔</div>
             <div class="activity-name">Would You Rather</div>
             <div class="activity-desc">Vote on a hard choice</div>
+          </button>
+          <button class="activity-card" data-activity="truthordare">
+            <div class="activity-icon">💫</div>
+            <div class="activity-name">Truth or Dare</div>
+            <div class="activity-desc">Personalized — host writes prompts</div>
+          </button>
+          <button class="activity-card" data-activity="mostlikely">
+            <div class="activity-icon">🌟</div>
+            <div class="activity-name">Most Likely To…</div>
+            <div class="activity-desc">Vote which member fits best</div>
+          </button>
+          <button class="activity-card" data-activity="connect4">
+            <div class="activity-icon">🟡🔴</div>
+            <div class="activity-name">Connect 4</div>
+            <div class="activity-desc">Pick colors, drop pieces, 4-in-a-row</div>
           </button>
         </div>
       </div>

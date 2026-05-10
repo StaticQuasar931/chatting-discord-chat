@@ -3419,8 +3419,9 @@ body[data-theme="oled"] .badge-icon-wrap {
   color: var(--t-primary); transition: all .12s;
   display: flex; align-items: center; justify-content: center;
 }
-.ttt-cell:hover:not(:disabled) { border-color: var(--c-accent); transform: scale(1.05); }
-.ttt-cell:disabled { cursor: default; }
+.ttt-cell:hover:not(.disabled) { border-color: var(--c-accent); transform: scale(1.05); }
+.ttt-cell.disabled { cursor: default; opacity: 0.85; }
+.ttt-cell:disabled { cursor: default; opacity: 0.85; }
 .ttt-cell.tttx { color: #4f7cff; }
 .ttt-cell.ttto { color: #f43f5e; }
 
@@ -3487,6 +3488,81 @@ body[data-theme="oled"] .badge-icon-wrap {
 }
 .wyr-option.selected .wyr-count { color: var(--c-accent); font-weight: 700; }
 
+/* Activity card favorite star */
+.activity-card { position: relative; }
+.activity-fav-btn {
+  position: absolute; top: 6px; right: 6px;
+  width: 22px; height: 22px; border-radius: 50%;
+  background: rgba(0,0,0,.3); border: none;
+  color: rgba(255,255,255,.4); font-size: 14px;
+  cursor: pointer; transition: all .12s;
+}
+.activity-fav-btn:hover { color: #fbbf24; transform: scale(1.15); }
+.activity-fav-btn.active { color: #fbbf24; background: rgba(251,191,36,.18); }
+
+/* Truth or Dare */
+.tod-add-row {
+  display: flex; gap: 6px; align-items: stretch; margin-top: 8px;
+}
+.tod-add-row .tod-kind {
+  background: var(--c-input); border: 1px solid var(--c-border-2);
+  color: var(--t-primary); padding: 6px 8px; border-radius: var(--radius-sm);
+  font-size: 12px;
+}
+.tod-add-row .tod-text { flex: 1; }
+.tod-pick-row {
+  display: flex; gap: 6px; margin-top: 8px;
+}
+.tod-pick-row .rps-btn { flex: 1; padding: 12px; }
+
+/* Connect 4 */
+.c4-drop-row {
+  display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px;
+  margin-bottom: 4px;
+}
+.c4-drop {
+  height: 22px; background: var(--c-input);
+  border: 1px solid var(--c-border-2); border-radius: 4px;
+  color: var(--t-muted); font-size: 11px; cursor: pointer;
+  transition: all .12s;
+}
+.c4-drop:hover:not(.disabled) {
+  background: var(--c-accent-soft); color: var(--c-accent);
+}
+.c4-drop.disabled { cursor: default; opacity: .4; }
+.c4-board {
+  display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px;
+  background: #1e3a8a; padding: 4px; border-radius: 6px;
+}
+.c4-cell {
+  aspect-ratio: 1; background: rgba(0,0,0,.25); border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+}
+.c4-disc {
+  width: 80%; height: 80%; border-radius: 50%;
+  box-shadow: inset 0 -2px 4px rgba(0,0,0,.3);
+}
+.c4-color-row {
+  display: flex; gap: 6px; margin-top: 6px; justify-content: center;
+}
+.c4-color-swatch {
+  width: 28px; height: 28px; border-radius: 50%;
+  border: 2px solid rgba(255,255,255,.3); cursor: pointer;
+  transition: transform .12s;
+}
+.c4-color-swatch:hover { transform: scale(1.15); border-color: #fff; }
+
+/* Mobile polish for games */
+@media (max-width: 480px) {
+  .game-card { max-width: 100%; padding: 10px; }
+  .ttt-board { grid-template-columns: repeat(3, 56px); }
+  .ttt-cell { width: 56px; height: 56px; font-size: 26px; }
+  .c4-board, .c4-drop-row { font-size: 10px; }
+  .c4-drop { height: 18px; }
+  .activities-grid { grid-template-columns: 1fr; }
+  .composer-plus-menu { left: 8px !important; right: 8px; min-width: 0; max-width: none; }
+}
+
 /* Poll builder modal */
 .poll-builder-option-row {
   display: flex; align-items: center; gap: 8px; margin-top: 6px;
@@ -3517,6 +3593,63 @@ body[data-theme="oled"] .badge-icon-wrap {
   font-size: 22px; line-height: 1; color: var(--t-primary);
 }
 .dblclick-emoji-btn:hover { border-color: var(--c-accent); background: var(--c-accent-soft); }
+
+/* Composer + (plus) menu */
+.composer-plus-btn {
+  color: var(--c-accent);
+  transition: transform .15s, color .12s, background .12s;
+}
+.composer-plus-btn:hover { transform: rotate(90deg); background: var(--c-accent-soft); }
+.composer-plus-btn.plus-silent-armed {
+  color: #fbbf24; background: rgba(251,191,36,.12);
+}
+.composer-plus-btn.plus-silent-armed::after {
+  content: "🔕"; position: absolute; top: -2px; right: -2px;
+  font-size: 10px;
+}
+.composer-plus-menu {
+  position: fixed; z-index: 500; min-width: 280px;
+  background: var(--c-overlay); border: 1px solid var(--c-border);
+  border-radius: var(--radius-md); box-shadow: var(--shadow-2);
+  padding: 6px; animation: card-pop .12s ease;
+}
+.cpm-item {
+  display: flex; align-items: center; gap: 12px;
+  width: 100%; padding: 10px; border-radius: var(--radius-sm);
+  background: transparent; border: none; cursor: pointer;
+  text-align: left; transition: background .12s;
+}
+.cpm-item:hover { background: var(--c-input); }
+.cpm-item.active { background: var(--c-accent-soft); }
+.cpm-icon {
+  width: 36px; height: 36px; border-radius: 8px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 18px; flex-shrink: 0;
+}
+.cpm-meta { flex: 1; min-width: 0; }
+.cpm-title { font-size: 14px; font-weight: 700; color: var(--t-primary); }
+.cpm-sub { font-size: 11px; color: var(--t-muted); margin-top: 1px; }
+
+/* Composer button colors — make icons more colorful */
+.composer-emoji-btn { color: #fbbf24; }
+.composer-emoji-btn:hover { color: #fde047; background: rgba(251,191,36,.12); }
+.composer-gif-btn { color: #ec4899; }
+.composer-gif-btn:hover { color: #f9a8d4; background: rgba(236,72,153,.12); }
+.composer-md-btn { color: #a78bfa; }
+.composer-md-btn:hover { color: #c4b5fd; background: rgba(167,139,250,.12); }
+#md-preview-btn.active { color: #c4b5fd; background: rgba(167,139,250,.18); }
+.composer-silent-btn { color: #94a3b8; }
+.composer-silent-btn:hover { color: #cbd5e1; background: rgba(148,163,184,.12); }
+.composer-send-btn { color: var(--c-accent); }
+
+/* Silent message indicator on rendered messages */
+.msg-silent-indicator {
+  display: inline-flex; align-items: center; gap: 3px;
+  font-size: 10px; color: var(--t-muted); margin-left: 6px;
+  padding: 1px 6px; border-radius: var(--radius-pill);
+  background: rgba(148,163,184,.15); font-weight: 700;
+  vertical-align: middle;
+}
 
 /* Custom emoji modal tabs */
 .emoji-modal-tabs {

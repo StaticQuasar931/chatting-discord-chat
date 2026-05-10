@@ -620,12 +620,19 @@ document.addEventListener("click", e=>{
     _icCurrentTarget = btn.dataset.icTarget;
     _icRenderGrid(); // ensure populated
     const pop = $("#ic-color-popover");
-    const cur = $(`#tc-${_icCurrentTarget}`)?.value || "#000000";
+    // Resolve the current value for ANY known target type
+    let cur = "#000000";
+    if (_icCurrentTarget === "banner1") cur = $("#banner-custom-color1")?.value || cur;
+    else if (_icCurrentTarget === "banner2") cur = $("#banner-custom-color2")?.value || cur;
+    else if (_icCurrentTarget === "bannerSolid") cur = $("#banner-solid-color")?.value || cur;
+    else cur = $(`#tc-${_icCurrentTarget}`)?.value || cur;
     $("#ic-color-hex").value = cur;
-    // Position popover near the button
+    // Position popover near the button (use position:fixed for reliability)
     const rect = btn.getBoundingClientRect();
-    pop.style.left = Math.min(window.innerWidth-260, rect.left) + "px";
-    pop.style.top  = (rect.bottom + 6) + "px";
+    pop.style.position = "fixed";
+    pop.style.left = Math.min(window.innerWidth-260, Math.max(8, rect.left)) + "px";
+    pop.style.top  = Math.min(window.innerHeight-260, rect.bottom + 6) + "px";
+    pop.style.right = "auto"; pop.style.bottom = "auto";
     pop.classList.remove("hidden");
     return;
   }
@@ -703,14 +710,26 @@ function showToast(msg, ms = 2400) {
 // Returns uid string, or null if no match found.
 function _resolveUsername(name) {
   const lc = name.toLowerCase();
+  // Build the set of UIDs that ARE valid mentions in the current context:
+  // - Always: self
+  // - DMs: the other DM partner
+  // - Groups: all chat members
+  // (We DON'T allow mentioning every friend or every cached user — that
+  // would let people ping people who aren't in this chat at all.)
+  const allowedUids = new Set();
+  if (state.user?.uid) allowedUids.add(state.user.uid);
+  const c = state.activeChat;
+  if (c?.members && Array.isArray(c.members)) {
+    for (const uid of c.members) allowedUids.add(uid);
+  }
   // Check self
   if (state.user && (state.user.username||"").toLowerCase() === lc) return state.user.uid;
-  // Check friends list (displayName stores the username)
-  const friend = state.friends.find(f=>(f.displayName||"").toLowerCase()===lc);
-  if (friend) return friend.uid;
-  // Check userCache (for group-chat participants not in friends list)
-  for (const [uid, profile] of Object.entries(state.userCache)) {
-    if ((profile.username||profile.displayName||"").toLowerCase()===lc) return uid;
+  // Check anyone in the active chat
+  for (const uid of allowedUids) {
+    const profile = state.userCache[uid] || (uid === state.user?.uid ? state.user : null);
+    if (!profile) continue;
+    const uname = (profile.username || profile.displayName || "").toLowerCase();
+    if (uname === lc) return uid;
   }
   return null;
 }
@@ -3137,6 +3156,7 @@ function renderMessages() {
               <span class="msg-author" ${profileUidAttr}>${escapeHtml(m.senderName||"User")}</span>
               ${isLeader?`<span class="leader-badge" title="Group leader"><svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path fill="currentColor" d="M5 16L3 5l5.5 5L12 4l3.5 6L21 5l-2 11H5zm14 3c0 .6-.4 1-1 1H6c-.6 0-1-.4-1-1v-1h14v1z"/></svg></span>`:""}
               <span class="msg-time">${escapeHtml(formatTime(ts))}</span>
+              ${m.silent?`<span class="msg-silent-indicator" title="Sent silently — no notification was triggered">🔕 silent</span>`:""}
             </div>
             ${replyHtml}
             <div class="msg-body">${formatMessage(m.text||"")}${editedLabel}</div>
@@ -3242,6 +3262,8 @@ function renderMessages() {
   updateJumpBtn();
   // Lazy-hydrate any link previews in the just-rendered batch
   hydrateLinkPreviews();
+  // Re-focus a game input if user just submitted a wrong guess (rapid-fire mode)
+  _maybeRefocusGameInput?.();
 }
 
 // Unread divider dismiss — click to clear the marker and hide the bar
@@ -3552,6 +3574,12 @@ async function sendCurrentMessage() {
     text=text.replace(/^@silent\s*/i,"").trim();
     if (!text) return; // don't send empty silent message
   }
+  // Or: + menu armed silent for next message
+  if (typeof _silentNextMessage !== "undefined" && _silentNextMessage) {
+    silent = true;
+    _silentNextMessage = false;
+    $("#composer-plus-btn")?.classList.remove("plus-silent-armed");
+  }
 
   if (text.length>2000) { showToast("Message too long (2000 char max)"); return; }
 
@@ -3581,11 +3609,58 @@ async function sendCurrentMessage() {
   };
 
   // /poll Question? | Opt A | Opt B [| Opt C ...] [duration:1h|30m|1d]
-  // /activities — open the activity (mini-games) picker modal
-  if (/^\/activit(y|ies)\b/i.test(text) || /^\/games?\b/i.test(text)) {
+  // /activities, /activity GAME, /games — open the activity picker OR launch a specific game
+  // Also: /tictactoe, /ttt, /rps, /dice, /numguess, /trivia, /wyr, /wouldyourather,
+  //       /truthordare, /tod, /mostlikelyto, /mlt, /connect4, /c4 — direct launch
+  // /gamestop — end the most recent active game in this chat
+  const directGameMatch = text.match(/^\/(activit(?:y|ies)|games?|tictactoe|ttt|rps|rockpaperscissors|dice|numguess|number|trivia|wyr|wouldyourather|truthordare|tod|mostlikelyto|mlt|connect4|c4|gamestop|stopgame)\s*(.*)/i);
+  if (directGameMatch) {
     composer.value = ""; composer.style.height = "auto"; updateSendBtn(); clearReplyTo();
-    openActivitiesPicker();
-    return;
+    const cmd = directGameMatch[1].toLowerCase();
+    const rest = (directGameMatch[2]||"").trim();
+    // /gamestop — end the most recent unfinished game by this user
+    if (cmd === "gamestop" || cmd === "stopgame") {
+      const recent = [...state.messages].reverse().find(m =>
+        m.type === "game" && m.gameData &&
+        (m.senderUid === state.user.uid || (m.gameData.host === state.user.uid))
+      );
+      if (!recent) { showToast("No active game to stop"); return; }
+      try {
+        await updateDoc(doc(db, "chats", state.activeChatId, "messages", recent.id), {
+          "gameData.winner": "stopped",
+          "gameData.stopped": true
+        });
+        showToast("Game stopped");
+      } catch(err) { showToast("Couldn't stop: "+err.message); }
+      return;
+    }
+    // /activity NAME (optional) — if NAME given, launch directly; else open picker
+    if (cmd === "activity" || cmd === "activities" || cmd === "game" || cmd === "games") {
+      if (rest) {
+        const map = { ttt:"tictactoe", tictactoe:"tictactoe", rps:"rps", rockpaperscissors:"rps",
+          dice:"dice", numguess:"numguess", number:"numguess", trivia:"trivia",
+          wyr:"wouldyou", wouldyourather:"wouldyou", tod:"truthordare", truthordare:"truthordare",
+          mlt:"mostlikely", mostlikelyto:"mostlikely", c4:"connect4", connect4:"connect4" };
+      const k = map[rest.toLowerCase()];
+        if (k) { _launchGame(k); return; }
+        showToast("Unknown game: " + rest); return;
+      }
+      openActivitiesPicker(); return;
+    }
+    // Direct game-name commands
+    const directMap = {
+      tictactoe: "tictactoe", ttt: "tictactoe",
+      rps: "rps", rockpaperscissors: "rps",
+      dice: "dice",
+      numguess: "numguess", number: "numguess",
+      trivia: "trivia",
+      wyr: "wouldyou", wouldyourather: "wouldyou",
+      truthordare: "truthordare", tod: "truthordare",
+      mostlikelyto: "mostlikely", mlt: "mostlikely",
+      connect4: "connect4", c4: "connect4",
+    };
+    const kind = directMap[cmd];
+    if (kind) { _launchGame(kind, rest); return; }
   }
 
   if (/^\/poll\s+/i.test(text)) {
@@ -5019,6 +5094,38 @@ $("#settings-save-btn")?.addEventListener("click", async ()=>{
     }
     if (!/^https?:\/\//i.test(favGameUrlRaw)) favGameUrl = "https://" + favGameUrlRaw;
     else favGameUrl = favGameUrlRaw;
+
+    // Autoflag if the site path-segment isn't an admin-allowlisted creator.
+    // Example: https://sites.google.com/view/{creator}/...  — `creator` must
+    // be in the allowlist (admin can extend via /appConfig/favGameAllowlist).
+    // Saving still succeeds (visual to user), but admin gets an Autoflag entry.
+    try {
+      const pathMatch = favGameUrl.match(/sites\.google\.com\/view\/([^\/?#]+)/i);
+      const creator = pathMatch ? pathMatch[1].toLowerCase() : "";
+      // Default allowlist — admin can add more by editing /appConfig/favGameAllowlist.allowed
+      let allowed = ["staticquasar931"];
+      try {
+        const cfgSnap = await getDoc(doc(db, "appConfig", "favGameAllowlist"));
+        if (cfgSnap.exists() && Array.isArray(cfgSnap.data().allowed)) {
+          allowed = cfgSnap.data().allowed.map(s => String(s).toLowerCase());
+        }
+      } catch(_){}
+      if (!allowed.includes(creator)) {
+        // Silent admin-only flag — no UI feedback to user
+        try {
+          await addDoc(collection(db, "Autoflag"), {
+            messageId: null, chatId: null,
+            senderUid: state.user.uid,
+            senderName: state.user.displayName || null,
+            flaggedBy: state.user.uid,
+            text: `Favorite-game URL set to: ${favGameUrl} (creator="${creator}", name="${favGameName}")`,
+            matchedCategory: "favgame_off_allowlist",
+            flaggedAt: serverTimestamp(),
+            reviewed: false,
+          });
+        } catch(_){}
+      }
+    } catch(_){}
   }
 
   if (!username||username.length<3) { showToast("Username must be at least 3 characters."); return; }
@@ -5069,6 +5176,8 @@ $("#settings-save-btn")?.addEventListener("click", async ()=>{
       bannerColor:state.bannerColor||null,
       status:state.status,
       isPrivate:privOn,
+      favGameName: favGameName || null,
+      favGameUrl:  favGameUrl  || null,
       badges:state.userCache[state.user.uid]?.badges||[]
     };
     updateUserPanel();
@@ -6378,8 +6487,56 @@ $("#poll-builder-create-btn")?.addEventListener("click", async () => {
    ===================================================================== */
 function openActivitiesPicker() {
   if (!state.activeChatId) { showToast("Open a chat first to start an activity"); return; }
+  // Reorder cards: favorites first, then alphabetical
+  _reorderActivities();
   openModal("activities-modal");
 }
+
+function _getGameFavs() {
+  try { return new Set(JSON.parse(localStorage.getItem("sc_game_favs")||"[]")); }
+  catch(_){ return new Set(); }
+}
+function _toggleGameFav(kind) {
+  const set = _getGameFavs();
+  if (set.has(kind)) set.delete(kind); else set.add(kind);
+  localStorage.setItem("sc_game_favs", JSON.stringify([...set]));
+  _reorderActivities();
+}
+function _reorderActivities() {
+  const grid = document.querySelector("#activities-modal .activities-grid");
+  if (!grid) return;
+  const favs = _getGameFavs();
+  const cards = Array.from(grid.querySelectorAll(".activity-card"));
+  // Add a star button if missing + sort
+  cards.forEach(c => {
+    const kind = c.dataset.activity;
+    if (!c.querySelector(".activity-fav-btn")) {
+      const btn = document.createElement("button");
+      btn.className = "activity-fav-btn" + (favs.has(kind) ? " active" : "");
+      btn.title = favs.has(kind) ? "Unfavorite" : "Favorite (pin to top)";
+      btn.innerHTML = "★";
+      btn.dataset.favGame = kind;
+      c.appendChild(btn);
+    } else {
+      const btn = c.querySelector(".activity-fav-btn");
+      btn.classList.toggle("active", favs.has(kind));
+    }
+  });
+  cards.sort((a, b) => {
+    const af = favs.has(a.dataset.activity) ? 0 : 1;
+    const bf = favs.has(b.dataset.activity) ? 0 : 1;
+    if (af !== bf) return af - bf;
+    return 0; // keep original order otherwise
+  });
+  cards.forEach(c => grid.appendChild(c));
+}
+// Star-button click toggles a game favorite
+document.addEventListener("click", e => {
+  const star = e.target.closest("[data-fav-game]");
+  if (!star) return;
+  e.stopPropagation();
+  _toggleGameFav(star.dataset.favGame);
+});
 
 // Trivia/Would-You-Rather pools (small, hand-curated)
 const _TRIVIA_QUESTIONS = [
@@ -6407,17 +6564,10 @@ const _WYR_PAIRS = [
   ["read minds", "be invisible"],
 ];
 
-document.addEventListener("click", async e => {
-  const card = e.target.closest("[data-activity]");
-  if (!card) return;
-  const kind = card.dataset.activity;
+async function _launchGame(kind, opts) {
   const chatId = state.activeChatId;
-  if (!chatId || !state.user) return;
-  closeModal("activities-modal");
-
-  // Build initial gameData per kind
-  let gameData;
-  let preview = "🎮 New activity";
+  if (!chatId || !state.user) { showToast("Open a chat first"); return; }
+  let gameData, preview = "🎮 New activity";
   if (kind === "tictactoe") {
     gameData = { kind, board: ["","","","","","","","",""], turn: state.user.uid, players: {x: state.user.uid, o: null}, winner: null, lastMove: null };
     preview = "⨯⭘ Tic-Tac-Toe — waiting for opponent";
@@ -6431,14 +6581,32 @@ document.addEventListener("click", async e => {
     gameData = { kind, target: 1+Math.floor(Math.random()*100), guesses: [], winner: null, host: state.user.uid };
     preview = "🔢 Number Guess (1–100) — guess the number!";
   } else if (kind === "trivia") {
+    // Optional: /trivia COUNT — set max question count (default 5, max 20)
+    const cnt = parseInt(opts, 10);
+    const total = (cnt && cnt >= 1 && cnt <= 20) ? cnt : 5;
     const t = _TRIVIA_QUESTIONS[Math.floor(Math.random()*_TRIVIA_QUESTIONS.length)];
-    gameData = { kind, question: t.q, answer: t.a.toLowerCase(), guesses: [], winner: null, host: state.user.uid };
-    preview = `❓ Trivia: ${t.q}`;
+    gameData = { kind, question: t.q, answer: t.a.toLowerCase(), guesses: [], winner: null, host: state.user.uid,
+                 questionNumber: 1, totalQuestions: total, scores: {} };
+    preview = `❓ Trivia (1/${total}): ${t.q}`;
   } else if (kind === "wouldyou") {
     const p = _WYR_PAIRS[Math.floor(Math.random()*_WYR_PAIRS.length)];
-    gameData = { kind, optionA: p[0], optionB: p[1], votes: {} };
+    gameData = { kind, optionA: p[0], optionB: p[1], votes: {}, host: state.user.uid, round: 1 };
     preview = `🤔 Would You Rather: ${p[0]} OR ${p[1]}?`;
-  } else { return; }
+  } else if (kind === "truthordare") {
+    gameData = { kind, host: state.user.uid, prompts: [], pickedBy: null, pickedKind: null };
+    preview = "💫 Truth or Dare — host fills in personalized prompts";
+  } else if (kind === "mostlikely") {
+    const prompt = (opts || "").trim() || "be the next viral celebrity";
+    gameData = { kind, prompt, votes: {}, host: state.user.uid };
+    preview = `🌟 Most Likely To: ${prompt}`;
+  } else if (kind === "connect4") {
+    // 7 cols x 6 rows. board[row][col] = "" | "1" | "2"
+    gameData = { kind, board: Array.from({length:6},()=>Array(7).fill("")),
+                 turn: state.user.uid, players: {p1: state.user.uid, p2: null},
+                 colors: {p1: "#ef4444", p2: "#fbbf24"}, // default: red vs yellow
+                 winner: null, host: state.user.uid };
+    preview = "🟡🔴 Connect 4 — waiting for opponent";
+  } else { showToast("Game not yet implemented: " + kind); return; }
 
   try {
     await addDoc(collection(db, "chats", chatId, "messages"), {
@@ -6455,6 +6623,13 @@ document.addEventListener("click", async e => {
       lastSenderUid: state.user.uid
     });
   } catch(err) { showToast("Couldn't start: " + err.message); }
+}
+
+document.addEventListener("click", async e => {
+  const card = e.target.closest("[data-activity]");
+  if (!card) return;
+  closeModal("activities-modal");
+  await _launchGame(card.dataset.activity);
 });
 
 /* Render a game card given its gameData. Returns HTML string. */
@@ -6463,20 +6638,26 @@ function renderGameCard(m) {
   const myUid = state.user?.uid;
   const escName = uid => escapeHtml((state.userCache[uid]?.username) || (state.userCache[uid]?.displayName) || (uid===m.senderUid?m.senderName:"Player") || "Player");
   if (g.kind === "tictactoe") {
-    const myTurn = g.turn === myUid && !g.winner;
     const isP1 = g.players?.x === myUid;
     const isP2 = g.players?.o === myUid;
+    const isPlayer = isP1 || isP2;
+    const myTurn = isPlayer && g.turn === myUid && !g.winner;
     const canJoinAsP2 = !g.players?.o && !isP1;
     const cells = (g.board||["","","","","","","","",""]).map((c, i) => {
       const filled = c === "X" ? "tttx" : c === "O" ? "ttto" : "";
-      const disabled = c || !myTurn || g.winner ? "disabled" : "";
-      return `<button class="ttt-cell ${filled}" data-game-action="ttt-move" data-game-msg="${escapeHtml(m.id)}" data-ttt-i="${i}" ${disabled}>${escapeHtml(c)}</button>`;
+      // Cell is interactable only if: empty + my turn + no winner. Otherwise add a 'disabled' CSS class.
+      const interactable = !c && myTurn && !g.winner;
+      return `<button class="ttt-cell ${filled} ${interactable?'':'disabled'}" data-game-action="ttt-move" data-game-msg="${escapeHtml(m.id)}" data-ttt-i="${i}">${escapeHtml(c)}</button>`;
     }).join("");
     let status;
-    if (g.winner === "draw") status = "Draw!";
+    if (g.winner === "draw") status = "🤝 Draw!";
     else if (g.winner) status = `🏆 ${escName(g.winner)} wins!`;
     else if (!g.players?.o) status = canJoinAsP2 ? `<button class="btn-primary game-join-btn" data-game-action="ttt-join" data-game-msg="${escapeHtml(m.id)}">Join as O</button>` : `Waiting for opponent…`;
-    else status = `${myTurn ? "Your turn" : escName(g.turn) + "'s turn"} — ${myUid === g.players.x ? "You're X" : myUid === g.players.o ? "You're O" : "Watching"}`;
+    else {
+      const turnLabel = myTurn ? "<strong>Your turn</strong>" : `${escName(g.turn)}'s turn`;
+      const youAre = isP1 ? "You're <strong style='color:#4f7cff'>X</strong>" : isP2 ? "You're <strong style='color:#f43f5e'>O</strong>" : "Watching";
+      status = `${turnLabel} — ${youAre}`;
+    }
     return `<div class="game-card game-tictactoe">
       <div class="game-title">⨯⭘ Tic-Tac-Toe</div>
       <div class="game-board ttt-board">${cells}</div>
@@ -6531,15 +6712,17 @@ function renderGameCard(m) {
   }
   if (g.kind === "numguess") {
     const won = !!g.winner;
-    const myGuessed = (g.guesses||[]).some(x => x.uid === myUid);
-    const lastFew = (g.guesses||[]).slice(-5).map(x => {
-      const hint = x.value < g.target ? "↑ higher" : x.value > g.target ? "↓ lower" : "🎯 correct!";
-      return `<div class="numguess-row"><span>${escapeHtml(x.name)}</span> <strong>${x.value}</strong> <span class="numguess-hint">${hint}</span></div>`;
+    const lastFew = (g.guesses||[]).slice(-6).map(x => {
+      let hint, color;
+      if (x.value === g.target) { hint = "🎯 correct!"; color = "#10b981"; }
+      else if (x.value < g.target) { hint = "↑ higher"; color = "#3b82f6"; }
+      else { hint = "↓ lower"; color = "#ef4444"; }
+      return `<div class="numguess-row"><span>${escapeHtml(x.name)}</span> <strong>${x.value}</strong> <span class="numguess-hint" style="color:${color};font-weight:700;">${hint}</span></div>`;
     }).join("");
     let action;
     if (won) action = `<div class="game-status">🏆 ${escName(g.winner)} guessed it! The number was <strong>${g.target}</strong>.</div>`;
     else action = `<div class="numguess-input-row">
-      <input type="number" class="numguess-input" id="numguess-${escapeHtml(m.id)}" min="1" max="100" placeholder="1-100" />
+      <input type="number" class="numguess-input game-input" id="numguess-${escapeHtml(m.id)}" data-enter-action="numguess-submit" data-enter-msg="${escapeHtml(m.id)}" min="1" max="100" placeholder="1-100" autocomplete="off" />
       <button class="btn-primary" data-game-action="numguess-submit" data-game-msg="${escapeHtml(m.id)}">Guess</button>
     </div>`;
     return `<div class="game-card game-numguess">
@@ -6550,19 +6733,35 @@ function renderGameCard(m) {
   }
   if (g.kind === "trivia") {
     const won = !!g.winner;
-    const myGuessed = (g.guesses||[]).some(x => x.uid === myUid);
     const lastFew = (g.guesses||[]).slice(-5).map(x => {
       const correct = x.correct ? "✅" : "❌";
       return `<div class="numguess-row"><span>${escapeHtml(x.name)}</span> <em>"${escapeHtml(x.value)}"</em> ${correct}</div>`;
     }).join("");
+    const total = g.totalQuestions || 1;
+    const num = g.questionNumber || 1;
+    const isHost = g.host === myUid;
+    const allDone = num >= total && won;
     let action;
-    if (won) action = `<div class="game-status">🏆 ${escName(g.winner)} got it! Answer: <strong>${escapeHtml(g.answer)}</strong></div>`;
-    else action = `<div class="numguess-input-row">
-      <input type="text" class="numguess-input" id="trivia-${escapeHtml(m.id)}" maxlength="50" placeholder="Your answer…" />
-      <button class="btn-primary" data-game-action="trivia-submit" data-game-msg="${escapeHtml(m.id)}">Answer</button>
-    </div>`;
+    if (won && !allDone) {
+      action = `<div class="game-status">🏆 ${escName(g.winner)} got it! Answer: <strong>${escapeHtml(g.answer)}</strong></div>
+                ${isHost ? `<button class="btn-primary game-join-btn" data-game-action="trivia-next" data-game-msg="${escapeHtml(m.id)}">▶ Next Question</button>` : `<div class="game-status" style="font-size:11px;opacity:.7;">Waiting for host to start next…</div>`}`;
+    } else if (allDone) {
+      // Show scoreboard
+      const scores = Object.entries(g.scores||{})
+        .map(([uid,s]) => ({uid, score:s, name:(state.userCache[uid]?.username||state.userCache[uid]?.displayName||"Player")}))
+        .sort((a,b)=>b.score-a.score);
+      const topScore = scores[0]?.score || 0;
+      const winnerName = scores[0] ? escapeHtml(scores[0].name) : "Nobody";
+      const board = scores.map((s,i) => `<div class="numguess-row"><span>${i===0?"🏆 ":""}${escapeHtml(s.name)}</span> <strong>${s.score}</strong></div>`).join("");
+      action = `<div class="game-status"><strong>Trivia complete!</strong> Winner: <strong style="color:var(--c-accent)">${winnerName}</strong> with ${topScore} points</div>${board}`;
+    } else {
+      action = `<div class="numguess-input-row">
+        <input type="text" class="numguess-input game-input" id="trivia-${escapeHtml(m.id)}" data-enter-action="trivia-submit" data-enter-msg="${escapeHtml(m.id)}" maxlength="50" placeholder="Your answer…" autocomplete="off" />
+        <button class="btn-primary" data-game-action="trivia-submit" data-game-msg="${escapeHtml(m.id)}">Answer</button>
+      </div>`;
+    }
     return `<div class="game-card game-trivia">
-      <div class="game-title">❓ Trivia</div>
+      <div class="game-title">❓ Trivia <span style="font-size:11px;opacity:.7;">— Q${num}/${total}</span></div>
       <div class="game-question">${escapeHtml(g.question)}</div>
       <div class="numguess-list">${lastFew}</div>
       ${action}
@@ -6576,8 +6775,10 @@ function renderGameCard(m) {
     const bCount = Object.values(votes).filter(v => v === "b").length;
     const aPct = total ? Math.round((aCount/total)*100) : 0;
     const bPct = total ? Math.round((bCount/total)*100) : 0;
+    const isHost = g.host === myUid;
+    const round = g.round || 1;
     return `<div class="game-card game-wyr">
-      <div class="game-title">🤔 Would You Rather…</div>
+      <div class="game-title">🤔 Would You Rather… <span style="font-size:11px;opacity:.6;">(Round ${round})</span></div>
       <button class="wyr-option ${myVote==="a"?"selected":""}" data-game-action="wyr-vote" data-game-msg="${escapeHtml(m.id)}" data-wyr="a">
         <span class="wyr-bar" style="width:${aPct}%"></span>
         <span class="wyr-text">${escapeHtml(g.optionA)}</span>
@@ -6590,6 +6791,130 @@ function renderGameCard(m) {
         <span class="wyr-count">${bCount} · ${bPct}%</span>
       </button>
       <div class="game-status">${total} vote${total===1?"":"s"}</div>
+      ${isHost && total > 0 ? `<button class="btn-primary game-join-btn" data-game-action="wyr-next" data-game-msg="${escapeHtml(m.id)}">▶ Next Round</button>` : ""}
+    </div>`;
+  }
+  // Truth or Dare
+  if (g.kind === "truthordare") {
+    const isHost = g.host === myUid;
+    const prompts = g.prompts || [];
+    const pickedText = g.pickedText || "";
+    let body;
+    if (pickedText) {
+      body = `<div class="game-question"><strong style="text-transform:uppercase;color:var(--c-accent);font-size:11px;">${escapeHtml(g.pickedKind)}:</strong><br>${escapeHtml(pickedText)}</div>
+        <div class="game-status" style="font-size:11px;color:var(--t-muted);">Picked by ${escName(g.pickedBy)}</div>
+        <button class="btn-primary game-join-btn" data-game-action="tod-clear" data-game-msg="${escapeHtml(m.id)}">Pick Another</button>`;
+    } else if (isHost && prompts.length === 0) {
+      body = `<div class="game-status" style="font-size:11px;">Add personalized truths and dares — anyone in the chat can then pick one.</div>
+        <div class="tod-add-row">
+          <select class="tod-kind">
+            <option value="truth">Truth</option>
+            <option value="dare">Dare</option>
+          </select>
+          <input type="text" class="numguess-input tod-text" maxlength="200" placeholder="e.g. What's your worst date story?" />
+          <button class="btn-primary" data-game-action="tod-add" data-game-msg="${escapeHtml(m.id)}">+ Add</button>
+        </div>`;
+    } else {
+      const myAddedCount = prompts.filter(p => p.uid === myUid).length;
+      const truthCount = prompts.filter(p => p.kind === "truth").length;
+      const dareCount  = prompts.filter(p => p.kind === "dare").length;
+      body = `<div class="game-status">${prompts.length} prompts available · ${truthCount} truth · ${dareCount} dare</div>
+        <div class="tod-pick-row">
+          <button class="rps-btn" data-game-action="tod-pick" data-game-msg="${escapeHtml(m.id)}" data-tod-kind="truth" ${truthCount===0?'disabled':''}>🤫 Truth (${truthCount})</button>
+          <button class="rps-btn" data-game-action="tod-pick" data-game-msg="${escapeHtml(m.id)}" data-tod-kind="dare" ${dareCount===0?'disabled':''}>😈 Dare (${dareCount})</button>
+        </div>
+        ${isHost ? `<div class="tod-add-row" style="margin-top:8px;">
+          <select class="tod-kind">
+            <option value="truth">Truth</option>
+            <option value="dare">Dare</option>
+          </select>
+          <input type="text" class="numguess-input tod-text" maxlength="200" placeholder="Add another…" />
+          <button class="btn-primary" data-game-action="tod-add" data-game-msg="${escapeHtml(m.id)}">+ Add</button>
+        </div>` : ""}
+        <div class="game-status" style="font-size:10px;color:var(--t-muted);">⚠️ Inappropriate prompts can be reported via right-click on this message.</div>`;
+    }
+    return `<div class="game-card game-tod">
+      <div class="game-title">💫 Truth or Dare</div>
+      ${body}
+    </div>`;
+  }
+  // Most Likely To
+  if (g.kind === "mostlikely") {
+    const votes = g.votes || {}; // votes[voterUid] = targetUid
+    const myVote = votes[myUid];
+    // Tally
+    const tally = {};
+    for (const t of Object.values(votes)) tally[t] = (tally[t]||0) + 1;
+    // Get chat members
+    const chat = state.chats.find(c => c.id === state.activeChatId);
+    const memberUids = chat?.members || [];
+    const total = Object.keys(votes).length;
+    const sorted = memberUids.map(uid => ({uid, count: tally[uid]||0}))
+                             .sort((a,b) => b.count - a.count);
+    const buttons = sorted.map(({uid, count}) => {
+      const pct = total ? Math.round((count/total)*100) : 0;
+      const isMe = uid === myUid;
+      const selected = myVote === uid;
+      return `<button class="wyr-option ${selected?'selected':''}" data-game-action="mlt-vote" data-game-msg="${escapeHtml(m.id)}" data-mlt-uid="${escapeHtml(uid)}">
+        <span class="wyr-bar" style="width:${pct}%"></span>
+        <span class="wyr-text">${escName(uid)}${isMe?" (you)":""}</span>
+        <span class="wyr-count">${count} · ${pct}%</span>
+      </button>`;
+    }).join("");
+    return `<div class="game-card game-mlt">
+      <div class="game-title">🌟 Most Likely To…</div>
+      <div class="game-question">${escapeHtml(g.prompt)}</div>
+      ${buttons}
+      <div class="game-status">${total} vote${total===1?"":"s"} — vote for ANY member, can change anytime</div>
+    </div>`;
+  }
+  // Connect 4
+  if (g.kind === "connect4") {
+    const isP1 = g.players?.p1 === myUid;
+    const isP2 = g.players?.p2 === myUid;
+    const isPlayer = isP1 || isP2;
+    const myTurn = isPlayer && g.turn === myUid && !g.winner;
+    const canJoinAsP2 = !g.players?.p2 && !isP1;
+    const colorP1 = g.colors?.p1 || "#ef4444";
+    const colorP2 = g.colors?.p2 || "#fbbf24";
+    // Build board (6 rows x 7 cols)
+    const board = g.board || Array.from({length:6},()=>Array(7).fill(""));
+    const rows = [];
+    for (let r = 0; r < 6; r++) {
+      const cells = [];
+      for (let c = 0; c < 7; c++) {
+        const v = board[r][c];
+        const dotColor = v === "1" ? colorP1 : v === "2" ? colorP2 : "transparent";
+        cells.push(`<div class="c4-cell"><div class="c4-disc" style="background:${dotColor}${v?'':';opacity:.15'}"></div></div>`);
+      }
+      rows.push(cells.join(""));
+    }
+    // Drop buttons (col headers) — interactable only on your turn
+    const dropBtns = Array.from({length:7}, (_, c) => {
+      const colFull = board[0][c] !== "";
+      return `<button class="c4-drop ${myTurn && !colFull && !g.winner?'':'disabled'}" data-game-action="c4-drop" data-game-msg="${escapeHtml(m.id)}" data-c4-col="${c}">▼</button>`;
+    }).join("");
+    let status;
+    if (g.winner === "draw") status = "🤝 Draw!";
+    else if (g.winner) status = `🏆 ${escName(g.winner)} wins!`;
+    else if (!g.players?.p2) {
+      const colorBtns = canJoinAsP2 ? `<div class="c4-color-row">
+        ${["#ef4444","#fbbf24","#22c55e","#a78bfa","#06b6d4","#ec4899"].filter(c=>c!==colorP1).map(c =>
+          `<button class="c4-color-swatch" style="background:${c}" data-game-action="c4-join" data-game-msg="${escapeHtml(m.id)}" data-c4-color="${c}" title="Join with this color"></button>`
+        ).join("")}
+      </div>` : "";
+      status = canJoinAsP2 ? `Pick a color to join:${colorBtns}` : `Waiting for opponent…`;
+    } else {
+      const turnLabel = myTurn ? "<strong>Your turn</strong>" : `${escName(g.turn)}'s turn`;
+      const myColor = isP1 ? colorP1 : isP2 ? colorP2 : null;
+      const youAre = myColor ? `You're <span style="color:${myColor};font-weight:800;">●</span>` : "Watching";
+      status = `${turnLabel} — ${youAre}`;
+    }
+    return `<div class="game-card game-c4">
+      <div class="game-title">🟡🔴 Connect 4</div>
+      <div class="c4-drop-row">${dropBtns}</div>
+      <div class="c4-board">${rows.join("")}</div>
+      <div class="game-status">${status}</div>
     </div>`;
   }
   return `<div class="game-card"><div class="game-status">Unknown game</div></div>`;
@@ -6603,6 +6928,36 @@ async function _gameUpdate(msgId, updateMap) {
   } catch(err) { showToast("Game update failed: " + err.message); }
 }
 
+// Game-input Enter-to-submit (also auto-refocuses after a wrong guess so you
+// can rapid-fire) — looks for the matching action button in the SAME game card.
+document.addEventListener("keydown", e => {
+  if (e.key !== "Enter") return;
+  const inp = e.target.closest("[data-enter-action]");
+  if (!inp) return;
+  e.preventDefault();
+  const action = inp.dataset.enterAction;
+  const msgId = inp.dataset.enterMsg;
+  const trigger = document.querySelector(`[data-game-action="${action}"][data-game-msg="${msgId}"]`);
+  if (trigger) trigger.click();
+});
+
+// After every renderMessages, auto-focus a game input if its placeholder game
+// is still active and the user just guessed (their previous guess was wrong).
+function _maybeRefocusGameInput() {
+  const inps = document.querySelectorAll(".game-input");
+  if (!inps.length) return;
+  // Focus the LAST visible game input (most recent game card)
+  const last = inps[inps.length - 1];
+  if (last && document.activeElement !== last) {
+    // Only refocus if user was previously focused on a game input (i.e. they
+    // pressed Enter to submit). We track this via a tiny state flag.
+    if (state._gameInputWasFocused) {
+      last.focus();
+      state._gameInputWasFocused = false;
+    }
+  }
+}
+
 document.addEventListener("click", async e => {
   const btn = e.target.closest("[data-game-action]");
   if (!btn) return;
@@ -6610,7 +6965,19 @@ document.addEventListener("click", async e => {
   const msgId = btn.dataset.gameMsg;
   const msg = state.messages.find(m => m.id === msgId);
   if (!msg || !msg.gameData) return;
+  // Prevent the focus-induced auto-scroll. We blur the button immediately so
+  // the browser doesn't scroll it into view, and we record the current scroll
+  // position to restore it after Firestore re-renders the message.
+  e.preventDefault();
   e.stopPropagation();
+  try { btn.blur(); } catch(_){}
+  const wrap = $("#messages");
+  const lockedTop = wrap?.scrollTop;
+  // Restore on next frame in case renderMessages bumped the scroll
+  if (wrap && lockedTop != null) {
+    requestAnimationFrame(() => { wrap.scrollTop = lockedTop; });
+    setTimeout(() => { if (wrap) wrap.scrollTop = lockedTop; }, 50);
+  }
   const g = msg.gameData;
   const myUid = state.user.uid;
 
@@ -6621,7 +6988,10 @@ document.addEventListener("click", async e => {
     return;
   }
   if (action === "ttt-move") {
+    if (btn.classList.contains("disabled")) return; // visually disabled
     if (g.winner) return;
+    const isPlayer = g.players?.x === myUid || g.players?.o === myUid;
+    if (!isPlayer) { showToast("You're not a player in this game"); return; }
     if (g.turn !== myUid) { showToast("Not your turn"); return; }
     const i = parseInt(btn.dataset.tttI, 10);
     if (g.board[i]) return;
@@ -6700,6 +7070,7 @@ document.addEventListener("click", async e => {
     const update = { "gameData.guesses": newGuesses };
     if (correct) update["gameData.winner"] = myUid;
     if (inp) inp.value = "";
+    state._gameInputWasFocused = !correct; // refocus on next render if wrong
     await _gameUpdate(msgId, update);
     return;
   }
@@ -6713,9 +7084,33 @@ document.addEventListener("click", async e => {
     const correct = val.toLowerCase().includes(g.answer);
     const newGuesses = [...(g.guesses||[]), { uid: myUid, name: state.user.displayName, value: val, correct }];
     const update = { "gameData.guesses": newGuesses };
-    if (correct) update["gameData.winner"] = myUid;
+    if (correct) {
+      update["gameData.winner"] = myUid;
+      // Increment user's score
+      const newScores = { ...(g.scores||{}) };
+      newScores[myUid] = (newScores[myUid]||0) + 1;
+      update["gameData.scores"] = newScores;
+    }
     if (inp) inp.value = "";
+    state._gameInputWasFocused = !correct;
     await _gameUpdate(msgId, update);
+    return;
+  }
+  // Trivia next question — host only
+  if (action === "trivia-next") {
+    if (g.host !== myUid) { showToast("Only the host can advance"); return; }
+    const total = g.totalQuestions || 1;
+    const num = g.questionNumber || 1;
+    if (num >= total) return; // last question — leaderboard already shown
+    // Pick a new random question
+    const t = _TRIVIA_QUESTIONS[Math.floor(Math.random()*_TRIVIA_QUESTIONS.length)];
+    await _gameUpdate(msgId, {
+      "gameData.question": t.q,
+      "gameData.answer": t.a.toLowerCase(),
+      "gameData.guesses": [],
+      "gameData.winner": null,
+      "gameData.questionNumber": num + 1
+    });
     return;
   }
 
@@ -6729,7 +7124,130 @@ document.addEventListener("click", async e => {
     await _gameUpdate(msgId, { "gameData.votes": newVotes });
     return;
   }
+  if (action === "wyr-next") {
+    if (g.host !== myUid) { showToast("Only the host can advance"); return; }
+    const p = _WYR_PAIRS[Math.floor(Math.random()*_WYR_PAIRS.length)];
+    await _gameUpdate(msgId, {
+      "gameData.optionA": p[0],
+      "gameData.optionB": p[1],
+      "gameData.votes": {},
+      "gameData.round": (g.round||1) + 1
+    });
+    return;
+  }
+
+  // ── Truth or Dare ──
+  if (action === "tod-add") {
+    if (g.host !== myUid) { showToast("Only the host can add prompts"); return; }
+    const card = btn.closest(".game-card");
+    const kind = card.querySelector(".tod-kind")?.value || "truth";
+    const inp = card.querySelector(".tod-text");
+    const text = (inp?.value || "").trim();
+    if (!text || text.length < 4) { showToast("Prompt must be at least 4 characters"); return; }
+    if (text.length > 200) { showToast("Too long (200 max)"); return; }
+    const prompts = [...(g.prompts||[]), { kind, text, uid: myUid, addedAt: Date.now() }];
+    if (inp) inp.value = "";
+    await _gameUpdate(msgId, { "gameData.prompts": prompts });
+    return;
+  }
+  if (action === "tod-pick") {
+    const wantKind = btn.dataset.todKind;
+    const pool = (g.prompts||[]).filter(p => p.kind === wantKind);
+    if (!pool.length) { showToast(`No ${wantKind}s yet`); return; }
+    const pick = pool[Math.floor(Math.random()*pool.length)];
+    await _gameUpdate(msgId, {
+      "gameData.pickedBy": myUid,
+      "gameData.pickedKind": pick.kind,
+      "gameData.pickedText": pick.text
+    });
+    return;
+  }
+  if (action === "tod-clear") {
+    await _gameUpdate(msgId, {
+      "gameData.pickedBy": null,
+      "gameData.pickedKind": null,
+      "gameData.pickedText": null
+    });
+    return;
+  }
+
+  // ── Most Likely To ──
+  if (action === "mlt-vote") {
+    const targetUid = btn.dataset.mltUid;
+    const cur = g.votes?.[myUid];
+    const newVotes = { ...(g.votes||{}) };
+    if (cur === targetUid) delete newVotes[myUid];
+    else newVotes[myUid] = targetUid;
+    await _gameUpdate(msgId, { "gameData.votes": newVotes });
+    return;
+  }
+
+  // ── Connect 4 ──
+  if (action === "c4-join") {
+    if (g.players?.p2 || g.players?.p1 === myUid) return;
+    const myColor = btn.dataset.c4Color;
+    await _gameUpdate(msgId, {
+      "gameData.players.p2": myUid,
+      "gameData.colors.p2": myColor
+    });
+    return;
+  }
+  if (action === "c4-drop") {
+    if (btn.classList.contains("disabled")) return;
+    if (g.winner) return;
+    const isP1 = g.players?.p1 === myUid;
+    const isP2 = g.players?.p2 === myUid;
+    if (!isP1 && !isP2) { showToast("You're not a player"); return; }
+    if (g.turn !== myUid) { showToast("Not your turn"); return; }
+    const col = parseInt(btn.dataset.c4Col, 10);
+    if (isNaN(col) || col < 0 || col > 6) return;
+    // Find the lowest empty row in this column
+    const board = g.board.map(r => [...r]);
+    let row = -1;
+    for (let r = 5; r >= 0; r--) {
+      if (!board[r][col]) { row = r; break; }
+    }
+    if (row < 0) { showToast("Column full"); return; }
+    const piece = isP1 ? "1" : "2";
+    board[row][col] = piece;
+    // Win check — 4 in a row in any direction
+    const w = _connect4Check(board, row, col, piece);
+    let winner = null;
+    if (w) winner = isP1 ? g.players.p1 : g.players.p2;
+    else if (board.every(r => r.every(Boolean))) winner = "draw";
+    const nextTurn = winner ? g.turn : (g.turn === g.players.p1 ? g.players.p2 : g.players.p1);
+    await _gameUpdate(msgId, {
+      "gameData.board": board,
+      "gameData.turn": nextTurn,
+      "gameData.winner": winner
+    });
+    // Play "ding" sound for everyone after a successful drop (unless we won)
+    if (!winner) playSound("message");
+    return;
+  }
 });
+
+// Connect-4 win checker
+function _connect4Check(board, row, col, piece) {
+  const dirs = [[0,1],[1,0],[1,1],[1,-1]];
+  for (const [dr, dc] of dirs) {
+    let count = 1;
+    // Forward
+    for (let k = 1; k < 4; k++) {
+      const r = row + dr*k, c = col + dc*k;
+      if (r<0||r>5||c<0||c>6||board[r][c] !== piece) break;
+      count++;
+    }
+    // Backward
+    for (let k = 1; k < 4; k++) {
+      const r = row - dr*k, c = col - dc*k;
+      if (r<0||r>5||c<0||c>6||board[r][c] !== piece) break;
+      count++;
+    }
+    if (count >= 4) return true;
+  }
+  return false;
+}
 
 async function castPollVote(msgId, optionIdx) {
   const chatId = state.activeChatId;
@@ -6955,6 +7473,70 @@ function _renderMdPreview() {
 }
 // Composer poll button → open builder
 $("#composer-poll-btn")?.addEventListener("click", () => openPollBuilder());
+
+/* ---------- Composer + (plus) menu ---------- */
+let _silentNextMessage = false; // when true, the next message is sent with @silent prefix
+$("#composer-plus-btn")?.addEventListener("click", e => {
+  e.stopPropagation();
+  document.getElementById("composer-plus-menu")?.remove();
+  const btn = e.currentTarget;
+  const rect = btn.getBoundingClientRect();
+  const menu = document.createElement("div");
+  menu.id = "composer-plus-menu";
+  menu.className = "composer-plus-menu";
+  menu.innerHTML = `
+    <button class="cpm-item" data-cpm="poll">
+      <span class="cpm-icon" style="background:rgba(79,124,255,.18);color:#4f7cff;">📊</span>
+      <div class="cpm-meta"><div class="cpm-title">Create Poll</div><div class="cpm-sub">Question + voting options</div></div>
+    </button>
+    <button class="cpm-item" data-cpm="activities">
+      <span class="cpm-icon" style="background:rgba(167,139,250,.18);color:#a78bfa;">🎮</span>
+      <div class="cpm-meta"><div class="cpm-title">Activity / Mini-game</div><div class="cpm-sub">Tic-Tac-Toe, RPS, trivia &amp; more</div></div>
+    </button>
+    <button class="cpm-item" data-cpm="commands">
+      <span class="cpm-icon" style="background:rgba(245,158,11,.18);color:#fbbf24;">⚡</span>
+      <div class="cpm-meta"><div class="cpm-title">Slash Commands</div><div class="cpm-sub">/8ball /joke /coinflip — show all</div></div>
+    </button>
+    <button class="cpm-item ${_silentNextMessage?'active':''}" data-cpm="silent">
+      <span class="cpm-icon" style="background:rgba(148,163,184,.18);color:#94a3b8;">🔕</span>
+      <div class="cpm-meta">
+        <div class="cpm-title">Silent message ${_silentNextMessage?'<strong style="color:var(--c-accent)">— ON for next message</strong>':''}</div>
+        <div class="cpm-sub">Send the next message without notifying others</div>
+      </div>
+    </button>`;
+  // Position above the button
+  menu.style.left = Math.max(8, rect.left) + "px";
+  menu.style.bottom = (window.innerHeight - rect.top + 8) + "px";
+  document.body.appendChild(menu);
+  // Single click handler
+  menu.addEventListener("click", e2 => {
+    const item = e2.target.closest("[data-cpm]");
+    if (!item) return;
+    const what = item.dataset.cpm;
+    menu.remove();
+    if (what === "poll") openPollBuilder();
+    else if (what === "activities") openActivitiesPicker();
+    else if (what === "commands") {
+      // Trigger the slash autocomplete by typing /
+      const c = $("#composer-input");
+      if (c) { c.focus(); c.value = "/"; c.dispatchEvent(new Event("input", {bubbles:true})); }
+    }
+    else if (what === "silent") {
+      _silentNextMessage = !_silentNextMessage;
+      $("#composer-plus-btn")?.classList.toggle("plus-silent-armed", _silentNextMessage);
+      showToast(_silentNextMessage
+        ? "🔕 Next message will be silent (no notification)"
+        : "🔔 Silent disarmed");
+    }
+  });
+  // Close on outside click
+  setTimeout(() => document.addEventListener("click", function _close(e3) {
+    if (!menu.contains(e3.target) && !e3.target.closest("#composer-plus-btn")) {
+      menu.remove();
+      document.removeEventListener("click", _close);
+    }
+  }), 0);
+});
 
 /* ---------- Custom emoji: personal (immediate) + sticker submission ---------- */
 
