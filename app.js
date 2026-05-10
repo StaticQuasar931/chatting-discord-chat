@@ -3643,7 +3643,7 @@ async function sendCurrentMessage() {
   // Also: /tictactoe, /ttt, /rps, /dice, /numguess, /trivia, /wyr, /wouldyourather,
   //       /truthordare, /tod, /mostlikelyto, /mlt, /connect4, /c4 — direct launch
   // /gamestop — end the most recent active game in this chat
-  const directGameMatch = text.match(/^\/(activit(?:y|ies)|games?|tictactoe|ttt|rps|rockpaperscissors|dice|numguess|number|trivia|wyr|wouldyourather|truthordare|tod|mostlikelyto|mlt|connect4|c4|gamestop|stopgame)\s*(.*)/i);
+  const directGameMatch = text.match(/^\/(activit(?:y|ies)|games?|tictactoe|ttt|rps|rockpaperscissors|dice|numguess|number|trivia|wyr|wouldyourather|truthordare|tod|mostlikelyto|mlt|connect4|c4|hangman|sahur|tungtung|tts|20q|20questions|typingrace|typing|reaction|reactiontest|gamestop|stopgame)\s*(.*)/i);
   if (directGameMatch) {
     composer.value = ""; composer.style.height = "auto"; updateSendBtn(); clearReplyTo();
     const cmd = directGameMatch[1].toLowerCase();
@@ -3670,7 +3670,11 @@ async function sendCurrentMessage() {
         const map = { ttt:"tictactoe", tictactoe:"tictactoe", rps:"rps", rockpaperscissors:"rps",
           dice:"dice", numguess:"numguess", number:"numguess", trivia:"trivia",
           wyr:"wouldyou", wouldyourather:"wouldyou", tod:"truthordare", truthordare:"truthordare",
-          mlt:"mostlikely", mostlikelyto:"mostlikely", c4:"connect4", connect4:"connect4" };
+          mlt:"mostlikely", mostlikelyto:"mostlikely", c4:"connect4", connect4:"connect4",
+          hangman:"hangman", sahur:"sahur", tungtung:"sahur", tts:"sahur",
+          "20q":"20q", "20questions":"20q",
+          typingrace:"typingrace", typing:"typingrace",
+          reaction:"reactiontest", reactiontest:"reactiontest" };
       const k = map[rest.toLowerCase()];
         if (k) { _launchGame(k); return; }
         showToast("Unknown game: " + rest); return;
@@ -3688,6 +3692,11 @@ async function sendCurrentMessage() {
       truthordare: "truthordare", tod: "truthordare",
       mostlikelyto: "mostlikely", mlt: "mostlikely",
       connect4: "connect4", c4: "connect4",
+      hangman: "hangman",
+      sahur: "sahur", tungtung: "sahur", tts: "sahur",
+      "20q": "20q", "20questions": "20q",
+      typingrace: "typingrace", typing: "typingrace",
+      reaction: "reactiontest", reactiontest: "reactiontest",
     };
     const kind = directMap[cmd];
     if (kind) { _launchGame(kind, rest); return; }
@@ -6208,7 +6217,7 @@ async function showFullProfile(uid) {
   if (fpGame) {
     const name = (profile.favGameName||"").trim();
     const url  = (profile.favGameUrl||"").trim();
-    const safeUrl = /^https?:\/\/[^\s"<>]+sites\.google\.com\/view\//i.test(url) ? url : "";
+    const safeUrl = /^https?:\/\/sites\.google\.com\/view\//i.test(url) ? url : "";
     if (name && safeUrl && !isPrivate) {
       fpGame.innerHTML = `🎮 Favorite Game: <a href="${escapeHtml(safeUrl)}" target="_blank" rel="noopener noreferrer" class="fp-favgame-link">${escapeHtml(name)}</a>`;
       fpGame.style.display = "";
@@ -7152,6 +7161,26 @@ async function _launchGame(kind, opts) {
                  colors: {p1: "#ef4444", p2: "#22c55e"},
                  firstMover: null, winner: null, host: state.user.uid };
     preview = "🔴🟢 Connect 4 — waiting for opponent";
+  } else if (kind === "typingrace") {
+    // Typing Race — players race to type the displayed phrase
+    const phrases = [
+      "The quick brown fox jumps over the lazy dog",
+      "Pack my box with five dozen liquor jugs",
+      "How vexingly quick daft zebras jump",
+      "The five boxing wizards jump quickly",
+      "Sphinx of black quartz judge my vow",
+      "Bright vixens jump dozy fowl quack",
+      "Glum Schwartzkopf vex'd by NJ IQ",
+      "Waltz bad nymph for quick jigs vex",
+    ];
+    const phrase = phrases[Math.floor(Math.random() * phrases.length)];
+    gameData = { kind, host: state.user.uid, phrase, players: {}, results: {}, started: false, winner: null };
+    preview = `⌨️ Typing Race — race to type the phrase!`;
+  } else if (kind === "reactiontest") {
+    // Reaction Test — click the button as fast as possible when it flashes
+    gameData = { kind, host: state.user.uid, phase: "waiting", // waiting | countdown | live | results
+      armedAt: null, liveAt: null, results: {}, players: {}, winner: null };
+    preview = `⚡ Reaction Test — who clicks fastest?`;
   } else { showToast("Couldn't start: unknown game. Try refreshing the page."); return; }
 
   try {
@@ -7696,6 +7725,117 @@ function renderGameCard(m) {
       <div class="game-status">${status}</div>
     </div>`;
   }
+  // ── Typing Race ──
+  if (g.kind === "typingrace") {
+    const isHost = g.host === myUid;
+    const hasJoined = myUid in (g.players || {});
+    const playerCount = Object.keys(g.players || {}).length;
+    if (!g.started) {
+      const joinBtn = hasJoined
+        ? `<span class="game-status" style="color:var(--c-success)">✅ Joined — waiting for host to start</span>`
+        : `<button class="game-btn" data-game-action="tr-join" data-game-msg="${escapeHtml(m.id)}">Join Race</button>`;
+      const startBtn = isHost && playerCount >= 2
+        ? `<button class="game-btn" data-game-action="tr-start" data-game-msg="${escapeHtml(m.id)}" style="margin-top:6px;">🏁 Start Race</button>`
+        : isHost ? `<div class="game-status" style="color:var(--t-muted);font-size:11px;">Need at least 2 players to start.</div>` : "";
+      return `<div class="game-card game-typingrace">
+        <div class="game-title">⌨️ Typing Race</div>
+        <div class="game-status" style="margin-bottom:8px;">Type the phrase as fast as you can!</div>
+        <div style="background:var(--c-input-2);border-radius:var(--radius-sm);padding:10px 12px;font-style:italic;color:var(--t-primary);font-size:13px;line-height:1.5;margin-bottom:10px;">"${escapeHtml(g.phrase || "")}"</div>
+        <div class="game-status" style="margin-bottom:6px;">👥 ${playerCount} player${playerCount===1?"":"s"} joined${playerCount>0?": "+Object.values(g.players).map(n=>escapeHtml(n)).join(", "):""}</div>
+        ${joinBtn}${startBtn}
+      </div>`;
+    }
+    // Race in progress or finished
+    const myResult = (g.results || {})[myUid];
+    const allDone = playerCount > 0 && Object.keys(g.players || {}).every(uid => (g.results || {})[uid]);
+    if (g.winner || allDone) {
+      const sorted = Object.entries(g.results || {}).sort((a,b)=>a[1].ms-b[1].ms);
+      const medals = ["🥇","🥈","🥉"];
+      const rows = sorted.map(([uid, r], i) =>
+        `<div style="display:flex;align-items:center;gap:8px;padding:4px 0;">
+          <span style="font-size:16px;">${medals[i]||"🎖️"}</span>
+          <span style="flex:1;font-weight:${uid===myUid?700:400};color:${uid===myUid?"var(--c-accent)":"var(--t-primary)"};">${escapeHtml((g.players||{})[uid]||"Player")}</span>
+          <span style="color:var(--t-muted);font-size:12px;">${(r.ms/1000).toFixed(2)}s</span>
+        </div>`
+      ).join("");
+      return `<div class="game-card game-typingrace">
+        <div class="game-title">⌨️ Typing Race — Finished!</div>
+        <div style="margin:8px 0;">${rows}</div>
+      </div>`;
+    }
+    // Race active — show input
+    if (myResult) {
+      return `<div class="game-card game-typingrace">
+        <div class="game-title">⌨️ Typing Race</div>
+        <div class="game-status" style="color:var(--c-success);">✅ You finished in ${(myResult.ms/1000).toFixed(2)}s — waiting for others…</div>
+        <div style="background:var(--c-input-2);border-radius:var(--radius-sm);padding:10px 12px;font-style:italic;color:var(--t-muted);font-size:13px;">"${escapeHtml(g.phrase||"")}"</div>
+      </div>`;
+    }
+    return `<div class="game-card game-typingrace">
+      <div class="game-title">⌨️ Typing Race</div>
+      <div style="background:var(--c-input-2);border-radius:var(--radius-sm);padding:10px 12px;font-style:italic;color:var(--t-primary);font-size:13px;line-height:1.5;margin-bottom:8px;user-select:none;">"${escapeHtml(g.phrase||"")}"</div>
+      <input type="text" class="game-input" id="tr-inp-${escapeHtml(m.id)}" placeholder="Type the phrase above…" autocomplete="off" autocorrect="off" spellcheck="false"
+        data-enter-action="tr-submit" data-enter-msg="${escapeHtml(m.id)}"
+        style="width:100%;margin-bottom:6px;" />
+      <button class="game-btn" data-game-action="tr-submit" data-game-msg="${escapeHtml(m.id)}">Submit</button>
+    </div>`;
+  }
+
+  // ── Reaction Test ──
+  if (g.kind === "reactiontest") {
+    const isHost = g.host === myUid;
+    const hasJoined = myUid in (g.players || {});
+    const playerCount = Object.keys(g.players || {}).length;
+    const myResult = (g.results || {})[myUid];
+    if (g.winner || (playerCount > 0 && Object.keys(g.players||{}).every(uid=>(g.results||{})[uid]))) {
+      const sorted = Object.entries(g.results||{}).sort((a,b)=>a[1].ms-b[1].ms);
+      const medals = ["🥇","🥈","🥉"];
+      const rows = sorted.map(([uid,r],i)=>
+        `<div style="display:flex;align-items:center;gap:8px;padding:4px 0;">
+          <span style="font-size:16px;">${medals[i]||"🎖️"}</span>
+          <span style="flex:1;font-weight:${uid===myUid?700:400};color:${uid===myUid?"var(--c-accent)":"var(--t-primary)"};">${escapeHtml((g.players||{})[uid]||"Player")}</span>
+          <span style="color:var(--t-muted);font-size:12px;">${(r.ms/1000).toFixed(3)}s</span>
+        </div>`
+      ).join("");
+      return `<div class="game-card game-reactiontest">
+        <div class="game-title">⚡ Reaction Test — Results</div>
+        <div style="margin:8px 0;">${rows}</div>
+      </div>`;
+    }
+    if (g.phase === "live") {
+      if (myResult) {
+        return `<div class="game-card game-reactiontest">
+          <div class="game-title">⚡ Reaction Test</div>
+          <div class="game-status" style="color:var(--c-success);">✅ You reacted in ${(myResult.ms/1000).toFixed(3)}s — waiting for others…</div>
+        </div>`;
+      }
+      return `<div class="game-card game-reactiontest">
+        <div class="game-title">⚡ Reaction Test</div>
+        <button class="game-btn reaction-live-btn" data-game-action="rt-react" data-game-msg="${escapeHtml(m.id)}"
+          style="width:100%;height:80px;font-size:22px;background:var(--c-success);border-radius:12px;animation:reaction-pulse .35s ease-in-out infinite alternate;">⚡ CLICK NOW!</button>
+      </div>`;
+    }
+    if (g.phase === "countdown") {
+      return `<div class="game-card game-reactiontest">
+        <div class="game-title">⚡ Reaction Test</div>
+        <div class="game-status" style="font-size:22px;text-align:center;padding:20px;">🟡 Get ready…</div>
+      </div>`;
+    }
+    // Waiting phase
+    const joinBtn = hasJoined
+      ? `<span class="game-status" style="color:var(--c-success)">✅ Joined</span>`
+      : `<button class="game-btn" data-game-action="rt-join" data-game-msg="${escapeHtml(m.id)}">Join</button>`;
+    const startBtn = isHost && playerCount >= 2
+      ? `<button class="game-btn" data-game-action="rt-start" data-game-msg="${escapeHtml(m.id)}" style="margin-top:6px;">▶️ Start</button>`
+      : isHost ? `<div class="game-status" style="color:var(--t-muted);font-size:11px;">Need 2+ players.</div>` : "";
+    return `<div class="game-card game-reactiontest">
+      <div class="game-title">⚡ Reaction Test</div>
+      <div class="game-status" style="margin-bottom:8px;">Click the button the instant it flashes!</div>
+      <div class="game-status" style="margin-bottom:6px;">👥 ${playerCount} player${playerCount===1?"":"s"} joined</div>
+      ${joinBtn}${startBtn}
+    </div>`;
+  }
+
   return `<div class="game-card"><div class="game-status">Unknown game</div></div>`;
 }
 
@@ -8254,6 +8394,63 @@ document.addEventListener("click", async e => {
     if (!winner) playSound("message");
     return;
   }
+
+  // ── Typing Race ──
+  if (action === "tr-join") {
+    if ((g.players||{})[myUid]) return;
+    await _gameUpdate(msgId, { [`gameData.players.${myUid}`]: state.user.displayName || "Player" });
+    return;
+  }
+  if (action === "tr-start") {
+    if (g.host !== myUid) return;
+    const count = Object.keys(g.players||{}).length;
+    if (count < 2) { showToast("Need at least 2 players"); return; }
+    await _gameUpdate(msgId, { "gameData.started": true, "gameData.startedAt": Date.now() });
+    return;
+  }
+  if (action === "tr-submit") {
+    if (!g.started || (g.results||{})[myUid]) return;
+    if (!(g.players||{})[myUid]) { showToast("You're not in this race — refresh if you joined"); return; }
+    const inp = document.getElementById(`tr-inp-${msgId}`);
+    const typed = (inp?.value || "").trim();
+    const phrase = (g.phrase || "").trim();
+    if (!typed) { showToast("Type the phrase first!"); return; }
+    if (typed.toLowerCase() !== phrase.toLowerCase()) { showToast("Not quite — keep typing!"); if (inp) { inp.style.border="1.5px solid var(--c-danger)"; setTimeout(()=>inp.style.border="",800); } return; }
+    const ms = Date.now() - (g.startedAt || Date.now());
+    await _gameUpdate(msgId, { [`gameData.results.${myUid}`]: { ms, name: state.user.displayName || "Player" } });
+    return;
+  }
+
+  // ── Reaction Test ──
+  if (action === "rt-join") {
+    if ((g.players||{})[myUid]) return;
+    await _gameUpdate(msgId, { [`gameData.players.${myUid}`]: state.user.displayName || "Player" });
+    return;
+  }
+  if (action === "rt-start") {
+    if (g.host !== myUid) return;
+    const count = Object.keys(g.players||{}).length;
+    if (count < 2) { showToast("Need at least 2 players"); return; }
+    // Go to countdown phase, then schedule live phase client-side (host writes it)
+    await _gameUpdate(msgId, { "gameData.phase": "countdown" });
+    // After a random 2–5 second delay, the host sets it live
+    const delay = 2000 + Math.random() * 3000;
+    setTimeout(async () => {
+      await _gameUpdate(msgId, { "gameData.phase": "live", "gameData.liveAt": Date.now() });
+    }, delay);
+    return;
+  }
+  if (action === "rt-react") {
+    if (g.phase !== "live" || (g.results||{})[myUid]) return;
+    const ms = Date.now() - (g.liveAt || Date.now());
+    const newResults = { ...(g.results||{}), [myUid]: { ms, name: state.user.displayName||"Player" } };
+    const allDone = Object.keys(g.players||{}).every(uid => newResults[uid]);
+    const winner = allDone ? Object.entries(newResults).sort((a,b)=>a[1].ms-b[1].ms)[0][0] : null;
+    const upd = { [`gameData.results.${myUid}`]: { ms, name: state.user.displayName||"Player" } };
+    if (allDone) upd["gameData.winner"] = winner;
+    await _gameUpdate(msgId, upd);
+    return;
+  }
 });
 
 // Connect 4 column hover highlight + ghost disc preview
@@ -8263,12 +8460,21 @@ document.addEventListener("mouseover", e => {
   const board = cell.closest(".c4-board");
   if (!board) return;
   const col = cell.dataset.c4Col;
-  // Highlight all cells in this column + show ghost on landing cell
+  // First clear ALL previous highlights and ghost discs in this board
+  board.querySelectorAll(".c4-cell").forEach(c => {
+    c.classList.remove("c4-col-hl");
+    if (c.dataset.c4Ghost) {
+      const disc = c.querySelector(".c4-disc");
+      if (disc) { disc.style.background = "transparent"; disc.style.opacity = "0.18"; }
+    }
+  });
+  // Then highlight the new column + show ghost on landing cell
   board.querySelectorAll(".c4-cell").forEach(c => {
     const inCol = c.dataset.c4Col === col;
-    c.classList.toggle("c4-col-hl", inCol);
+    if (!inCol) return;
+    c.classList.add("c4-col-hl");
     // Show ghost disc on the landing cell (data-c4-ghost holds the color)
-    if (inCol && c.dataset.c4Ghost) {
+    if (c.dataset.c4Ghost) {
       const disc = c.querySelector(".c4-disc");
       if (disc) { disc.style.background = c.dataset.c4Ghost; disc.style.opacity = "0.45"; }
     }
@@ -9844,11 +10050,29 @@ document.addEventListener("click", e => {
 
 
 /* =====================================================================
-   USER PANEL AVATAR CLICK → STATUS PICKER
+   USER PANEL CLICK ROUTING
+   • Avatar area (pfp + status dot) → status / appearance picker
+   • Name or custom-status tag text → open Settings
    ===================================================================== */
 document.addEventListener("click", e=>{
-  const wrap=e.target.closest("#user-panel-avatar-wrap");
-  if (wrap) { e.stopPropagation(); toggleStatusPicker(wrap); }
+  // If the camera-edit overlay was clicked it already calls stopPropagation,
+  // so this handler won't fire for that case.
+  if (e.target.closest("#user-panel-avatar-wrap")) {
+    e.stopPropagation();
+    const wrap = document.getElementById("user-panel-avatar-wrap");
+    if (wrap) toggleStatusPicker(wrap);
+    return;
+  }
+  if (e.target.closest("#user-status-dot")) {
+    e.stopPropagation();
+    const wrap = document.getElementById("user-panel-avatar-wrap");
+    if (wrap) toggleStatusPicker(wrap);
+    return;
+  }
+  if (e.target.closest("#user-panel-name") || e.target.closest("#user-panel-tag")) {
+    e.stopPropagation();
+    openSettingsModal("account");
+  }
 });
 
 

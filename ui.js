@@ -1402,7 +1402,7 @@ export function buildUI() {
 
   <!-- Activities (mini-games) Picker Modal -->
   <div class="modal hidden" id="activities-modal">
-    <div class="modal-card" style="max-width:500px;width:96vw;">
+    <div class="modal-card" style="max-width:640px;width:96vw;">
       <div class="modal-head">
         <h2>🎮 Activities</h2>
         <button class="icon-btn modal-close" data-close="activities-modal">
@@ -1410,7 +1410,12 @@ export function buildUI() {
         </button>
       </div>
       <div class="modal-body" style="padding:16px 20px;">
-        <p class="hint" style="margin:0 0 14px;">Pick a game to play with everyone in this chat. The game will be posted as a message — anyone can take their turn.</p>
+        <!-- Search bar at top -->
+        <div style="margin-bottom:12px;">
+          <input type="text" id="activities-search" placeholder="🔍 Search activities…" autocomplete="off"
+            style="width:100%;padding:8px 12px;font-size:13px;background:var(--c-input-2);border:1px solid var(--c-border-2);border-radius:var(--radius-sm);color:var(--t-primary);box-sizing:border-box;" />
+        </div>
+        <p class="hint" style="margin:0 0 12px;">Pick a game to play with everyone in this chat. The game will be posted as a message — anyone can take their turn.</p>
         <div class="activities-grid">
           <button class="activity-card" data-activity="tictactoe">
             <div class="activity-icon">⨯⭘</div>
@@ -1484,11 +1489,18 @@ export function buildUI() {
             <div class="activity-desc">Higher or lower, race!</div>
             <div class="activity-players">👥 2+ players</div>
           </button>
-        </div>
-        <!-- Search bar at bottom of grid -->
-        <div style="margin-top:12px;">
-          <input type="text" id="activities-search" placeholder="Search activities…" autocomplete="off"
-            style="width:100%;padding:8px 12px;font-size:13px;background:var(--c-input-2);border:1px solid var(--c-border-2);border-radius:var(--radius-sm);color:var(--t-primary);" />
+          <button class="activity-card" data-activity="typingrace">
+            <div class="activity-icon">⌨️</div>
+            <div class="activity-name">Typing Race</div>
+            <div class="activity-desc">Race to type the phrase</div>
+            <div class="activity-players">👥 2+ players</div>
+          </button>
+          <button class="activity-card" data-activity="reactiontest">
+            <div class="activity-icon">⚡</div>
+            <div class="activity-name">Reaction Test</div>
+            <div class="activity-desc">Hit the button first!</div>
+            <div class="activity-players">👥 2+ players</div>
+          </button>
         </div>
       </div>
     </div>

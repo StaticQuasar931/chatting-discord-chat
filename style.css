@@ -718,8 +718,10 @@ input, textarea { font-family: inherit; font-size: inherit; color: var(--t-prima
   color: #fff; display: grid; place-items: center; font-weight: 700; font-size: 13px; flex-shrink: 0;
 }
 .user-panel-info { flex: 1; min-width: 0; }
-.user-panel-name { font-size: 14px; font-weight: 600; color: var(--t-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.user-panel-tag { font-size: 11px; color: var(--t-muted); }
+.user-panel-name { font-size: 14px; font-weight: 600; color: var(--t-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; }
+.user-panel-name:hover { color: var(--c-accent); }
+.user-panel-tag { font-size: 11px; color: var(--t-muted); cursor: pointer; }
+.user-panel-tag:hover { color: var(--t-secondary); }
 
 /* =================================================
    MAIN
@@ -3386,22 +3388,22 @@ body[data-theme="oled"] .badge-icon-wrap {
    ACTIVITIES (mini-games) MODAL + CARDS
    ================================================= */
 .activities-grid {
-  display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px;
+  display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px;
 }
 .activity-card {
-  display: flex; flex-direction: column; align-items: flex-start; gap: 3px;
-  padding: 11px 10px; border-radius: var(--radius-md);
+  display: flex; flex-direction: column; align-items: flex-start; gap: 4px;
+  padding: 14px 12px; border-radius: var(--radius-md);
   background: var(--c-input-2); border: 1.5px solid var(--c-border-2);
   cursor: pointer; text-align: left; transition: all .12s;
-  aspect-ratio: unset; min-height: 80px;
+  aspect-ratio: unset; min-height: 96px;
 }
 .activity-card:hover {
   border-color: var(--c-accent); transform: translateY(-2px);
   box-shadow: 0 6px 18px rgba(0,0,0,.3);
 }
-.activity-icon { font-size: 22px; line-height: 1; }
-.activity-name { font-size: 12px; font-weight: 700; color: var(--t-primary); }
-.activity-desc { font-size: 10px; color: var(--t-muted); line-height: 1.3; }
+.activity-icon { font-size: 26px; line-height: 1; }
+.activity-name { font-size: 13px; font-weight: 700; color: var(--t-primary); }
+.activity-desc { font-size: 11px; color: var(--t-muted); line-height: 1.3; }
 .activity-players {
   font-size: 9px; color: var(--c-accent); font-weight: 600;
   background: var(--c-accent-soft); border-radius: 20px;
@@ -3644,6 +3646,11 @@ body[data-theme="oled"] .badge-icon-wrap {
 .sahur-img-live { animation: sahur-img-pop .3s ease-out; }
 @keyframes sahur-img-breathe { 0%,100%{transform:scale(1)} 50%{transform:scale(1.06)} }
 @keyframes sahur-img-pop { 0%{transform:scale(.4);opacity:0} 60%{transform:scale(1.15)} 100%{transform:scale(1);opacity:1} }
+
+/* Reaction Test */
+@keyframes reaction-pulse { from { box-shadow: 0 0 8px rgba(34,197,94,.4); } to { box-shadow: 0 0 22px rgba(34,197,94,.9); } }
+.reaction-live-btn { border: none; color: #fff; cursor: pointer; transition: transform .08s; }
+.reaction-live-btn:active { transform: scale(.96); }
 .sahur-roster {
   display: flex; flex-direction: column; gap: 4px;
   margin: 8px 0;
