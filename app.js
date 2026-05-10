@@ -2574,19 +2574,26 @@ async function openChat(chatId) {
   }
 
   state.unsubscribers.messages=onSnapshot(
-    query(collection(db,"chats",chatId,"messages"),orderBy("createdAt","asc"),limit(200)),
+    // Fetch newest 200 in descending order so we always see the latest messages,
+    // regardless of total chat size. Reverse before storing so rendering stays
+    // oldest-to-newest. (The old asc+limit approach blocked new messages once
+    // a chat exceeded 200 total — "one delete = one new message" bug.)
+    query(collection(db,"chats",chatId,"messages"),orderBy("createdAt","desc"),limit(200)),
     snap=>{
-      const prevLen=state.messages.length;
+      const prevNewestId = state.messages.length > 0
+        ? state.messages[state.messages.length-1].id : null;
       const hadMessages=state.chatInitialized.has(chatId);
-      state.messages=snap.docs.map(d=>({id:d.id,...d.data()}));
-      state.messageCache[chatId]=state.messages; // keep in cache for instant re-open
-      const isNew=hadMessages&&state.messages.length>prevLen;
+      // Reverse so messages render oldest → newest
+      state.messages=snap.docs.slice().reverse().map(d=>({id:d.id,...d.data()}));
+      state.messageCache[chatId]=state.messages;
+      // "isNew" = the newest message ID changed (works even when window stays at 200)
+      const newestMsg = state.messages[state.messages.length-1];
+      const isNew = hadMessages && newestMsg && newestMsg.id !== prevNewestId;
       if (isNew) {
-        const newest=state.messages[state.messages.length-1];
-        if (newest&&newest.senderUid!==state.user.uid&&!isChatMuted(chatId)&&!newest.silent) playSound("message");
+        if (newestMsg.senderUid!==state.user.uid&&!isChatMuted(chatId)&&!newestMsg.silent) playSound("message");
         // Autoflag incoming messages from others (silent, no UX impact)
-        if (newest&&newest.senderUid!==state.user.uid&&newest.text) {
-          _autoFlagCheck(newest.text, newest.id, chatId, newest.senderUid, newest.senderName);
+        if (newestMsg.senderUid!==state.user.uid&&newestMsg.text) {
+          _autoFlagCheck(newestMsg.text, newestMsg.id, chatId, newestMsg.senderUid, newestMsg.senderName);
         }
       }
       state.chatInitialized.add(chatId);
