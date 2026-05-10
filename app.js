@@ -962,16 +962,23 @@ function formatMessage(raw) {
     return `<span class="msg-mention${isMe?" msg-mention-me":""}" data-mention="${escapeHtml(name)}" data-mention-uid="${escapeHtml(uid)}">@${escapeHtml(name)}</span>`;
   });
 
+  // NSFW guard: if the surrounding message text has multiple strong NSFW signals,
+  // SKIP auto-embedding (still posts as plain link, autoflag still fires elsewhere).
+  const nsfwSignals = (raw.toLowerCase().match(/\b(porn|xxx|nsfw|nude|sex|onlyfans|pornhub|xvideos|xnxx|chaturbate)\b/g) || []).length;
+  const skipEmbed = nsfwSignals >= 2;
+
   // URLs → embeds or plain links.  Run safeUrl() so malformed strings never
   // produce broken href= attributes that GitHub Pages misroutes.
   // This runs AFTER emoji placeholders are in place, so img src attrs are safe.
   text = text.replace(/https?:\/\/[^\s<>"]+/g, rawUrl => {
     const url = safeUrl(rawUrl);
     if (!url) return escapeHtml(rawUrl);
+    if (skipEmbed) {
+      return `<a class="msg-link" href="${url}" target="_blank" rel="noopener noreferrer">${url}</a>`;
+    }
     if (IMAGE_URL_RE.test(url) || GIF_CDN_RE.test(url)) {
       const isGif = /\.gif(\?|$)/i.test(url) || GIF_CDN_RE.test(url);
       if (isGif) {
-        // data-gif-src stores original URL so freeze/unfreeze logic can always find it
         const freezeAttrs = state.gifFreezeDefault || state.frozenGifs.has(url)
           ? `data-autofreeze="true"` : ``;
         return `<div class="gif-embed-wrap"><img class="msg-embed-img gif-embed-live" src="${url}" alt="" ${freezeAttrs} data-gif-src="${url}" onerror="this.style.display='none'" title="Click to freeze" /><span class="gif-embed-tag">GIF</span></div>`;
@@ -2980,7 +2987,11 @@ function buildReactionBar(reactions={}, msgId) {
 function renderMessages() {
   const wrap=$("#messages");
   if (!state.messages.length) {
-    wrap.innerHTML=`<div class="empty" style="margin:24px;">No messages yet — say hi!</div>`;
+    wrap.innerHTML=`<div class="empty empty-state" style="margin:24px;">
+      <div class="empty-icon">💬</div>
+      <div class="empty-title">No messages yet</div>
+      <div class="empty-desc">Send the first message — or try <button class="empty-action" data-empty-action="open-activities">🎮 starting an activity</button> to break the ice.</div>
+    </div>`;
     return;
   }
   const html=[];
@@ -3112,7 +3123,7 @@ function renderMessages() {
             <span class="msg-time">${escapeHtml(formatTime(ts))}</span>
           </div>
           <div class="poll-card">
-            <div class="poll-question">📊 ${escapeHtml(pd.question||"Poll")}</div>
+            <div class="poll-question">📊 ${escapeHtml(pd.question||"Poll")}${pd.anon?` <span class="poll-anon-tag" title="Anonymous — voters not shown">🕶️ anon</span>`:""}</div>
             <div class="poll-options">${optsHtml}</div>
             <div class="poll-meta">
               <span>${total} vote${total===1?"":"s"}</span>
@@ -3577,8 +3588,7 @@ async function sendCurrentMessage() {
   // Or: + menu armed silent for next message
   if (typeof _silentNextMessage !== "undefined" && _silentNextMessage) {
     silent = true;
-    _silentNextMessage = false;
-    $("#composer-plus-btn")?.classList.remove("plus-silent-armed");
+    _setSilentArmed(false);
   }
 
   if (text.length>2000) { showToast("Message too long (2000 char max)"); return; }
@@ -5675,6 +5685,61 @@ document.addEventListener("click",e=>{
 /* =====================================================================
    SLASH COMMAND AUTOCOMPLETE
    ===================================================================== */
+/* Slash Commands Help — searchable GUI modal */
+function openCommandsHelp() {
+  _renderCommandsHelpList("");
+  openModal("commands-help-modal");
+  setTimeout(() => $("#commands-help-search")?.focus(), 100);
+}
+function _renderCommandsHelpList(filter) {
+  const list = $("#commands-help-list"); if (!list) return;
+  const q = (filter || "").toLowerCase().trim();
+  const items = SLASH_CMD_LIST.filter(c => {
+    if (!q) return true;
+    return c.name.includes(q)
+        || (c.aliases && c.aliases.some(a => a.includes(q)))
+        || (c.desc && c.desc.toLowerCase().includes(q));
+  });
+  if (!items.length) {
+    list.innerHTML = `<div class="empty" style="padding:18px;color:var(--t-muted);">No commands match "${escapeHtml(q)}".</div>`;
+    return;
+  }
+  list.innerHTML = items.map(c => {
+    const aliases = c.aliases?.length ? `<span class="ch-aliases">${c.aliases.map(a=>"/"+a).join(" · ")}</span>` : "";
+    const launchBtn = (c.openPoll || c.openActivities) ? `<button class="ch-launch" data-ch-launch="${escapeHtml(c.name)}" title="Launch now">▶</button>` : "";
+    return `<div class="ch-row" data-ch-insert="/${escapeHtml(c.name)} ">
+      <div class="ch-name">/${escapeHtml(c.name)}</div>
+      <div class="ch-desc">${escapeHtml(c.desc||"")}</div>
+      ${aliases}
+      ${launchBtn}
+    </div>`;
+  }).join("");
+}
+$("#commands-help-search")?.addEventListener("input", e => _renderCommandsHelpList(e.target.value));
+$("#commands-help-list")?.addEventListener("click", e => {
+  // Launch button
+  const launch = e.target.closest("[data-ch-launch]");
+  if (launch) {
+    const name = launch.dataset.chLaunch;
+    closeModal("commands-help-modal");
+    if (name === "poll") openPollBuilder();
+    else if (name === "activities") openActivitiesPicker();
+    return;
+  }
+  // Insert command into composer
+  const row = e.target.closest("[data-ch-insert]");
+  if (row) {
+    const c = $("#composer-input");
+    if (c) {
+      c.value = row.dataset.chInsert;
+      c.focus();
+      c.selectionStart = c.selectionEnd = c.value.length;
+      c.dispatchEvent(new Event("input", {bubbles:true}));
+    }
+    closeModal("commands-help-modal");
+  }
+});
+
 const SLASH_CMD_LIST = [
   { name:"8ball",    aliases:["8b"],                desc:"Ask the magic 8-ball a question" },
   { name:"tod",      aliases:["truthordare"],        desc:"Truth or dare!" },
@@ -5691,7 +5756,22 @@ const SLASH_CMD_LIST = [
   { name:"shrug",    aliases:[],                     desc:"Send a shrug ¯\\_(ツ)_/¯" },
   { name:"poll",     aliases:[],                     desc:"Start a poll — /poll Question? | A | B [duration:1h]", openPoll: true },
   { name:"activities", aliases:["games","activity","game"], desc:"Play a mini-game with friends 🎮", openActivities: true },
-  { name:"help",     aliases:["h"],                  desc:"List all commands" },
+  // Per-game shortcuts
+  { name:"tictactoe", aliases:["ttt"],               desc:"🎮 Tic-Tac-Toe — 2 players" },
+  { name:"rps",      aliases:["rockpaperscissors"],  desc:"🎮 Rock Paper Scissors — best of 5" },
+  { name:"connect4", aliases:["c4"],                 desc:"🎮 Connect 4 — drop pieces, 4-in-a-row" },
+  { name:"dice",     aliases:[],                     desc:"🎲 Dice Duel — roll the highest" },
+  { name:"numguess", aliases:["number"],             desc:"🔢 Number Guess (1–100)" },
+  { name:"trivia",   aliases:[],                     desc:"❓ Trivia — /trivia [count]" },
+  { name:"wyr",      aliases:["wouldyourather"],     desc:"🤔 Would You Rather" },
+  { name:"truthordare", aliases:[],                  desc:"💫 Truth or Dare — personalized prompts" },
+  { name:"mlt",      aliases:["mostlikelyto"],       desc:"🌟 Most Likely To… — /mlt prompt here" },
+  { name:"hangman",  aliases:[],                     desc:"📝 Hangman — guess the word" },
+  { name:"20q",      aliases:["20questions"],        desc:"❓ 20 Questions — yes/no guessing" },
+  { name:"sahur",    aliases:["tungtung","tts"],     desc:"🥁 Tung Tung Sahur — reaction-rush meme game" },
+  { name:"gamestop", aliases:["stopgame"],           desc:"🛑 Stop your most recent active game" },
+  { name:"bug",      aliases:["report"],             desc:"🪲 Report a bug to the developer", openBug:true },
+  { name:"help",     aliases:["h","commands"],       desc:"Show this list", openHelp:true },
 ];
 
 let _cmdAcItems=[], _cmdAcIndex=-1;
@@ -5737,6 +5817,18 @@ function insertCmdAcItem(idx) {
     composer.value = "";
     hideCmdAc(); updateSendBtn();
     openActivitiesPicker();
+    return;
+  }
+  if (cmd.openHelp) {
+    composer.value = "";
+    hideCmdAc(); updateSendBtn();
+    openCommandsHelp();
+    return;
+  }
+  if (cmd.openBug) {
+    composer.value = "";
+    hideCmdAc(); updateSendBtn();
+    openBugReporter();
     return;
   }
   composer.value="/"+cmd.name+" ";
@@ -6452,6 +6544,7 @@ $("#poll-builder-create-btn")?.addEventListener("click", async () => {
   const options = optionEls.map(i => i.value.trim()).filter(Boolean);
   if (options.length < 2) { showToast("Need at least 2 non-empty options"); return; }
   const durMs = parseInt($("#poll-builder-duration").value, 10) || 86400000;
+  const isAnon = !!$("#poll-builder-anon")?.checked;
   const chatId = state.activeChatId; if (!chatId || !state.user) return;
   const btn = $("#poll-builder-create-btn");
   btn.disabled = true; btn.textContent = "Posting…";
@@ -6463,7 +6556,8 @@ $("#poll-builder-create-btn")?.addEventListener("click", async () => {
       pollData: {
         question, options, votes: {},
         durationMs: durMs, endsAt: Date.now() + durMs,
-        createdAt: Date.now(), createdBy: state.user.uid
+        createdAt: Date.now(), createdBy: state.user.uid,
+        anon: isAnon
       }
     });
     await updateDoc(doc(db, "chats", chatId), {
@@ -6487,10 +6581,79 @@ $("#poll-builder-create-btn")?.addEventListener("click", async () => {
    ===================================================================== */
 function openActivitiesPicker() {
   if (!state.activeChatId) { showToast("Open a chat first to start an activity"); return; }
-  // Reorder cards: favorites first, then alphabetical
   _reorderActivities();
+  // Reset search box on open
+  const search = $("#activities-search");
+  if (search) { search.value = ""; _filterActivities(""); }
   openModal("activities-modal");
 }
+
+function _filterActivities(q) {
+  q = (q||"").toLowerCase().trim();
+  const cards = document.querySelectorAll("#activities-modal .activity-card");
+  let anyVisible = false;
+  cards.forEach(c => {
+    const name = c.querySelector(".activity-name")?.textContent.toLowerCase() || "";
+    const desc = c.querySelector(".activity-desc")?.textContent.toLowerCase() || "";
+    const match = !q || name.includes(q) || desc.includes(q);
+    c.style.display = match ? "" : "none";
+    if (match) anyVisible = true;
+  });
+  // (no "no results" banner needed — empty grid is self-evident)
+}
+$("#activities-search")?.addEventListener("input", e => _filterActivities(e.target.value));
+
+/* ---------- Bug Reporter ---------- */
+let _lastError = null;
+window.addEventListener("error", e => {
+  _lastError = `${e.message} — ${e.filename}:${e.lineno}:${e.colno}`;
+});
+window.addEventListener("unhandledrejection", e => {
+  _lastError = "Unhandled promise: " + (e.reason?.message || String(e.reason));
+});
+
+function openBugReporter() {
+  $("#bug-report-text").value = "";
+  $("#bug-report-steps").value = "";
+  const meta = {
+    uid: state.user?.uid || "(not signed in)",
+    username: state.user?.username || null,
+    activeChat: state.activeChatId || null,
+    url: location.href,
+    userAgent: navigator.userAgent,
+    viewport: `${window.innerWidth}x${window.innerHeight}`,
+    theme: state.theme,
+    lastError: _lastError || "(none)",
+    when: new Date().toISOString(),
+  };
+  $("#bug-report-meta").textContent = JSON.stringify(meta, null, 2);
+  $("#bug-report-modal").dataset.meta = JSON.stringify(meta);
+  openModal("bug-report-modal");
+  setTimeout(() => $("#bug-report-text")?.focus(), 100);
+}
+
+$("#bug-report-send-btn")?.addEventListener("click", async () => {
+  const text = ($("#bug-report-text").value || "").trim();
+  const steps = ($("#bug-report-steps").value || "").trim();
+  if (!text || text.length < 5) { showToast("Tell me what went wrong (5+ chars)"); return; }
+  let meta = {};
+  try { meta = JSON.parse($("#bug-report-modal").dataset.meta || "{}"); } catch(_){}
+  const btn = $("#bug-report-send-btn");
+  btn.disabled = true; btn.textContent = "Sending…";
+  try {
+    await addDoc(collection(db, "bugReports"), {
+      reportedBy: state.user?.uid || null,
+      reporterName: state.user?.displayName || null,
+      text, steps,
+      meta,
+      createdAt: serverTimestamp(),
+      reviewed: false,
+    });
+    closeModal("bug-report-modal");
+    showToast("✓ Bug report sent — thanks!");
+  } catch(err) { showToast("Couldn't send: " + err.message); }
+  finally { btn.disabled = false; btn.textContent = "Send Report"; }
+});
 
 function _getGameFavs() {
   try { return new Set(JSON.parse(localStorage.getItem("sc_game_favs")||"[]")); }
@@ -6538,31 +6701,237 @@ document.addEventListener("click", e => {
   _toggleGameFav(star.dataset.favGame);
 });
 
-// Trivia/Would-You-Rather pools (small, hand-curated)
-const _TRIVIA_QUESTIONS = [
-  { q:"What's the largest planet in our solar system?", a:"jupiter" },
-  { q:"How many continents are there?", a:"7" },
-  { q:"What year did World War 2 end?", a:"1945" },
-  { q:"What's the capital of Australia?", a:"canberra" },
-  { q:"What's the chemical symbol for gold?", a:"au" },
-  { q:"How many strings does a standard guitar have?", a:"6" },
-  { q:"What's the smallest country in the world?", a:"vatican" },
-  { q:"Who painted the Mona Lisa?", a:"da vinci" },
-  { q:"What's H2O more commonly known as?", a:"water" },
-  { q:"How many sides does a hexagon have?", a:"6" },
-];
-const _WYR_PAIRS = [
-  ["have unlimited Wi-Fi anywhere", "have free coffee for life"],
-  ["only be able to whisper", "only be able to shout"],
-  ["always have to sing instead of speak", "always have to dance while walking"],
-  ["live without music", "live without movies"],
-  ["fight 100 duck-sized horses", "fight 1 horse-sized duck"],
-  ["never use a phone again", "never use a computer again"],
-  ["have no homework forever", "get $20 every time you finish homework"],
-  ["always be 10 minutes late", "always be 20 minutes early"],
-  ["have a personal robot", "have a personal chef"],
-  ["read minds", "be invisible"],
-];
+/* Trivia / Would You Rather / Most Likely To — categorized pools */
+const _TRIVIA_BY_CAT = {
+  general: [
+    { q:"What's the tallest mountain in the world?", a:"everest" },
+    { q:"What's the fastest land animal?", a:"cheetah" },
+    { q:"What planet is known as the Red Planet?", a:"mars" },
+    { q:"What's the capital of Japan?", a:"tokyo" },
+    { q:"What gas do humans breathe in to survive?", a:"oxygen" },
+    { q:"How many bones are in the human body?", a:"206" },
+    { q:"What's the largest ocean?", a:"pacific" },
+    { q:"What language is spoken in Brazil?", a:"portuguese" },
+    { q:"What's the hardest natural substance?", a:"diamond" },
+    { q:"What's the biggest desert on Earth?", a:"antarctic" },
+    { q:"What's the main ingredient in guacamole?", a:"avocado" },
+    { q:"What's the freezing point of water (°C)?", a:"0" },
+    { q:"What animal is known as the King of the Jungle?", a:"lion" },
+    { q:"What country invented pizza?", a:"italy" },
+    { q:"How many planets are in the solar system?", a:"8" },
+    { q:"What's the largest mammal?", a:"blue whale" },
+    { q:"What's the capital of Canada?", a:"ottawa" },
+    { q:"What's the national animal of Australia?", a:"kangaroo" },
+    { q:"What do bees make?", a:"honey" },
+    { q:"Which planet has rings?", a:"saturn" },
+    { q:"What's the largest planet in our solar system?", a:"jupiter" },
+    { q:"How many continents are there?", a:"7" },
+    { q:"What year did World War 2 end?", a:"1945" },
+    { q:"What's the chemical symbol for gold?", a:"au" },
+    { q:"Who painted the Mona Lisa?", a:"da vinci" },
+  ],
+  gaming: [
+    { q:"What game has creepers?", a:"minecraft" },
+    { q:"Who says \"Victory Royale\"?", a:"fortnite" },
+    { q:"What company made Roblox?", a:"roblox" },
+    { q:"What's the rarest Minecraft ore (excluding netherite)?", a:"emerald" },
+    { q:"What game features \"The Nether\"?", a:"minecraft" },
+    { q:"What color is Luigi's hat?", a:"green" },
+    { q:"What game has a battle bus?", a:"fortnite" },
+    { q:"What does \"AFK\" mean?", a:"away from keyboard" },
+    { q:"What does \"GG\" stand for?", a:"good game" },
+    { q:"What's the currency in Fortnite called?", a:"v-bucks" },
+    { q:"Which game has Endermen?", a:"minecraft" },
+    { q:"What does \"NPC\" stand for?", a:"non-player character" },
+    { q:"What game has Poké Balls?", a:"pokemon" },
+    { q:"What game has the map \"Dust II\"?", a:"counter" },
+    { q:"What's Sonic the Hedgehog's color?", a:"blue" },
+    { q:"What's Mario's brother's name?", a:"luigi" },
+    { q:"What game has \"Red Light Green Light\" mode now?", a:"squid" },
+    { q:"What does \"nerf\" mean in gaming?", a:"weaken" },
+  ],
+  popculture: [
+    { q:"Who lives in a pineapple under the sea?", a:"spongebob" },
+    { q:"What color is Shrek?", a:"green" },
+    { q:"What's the name of the cowboy in Toy Story?", a:"woody" },
+    { q:"What's Baby Yoda's real name?", a:"grogu" },
+    { q:"What movie has blue aliens on Pandora?", a:"avatar" },
+    { q:"Who's the snowman in Frozen?", a:"olaf" },
+    { q:"What's the name of Harry Potter's owl?", a:"hedwig" },
+    { q:"What superhero uses a shield?", a:"captain america" },
+    { q:"What's the name of the yellow Pokémon?", a:"pikachu" },
+    { q:"Who says \"I am your father\"?", a:"vader" },
+    { q:"What's the clownfish in Finding Nemo's name?", a:"nemo" },
+    { q:"What's Wednesday Addams' first name?", a:"wednesday" },
+    { q:"What's the name of the green ogre?", a:"shrek" },
+    { q:"What's Batman's city?", a:"gotham" },
+    { q:"What animal is Kung Fu Panda?", a:"panda" },
+    { q:"What's the talking donkey in Shrek's name?", a:"donkey" },
+    { q:"What color is the Hulk?", a:"green" },
+    { q:"Who lives at Bikini Bottom?", a:"spongebob" },
+    { q:"What's Elsa's sister's name?", a:"anna" },
+    { q:"What superhero can climb walls?", a:"spider" },
+  ],
+};
+function _allTrivia() {
+  return [..._TRIVIA_BY_CAT.general, ..._TRIVIA_BY_CAT.gaming, ..._TRIVIA_BY_CAT.popculture];
+}
+// Backward-compat — older code referenced this constant
+const _TRIVIA_QUESTIONS = _allTrivia();
+
+const _WYR_BY_CAT = {
+  funny: [
+    ["have spaghetti for hair", "have syrup for sweat"],
+    ["burp every time you talk", "sneeze every time you laugh"],
+    ["only crawl everywhere", "only skip everywhere"],
+    ["have permanently wet socks", "have permanently sticky hands"],
+    ["always sound like a robot", "always sound like you're underwater"],
+    ["have a duck follow you forever", "have a monkey scream every hour"],
+    ["only eat cold food", "only drink warm drinks"],
+    ["have giant feet", "have giant ears"],
+    ["randomly scream once a day", "randomly trip once a day"],
+    ["only communicate in memes", "only communicate in emojis"],
+    ["have unlimited nuggets", "have unlimited fries"],
+    ["have a rewind button in life", "have a pause button in life"],
+    ["have your search history leaked", "have your texts leaked"],
+    ["be stuck in 2016 internet forever", "be stuck in 2020 internet forever"],
+    ["be famous on TikTok", "be famous on YouTube"],
+    ["fight a goose every morning", "fight a raccoon every night"],
+    ["have your laugh sound like a car horn", "have your laugh sound like a microwave"],
+    ["be forced to dab when you enter a room", "have to meow before talking"],
+    ["wear clown shoes forever", "wear a clown wig forever"],
+    ["only use Internet Explorer forever", "never use Wi-Fi again"],
+  ],
+  gamer: [
+    ["have max FPS forever", "have max graphics forever"],
+    ["only play multiplayer games", "only play single-player games"],
+    ["lose all game progress", "lose all social media accounts"],
+    ["be trapped in Minecraft", "be trapped in Roblox"],
+    ["have infinite Robux", "have infinite V-Bucks"],
+    ["main one game forever", "never finish any game"],
+    ["only use keyboard", "only use controller"],
+    ["have ultra-fast internet", "have infinite battery"],
+    ["be top 500 in any game", "be a famous streamer"],
+    ["always lag slightly", "disconnect once every hour"],
+    ["have every skin in one game", "have every game for free"],
+    ["pause online games", "rewind online games"],
+    ["win every ranked match but never have fun", "lose but always have fun"],
+    ["have your dream setup", "have your dream gaming room"],
+    ["never rage again", "never lose again"],
+    ["be a Minecraft pro", "be a Fortnite pro"],
+    ["always clutch", "always top frag"],
+  ],
+  serious: [
+    ["read minds", "predict the future"],
+    ["be rich but lonely", "be poor with friends"],
+    ["live on Mars", "live underwater"],
+    ["never sleep again", "never eat again"],
+    ["know how you die", "know when you die"],
+    ["have infinite money but no internet", "have internet but no money"],
+    ["be able to fly", "be able to teleport"],
+    ["restart life at age 5", "skip to age 30"],
+    ["be famous forever", "be anonymous forever"],
+    ["never feel embarrassment", "never feel fear"],
+    ["be the smartest person alive", "be the funniest person alive"],
+    ["live forever", "live perfectly for 30 years"],
+    ["have perfect memory", "have perfect luck"],
+    ["stop time", "speed up time"],
+    ["lose all memories", "never make new ones"],
+    ["be invisible", "be able to shapeshift"],
+    ["speak every language", "talk to animals"],
+    ["have no ads forever", "have free food forever"],
+    ["clone yourself", "read thoughts"],
+    ["always know when someone lies", "always know what people think"],
+  ],
+  spicy: [
+    // PG-13 spicy — none NSFW. Keep tame for school-safe context.
+    ["confess your biggest crush in front of the class", "stand on a chair and read your worst diary entry"],
+    ["dance in silence for 30 seconds", "tell everyone your most embarrassing memory"],
+    ["read the last 5 texts you sent out loud", "show the last 5 photos in your camera roll"],
+    ["call your crush", "text your crush something cringe"],
+    ["wear the same outfit for a week", "no phone for a week"],
+    ["have your worst grade exposed", "have your worst photo exposed"],
+    ["never lie again", "never tell a secret again"],
+    ["lose all your friends but get $1M", "keep your friends but never have $1M"],
+    ["confess all your crushes for 10 years", "confess every lie you've ever told"],
+    ["never hide your face when embarrassed", "never look anyone in the eye"],
+  ],
+};
+function _allWYR() {
+  return [..._WYR_BY_CAT.funny, ..._WYR_BY_CAT.gamer, ..._WYR_BY_CAT.serious];
+}
+// Back-compat
+const _WYR_PAIRS = _allWYR();
+
+const _MLT_BY_CAT = {
+  funnyschool: [
+    "sleep through class",
+    "accidentally become famous",
+    "eat during class secretly",
+    "get caught lacking",
+    "laugh at the worst moment",
+    "survive a zombie apocalypse",
+    "forget homework",
+    "become a meme",
+    "become a streamer",
+    "get addicted to a random game",
+    "fail a CAPTCHA",
+    "trip in public",
+    "send a message to the wrong person",
+    "get detention for something dumb",
+    "break their sleep schedule",
+    "win an argument with zero logic",
+    "survive only on snacks",
+    "stay up until 4 AM",
+    "accidentally go viral",
+    "get distracted instantly",
+  ],
+  gamer: [
+    "rage quit",
+    "spend too much on skins",
+    "say \"one more game\" at 2 AM",
+    "have 100 browser tabs open",
+    "grind all night",
+    "become a VTuber",
+    "get jump-scared",
+    "main one game forever",
+    "become a Discord mod",
+    "accidentally leak something on stream",
+    "become an esports pro",
+    "lose because of lag",
+    "use the weirdest username",
+    "become internet-famous",
+    "type insanely fast",
+    "become a speedrunner",
+    "touch grass the least",
+    "get carried",
+    "say \"it's just a game\" after raging",
+    "blame teammates",
+  ],
+  real: [
+    "become rich",
+    "move to another country",
+    "start a business",
+    "become a teacher",
+    "become famous",
+    "become a scientist",
+    "invent something crazy",
+    "become president",
+    "disappear and live in the woods",
+    "become an influencer",
+    "travel the world",
+    "write a book",
+    "become a millionaire",
+    "survive on an island",
+    "become a hacker",
+    "own a mansion",
+    "go to space",
+    "change the world",
+  ],
+};
+function _allMLT() {
+  return [..._MLT_BY_CAT.funnyschool, ..._MLT_BY_CAT.gamer, ..._MLT_BY_CAT.real];
+}
 
 async function _launchGame(kind, opts) {
   const chatId = state.activeChatId;
@@ -6581,32 +6950,89 @@ async function _launchGame(kind, opts) {
     gameData = { kind, target: 1+Math.floor(Math.random()*100), guesses: [], winner: null, host: state.user.uid };
     preview = "🔢 Number Guess (1–100) — guess the number!";
   } else if (kind === "trivia") {
-    // Optional: /trivia COUNT — set max question count (default 5, max 20)
-    const cnt = parseInt(opts, 10);
-    const total = (cnt && cnt >= 1 && cnt <= 20) ? cnt : 5;
-    const t = _TRIVIA_QUESTIONS[Math.floor(Math.random()*_TRIVIA_QUESTIONS.length)];
+    // /trivia [count] [category]
+    // count: 1-20 (default 5).  category: general | gaming | popculture | mixed (default mixed)
+    const partsT = (opts||"").trim().split(/\s+/).filter(Boolean);
+    let cnt = 5, cat = "mixed";
+    for (const p of partsT) {
+      const n = parseInt(p, 10);
+      if (!isNaN(n) && n >= 1 && n <= 20) cnt = n;
+      else if (_TRIVIA_BY_CAT[p.toLowerCase()]) cat = p.toLowerCase();
+      else if (p.toLowerCase() === "all" || p.toLowerCase() === "mixed") cat = "mixed";
+    }
+    const pool = cat === "mixed" ? _allTrivia() : _TRIVIA_BY_CAT[cat];
+    const t = pool[Math.floor(Math.random()*pool.length)];
     gameData = { kind, question: t.q, answer: t.a.toLowerCase(), guesses: [], winner: null, host: state.user.uid,
-                 questionNumber: 1, totalQuestions: total, scores: {} };
-    preview = `❓ Trivia (1/${total}): ${t.q}`;
+                 questionNumber: 1, totalQuestions: cnt, scores: {}, category: cat };
+    preview = `❓ Trivia (1/${cnt}, ${cat}): ${t.q}`;
   } else if (kind === "wouldyou") {
-    const p = _WYR_PAIRS[Math.floor(Math.random()*_WYR_PAIRS.length)];
-    gameData = { kind, optionA: p[0], optionB: p[1], votes: {}, host: state.user.uid, round: 1 };
+    // /wyr [category]   funny | gamer | serious | spicy | mixed
+    const cat = (opts||"").trim().toLowerCase();
+    const validCats = Object.keys(_WYR_BY_CAT);
+    const useCat = validCats.includes(cat) ? cat : "mixed";
+    const pool = useCat === "mixed" ? _allWYR() : _WYR_BY_CAT[useCat];
+    const p = pool[Math.floor(Math.random()*pool.length)];
+    gameData = { kind, optionA: p[0], optionB: p[1], votes: {}, host: state.user.uid, round: 1, category: useCat };
     preview = `🤔 Would You Rather: ${p[0]} OR ${p[1]}?`;
   } else if (kind === "truthordare") {
     gameData = { kind, host: state.user.uid, prompts: [], pickedBy: null, pickedKind: null };
     preview = "💫 Truth or Dare — host fills in personalized prompts";
   } else if (kind === "mostlikely") {
-    const prompt = (opts || "").trim() || "be the next viral celebrity";
+    // /mlt CATEGORY    or /mlt CUSTOM PROMPT TEXT
+    let prompt = (opts || "").trim();
+    const validCats = Object.keys(_MLT_BY_CAT);
+    if (!prompt) prompt = _allMLT()[Math.floor(Math.random()*_allMLT().length)];
+    else if (validCats.includes(prompt.toLowerCase())) {
+      const pool = _MLT_BY_CAT[prompt.toLowerCase()];
+      prompt = pool[Math.floor(Math.random()*pool.length)];
+    }
+    // Otherwise treat as a literal custom prompt
     gameData = { kind, prompt, votes: {}, host: state.user.uid };
     preview = `🌟 Most Likely To: ${prompt}`;
+  } else if (kind === "sahur") {
+    // Tung Tung Sahur Reaction Rush — meme-energy reaction game
+    // Mode: normal | typing | fakeout | chaos. Default normal.
+    const mode = ["normal","typing","fakeout","chaos"].includes((opts||"").toLowerCase().trim())
+      ? opts.toLowerCase().trim() : "normal";
+    gameData = { kind, mode,
+      host: state.user.uid, players: { [state.user.uid]: state.user.displayName },
+      scores: { [state.user.uid]: 0 },
+      streaks: { [state.user.uid]: 0 },
+      bestStreak: { [state.user.uid]: 0 },
+      bestReaction: {}, // uid -> ms
+      round: 0, totalRounds: 5,
+      state: "lobby", // lobby | armed | live | resolving | finished
+      armedAt: null, liveAt: null, lastWinner: null, lastReaction: null,
+      isFakeout: false, fakeoutPenalties: {} };
+    preview = `🥁 Tung Tung Sahur (${mode}) — wake up for sahur!`;
+  } else if (kind === "hangman") {
+    // Hangman — simple word-guess game.
+    const words = ["javascript","minecraft","fortnite","pokemon","spaghetti","hamburger","computer","chocolate","keyboard","sunshine","mountain","airplane","penguin","library","sandwich","umbrella","whisper","balloon","circus","trampoline","calendar","puzzle","monster","detective","skateboard"];
+    const word = (opts||"").trim().toLowerCase().replace(/[^a-z]/g,"") ||
+                 words[Math.floor(Math.random()*words.length)];
+    gameData = { kind, word, revealed: word.replace(/./g,"_"),
+      guessed: [], wrong: 0, maxWrong: 6,
+      host: state.user.uid, winner: null, lastGuesser: null };
+    preview = `📝 Hangman — guess the ${word.length}-letter word!`;
+  } else if (kind === "20q") {
+    // 20 Questions — host thinks of something, players ask yes/no
+    const subject = (opts||"").trim() || null;
+    gameData = { kind, host: state.user.uid, subject, // subject hidden until reveal
+      questions: [], guesses: [], winner: null,
+      qLimit: 20 };
+    preview = subject
+      ? `❓ 20 Questions — ${state.user.displayName} is thinking of something!`
+      : `❓ 20 Questions — host is choosing a subject…`;
   } else if (kind === "connect4") {
-    // 7 cols x 6 rows. board[row][col] = "" | "1" | "2"
-    gameData = { kind, board: Array.from({length:6},()=>Array(7).fill("")),
+    // 7 cols x 6 rows = 42 cells. Stored FLAT (Firestore disallows nested arrays).
+    // index = row*7 + col, 0=top-left, 41=bottom-right. Value: "" | "1" | "2"
+    gameData = { kind, board: new Array(42).fill(""),
                  turn: state.user.uid, players: {p1: state.user.uid, p2: null},
                  colors: {p1: "#ef4444", p2: "#fbbf24"}, // default: red vs yellow
+                 firstMover: null, // host picks who goes first when P2 joins
                  winner: null, host: state.user.uid };
     preview = "🟡🔴 Connect 4 — waiting for opponent";
-  } else { showToast("Game not yet implemented: " + kind); return; }
+  } else { showToast("Couldn't start: unknown game. Try refreshing the page."); return; }
 
   try {
     await addDoc(collection(db, "chats", chatId, "messages"), {
@@ -6868,34 +7294,192 @@ function renderGameCard(m) {
       <div class="game-status">${total} vote${total===1?"":"s"} — vote for ANY member, can change anytime</div>
     </div>`;
   }
+  // Tung Tung Sahur
+  if (g.kind === "sahur") {
+    const players = g.players || {};
+    const scores  = g.scores  || {};
+    const streaks = g.streaks || {};
+    const isHost  = g.host === myUid;
+    const inGame  = !!players[myUid];
+    const mode    = g.mode || "normal";
+    const round   = g.round || 0;
+    const totalRounds = g.totalRounds || 5;
+    const phase   = g.state || "lobby";
+    // Roster
+    const rosterHtml = Object.entries(players).map(([uid, name]) =>
+      `<div class="sahur-player ${uid===myUid?"me":""}">
+        <span class="sahur-name">${escapeHtml(name)}</span>
+        <span class="sahur-score">${scores[uid]||0}pts</span>
+        ${(streaks[uid]||0) > 1 ? `<span class="sahur-streak">🔥${streaks[uid]}</span>`:""}
+      </div>`).join("");
+    let body;
+    if (phase === "lobby") {
+      const joinBtn = inGame ? `` : `<button class="btn-primary game-join-btn" data-game-action="sahur-join" data-game-msg="${escapeHtml(m.id)}">Join</button>`;
+      const startBtn = isHost && Object.keys(players).length >= 1
+        ? `<button class="btn-primary game-join-btn" data-game-action="sahur-start" data-game-msg="${escapeHtml(m.id)}">▶ Start (${totalRounds} rounds)</button>` : "";
+      body = `<div class="sahur-roster">${rosterHtml}</div>
+        <div class="sahur-mode">Mode: <strong style="color:#a78bfa;">${escapeHtml(mode.toUpperCase())}</strong></div>
+        ${joinBtn}${startBtn}`;
+    } else if (phase === "armed") {
+      body = `<div class="sahur-armed sahur-${mode}">
+        <div class="sahur-warmup">🌙 Get ready…</div>
+        <div class="sahur-roster">${rosterHtml}</div>
+      </div>`;
+    } else if (phase === "live") {
+      // The big "TUNG TUNG TUNG SAHUR" call-to-action
+      const callout = g.isFakeout
+        ? `<div class="sahur-callout sahur-fake">😴 false alarm…</div>`
+        : `<div class="sahur-callout sahur-${mode}">TUNG TUNG TUNG<br>SAHUR 🥁</div>`;
+      let actionUI;
+      if (mode === "typing") {
+        actionUI = `<div class="numguess-input-row">
+          <input type="text" class="numguess-input game-input" id="sahur-${escapeHtml(m.id)}" data-enter-action="sahur-react" data-enter-msg="${escapeHtml(m.id)}" placeholder="type SAHUR…" autocomplete="off" />
+          <button class="btn-primary" data-game-action="sahur-react" data-game-msg="${escapeHtml(m.id)}">Send</button>
+        </div>`;
+      } else {
+        actionUI = `<button class="btn-primary sahur-tap-btn" data-game-action="sahur-react" data-game-msg="${escapeHtml(m.id)}">🥁 WAKE UP!</button>`;
+      }
+      body = `${callout}
+        ${inGame ? actionUI : `<div class="game-status" style="opacity:.7;">Watching…</div>`}
+        <div class="sahur-roster">${rosterHtml}</div>`;
+    } else if (phase === "resolving") {
+      const lastWinner = g.lastWinner ? escName(g.lastWinner) : "Nobody";
+      const ms = g.lastReaction ? `${g.lastReaction}ms` : "—";
+      body = `<div class="sahur-result">
+        ${g.isFakeout ? "😴 That was fake!" : `🏆 ${escapeHtml(lastWinner)} woke up first! <strong>${ms}</strong>`}
+      </div>
+      <div class="sahur-roster">${rosterHtml}</div>
+      <div class="game-status">Round ${round}/${totalRounds}</div>
+      ${isHost ? `<button class="btn-primary game-join-btn" data-game-action="sahur-next" data-game-msg="${escapeHtml(m.id)}">▶ Next round</button>`:""}`;
+    } else { // finished
+      const sorted = Object.entries(scores).map(([uid,s])=>({uid,s,name:players[uid]||"P"})).sort((a,b)=>b.s-a.s);
+      const board = sorted.map((s,i)=>`<div class="numguess-row"><span>${i===0?"🏆 ":""}${escapeHtml(s.name)}</span> <strong>${s.s}</strong></div>`).join("");
+      const fastest = Object.entries(g.bestReaction||{}).sort((a,b)=>a[1]-b[1])[0];
+      const bestStreaks = Object.entries(g.bestStreak||{}).sort((a,b)=>b[1]-a[1])[0];
+      body = `<div class="sahur-result">🌙 Final scores</div>
+        ${board}
+        ${fastest ? `<div class="game-status" style="font-size:11px;">⚡ Fastest reaction: ${escapeHtml(players[fastest[0]]||"?")} — ${fastest[1]}ms</div>`:""}
+        ${bestStreaks && bestStreaks[1]>1 ? `<div class="game-status" style="font-size:11px;">🔥 Longest streak: ${escapeHtml(players[bestStreaks[0]]||"?")} (${bestStreaks[1]})</div>`:""}
+        ${isHost ? `<button class="btn-primary game-join-btn" data-game-action="sahur-replay" data-game-msg="${escapeHtml(m.id)}">↻ Replay</button>`:""}`;
+    }
+    return `<div class="game-card game-sahur game-sahur-${mode}">
+      <div class="game-title">🥁 Tung Tung Sahur <span style="font-size:11px;opacity:.7;">— ${escapeHtml(mode)}</span></div>
+      ${body}
+    </div>`;
+  }
+
+  // Hangman
+  if (g.kind === "hangman") {
+    const won = g.winner || g.wrong >= g.maxWrong;
+    const word = g.word || "";
+    const guessed = g.guessed || [];
+    const revealed = word.split("").map(ch =>
+      guessed.includes(ch) ? ch.toUpperCase() : "_").join(" ");
+    const alphabet = "abcdefghijklmnopqrstuvwxyz".split("");
+    const stages = [
+      "  +---+\n  |   |\n      |\n      |\n      |\n      |\n=========",
+      "  +---+\n  |   |\n  O   |\n      |\n      |\n      |\n=========",
+      "  +---+\n  |   |\n  O   |\n  |   |\n      |\n      |\n=========",
+      "  +---+\n  |   |\n  O   |\n /|   |\n      |\n      |\n=========",
+      "  +---+\n  |   |\n  O   |\n /|\\  |\n      |\n      |\n=========",
+      "  +---+\n  |   |\n  O   |\n /|\\  |\n /    |\n      |\n=========",
+      "  +---+\n  |   |\n  O   |\n /|\\  |\n / \\  |\n      |\n=========",
+    ];
+    const stage = stages[Math.min(g.wrong||0, 6)];
+    const lost = g.wrong >= g.maxWrong && !g.winner;
+    const keys = alphabet.map(ch => {
+      const used = guessed.includes(ch);
+      const isWrong = used && !word.includes(ch);
+      return `<button class="hm-key ${used?"used":""} ${isWrong?"wrong":""}" data-game-action="hm-guess" data-game-msg="${escapeHtml(m.id)}" data-hm-letter="${ch}" ${used||won?'disabled':''}>${ch.toUpperCase()}</button>`;
+    }).join("");
+    let status;
+    if (g.winner) status = `🏆 ${escName(g.winner)} solved it! Word was <strong>${escapeHtml(word.toUpperCase())}</strong>`;
+    else if (lost) status = `💀 You ran out of guesses. Word was <strong>${escapeHtml(word.toUpperCase())}</strong>`;
+    else status = `${g.wrong||0} / ${g.maxWrong} wrong${g.lastGuesser?` — last guess by ${escName(g.lastGuesser)}`:""}`;
+    return `<div class="game-card game-hangman">
+      <div class="game-title">📝 Hangman</div>
+      <pre class="hm-stage">${stage}</pre>
+      <div class="hm-word">${revealed}</div>
+      <div class="hm-keys">${keys}</div>
+      <div class="game-status">${status}</div>
+    </div>`;
+  }
+
+  // 20 Questions
+  if (g.kind === "20q") {
+    const isHost = g.host === myUid;
+    const subjectSet = !!g.subject;
+    const qs = g.questions || [];
+    const qsLeft = (g.qLimit || 20) - qs.length;
+    const won = !!g.winner;
+    let body;
+    if (!subjectSet && isHost) {
+      body = `<div class="game-status" style="font-size:11px;">Type the subject (it stays hidden from players):</div>
+        <div class="numguess-input-row">
+          <input type="text" class="numguess-input game-input" id="q20s-${escapeHtml(m.id)}" data-enter-action="q20-set" data-enter-msg="${escapeHtml(m.id)}" maxlength="50" placeholder="e.g. pizza, the moon, your dog" autocomplete="off" />
+          <button class="btn-primary" data-game-action="q20-set" data-game-msg="${escapeHtml(m.id)}">Set</button>
+        </div>`;
+    } else if (!subjectSet) {
+      body = `<div class="game-status">Waiting for ${escName(g.host)} to pick a subject…</div>`;
+    } else if (won) {
+      body = `<div class="game-status">🏆 ${escName(g.winner)} guessed it! Subject was <strong>${escapeHtml(g.subject)}</strong></div>`;
+    } else {
+      const log = qs.slice(-6).map(q => {
+        const ans = q.answer === "yes" ? "✅" : q.answer === "no" ? "❌" : "🤷";
+        return `<div class="numguess-row"><span>${escapeHtml(q.askerName)}</span> <em>"${escapeHtml(q.text)}"</em> ${ans}</div>`;
+      }).join("");
+      body = `<div class="game-status" style="font-size:11px;">${qsLeft} questions left · ask yes/no questions or guess the subject</div>
+        <div class="numguess-list">${log||'<div class="game-status" style="opacity:.6">Be the first to ask…</div>'}</div>
+        ${isHost ? `<div class="game-status" style="font-size:10px;color:var(--c-warn);">⏳ Waiting for someone to ask. Click Yes/No on any pending question to answer.</div>` : ""}
+        <div class="numguess-input-row">
+          <input type="text" class="numguess-input game-input" id="q20q-${escapeHtml(m.id)}" data-enter-action="q20-ask" data-enter-msg="${escapeHtml(m.id)}" maxlength="100" placeholder="Ask a yes/no question OR type GUESS: thing" autocomplete="off" />
+          <button class="btn-primary" data-game-action="q20-ask" data-game-msg="${escapeHtml(m.id)}">Ask</button>
+        </div>
+        ${isHost && qs.length && !qs[qs.length-1].answer ? `
+          <div class="tod-pick-row">
+            <button class="rps-btn" data-game-action="q20-answer" data-game-msg="${escapeHtml(m.id)}" data-q20-ans="yes">✅ Yes</button>
+            <button class="rps-btn" data-game-action="q20-answer" data-game-msg="${escapeHtml(m.id)}" data-q20-ans="no">❌ No</button>
+            <button class="rps-btn" data-game-action="q20-answer" data-game-msg="${escapeHtml(m.id)}" data-q20-ans="maybe">🤷 Maybe</button>
+          </div>` : ""}`;
+    }
+    return `<div class="game-card game-20q">
+      <div class="game-title">❓ 20 Questions</div>
+      ${body}
+    </div>`;
+  }
+
   // Connect 4
   if (g.kind === "connect4") {
     const isP1 = g.players?.p1 === myUid;
     const isP2 = g.players?.p2 === myUid;
+    const isHost = g.host === myUid;
     const isPlayer = isP1 || isP2;
-    const myTurn = isPlayer && g.turn === myUid && !g.winner;
+    const bothJoined = g.players?.p1 && g.players?.p2;
+    const turnPicked = !!g.firstMover;
+    const myTurn = isPlayer && bothJoined && turnPicked && g.turn === myUid && !g.winner;
     const canJoinAsP2 = !g.players?.p2 && !isP1;
     const colorP1 = g.colors?.p1 || "#ef4444";
     const colorP2 = g.colors?.p2 || "#fbbf24";
-    // Build board (6 rows x 7 cols)
-    const board = g.board || Array.from({length:6},()=>Array(7).fill(""));
+    // Board is FLAT (length 42). Read with row*7+col.
+    const board = Array.isArray(g.board) && g.board.length === 42 ? g.board : new Array(42).fill("");
+    const at = (r, c) => board[r*7 + c] || "";
     const rows = [];
     for (let r = 0; r < 6; r++) {
       const cells = [];
       for (let c = 0; c < 7; c++) {
-        const v = board[r][c];
+        const v = at(r, c);
         const dotColor = v === "1" ? colorP1 : v === "2" ? colorP2 : "transparent";
         cells.push(`<div class="c4-cell"><div class="c4-disc" style="background:${dotColor}${v?'':';opacity:.15'}"></div></div>`);
       }
       rows.push(cells.join(""));
     }
-    // Drop buttons (col headers) — interactable only on your turn
     const dropBtns = Array.from({length:7}, (_, c) => {
-      const colFull = board[0][c] !== "";
+      const colFull = at(0, c) !== "";
       return `<button class="c4-drop ${myTurn && !colFull && !g.winner?'':'disabled'}" data-game-action="c4-drop" data-game-msg="${escapeHtml(m.id)}" data-c4-col="${c}">▼</button>`;
     }).join("");
     let status;
     if (g.winner === "draw") status = "🤝 Draw!";
+    else if (g.winner === "stopped") status = "🛑 Game stopped.";
     else if (g.winner) status = `🏆 ${escName(g.winner)} wins!`;
     else if (!g.players?.p2) {
       const colorBtns = canJoinAsP2 ? `<div class="c4-color-row">
@@ -6904,6 +7488,18 @@ function renderGameCard(m) {
         ).join("")}
       </div>` : "";
       status = canJoinAsP2 ? `Pick a color to join:${colorBtns}` : `Waiting for opponent…`;
+    } else if (!turnPicked) {
+      // Both joined — host picks who goes first
+      if (isHost) {
+        status = `Who goes first?
+          <div class="c4-color-row" style="margin-top:6px;">
+            <button class="btn-secondary" data-game-action="c4-firstmover" data-game-msg="${escapeHtml(m.id)}" data-firstmover="${escapeHtml(g.players.p1)}" style="font-size:11px;">You (host)</button>
+            <button class="btn-secondary" data-game-action="c4-firstmover" data-game-msg="${escapeHtml(m.id)}" data-firstmover="${escapeHtml(g.players.p2)}" style="font-size:11px;">Opponent</button>
+            <button class="btn-secondary" data-game-action="c4-firstmover" data-game-msg="${escapeHtml(m.id)}" data-firstmover="random" style="font-size:11px;">🎲 Random</button>
+          </div>`;
+      } else {
+        status = "Waiting for host to pick who goes first…";
+      }
     } else {
       const turnLabel = myTurn ? "<strong>Your turn</strong>" : `${escName(g.turn)}'s turn`;
       const myColor = isP1 ? colorP1 : isP2 ? colorP2 : null;
@@ -7101,9 +7697,10 @@ document.addEventListener("click", async e => {
     if (g.host !== myUid) { showToast("Only the host can advance"); return; }
     const total = g.totalQuestions || 1;
     const num = g.questionNumber || 1;
-    if (num >= total) return; // last question — leaderboard already shown
-    // Pick a new random question
-    const t = _TRIVIA_QUESTIONS[Math.floor(Math.random()*_TRIVIA_QUESTIONS.length)];
+    if (num >= total) return;
+    const cat = g.category || "mixed";
+    const pool = cat !== "mixed" && _TRIVIA_BY_CAT[cat] ? _TRIVIA_BY_CAT[cat] : _allTrivia();
+    const t = pool[Math.floor(Math.random()*pool.length)];
     await _gameUpdate(msgId, {
       "gameData.question": t.q,
       "gameData.answer": t.a.toLowerCase(),
@@ -7126,7 +7723,9 @@ document.addEventListener("click", async e => {
   }
   if (action === "wyr-next") {
     if (g.host !== myUid) { showToast("Only the host can advance"); return; }
-    const p = _WYR_PAIRS[Math.floor(Math.random()*_WYR_PAIRS.length)];
+    const cat = g.category || "mixed";
+    const pool = cat !== "mixed" && _WYR_BY_CAT[cat] ? _WYR_BY_CAT[cat] : _allWYR();
+    const p = pool[Math.floor(Math.random()*pool.length)];
     await _gameUpdate(msgId, {
       "gameData.optionA": p[0],
       "gameData.optionB": p[1],
@@ -7182,6 +7781,198 @@ document.addEventListener("click", async e => {
     return;
   }
 
+  // ── Tung Tung Sahur ──
+  if (action === "sahur-join") {
+    if (g.players?.[myUid]) return;
+    await _gameUpdate(msgId, {
+      [`gameData.players.${myUid}`]: state.user.displayName,
+      [`gameData.scores.${myUid}`]: 0,
+      [`gameData.streaks.${myUid}`]: 0,
+      [`gameData.bestStreak.${myUid}`]: 0
+    });
+    return;
+  }
+  if (action === "sahur-start" || action === "sahur-replay") {
+    if (g.host !== myUid) { showToast("Only the host can start"); return; }
+    // Reset scores on replay; just advance state for start.
+    const reset = action === "sahur-replay";
+    const upd = { "gameData.state": "armed", "gameData.round": 1, "gameData.armedAt": Date.now() };
+    if (reset) {
+      for (const uid of Object.keys(g.players||{})) {
+        upd[`gameData.scores.${uid}`] = 0;
+        upd[`gameData.streaks.${uid}`] = 0;
+      }
+    }
+    // Pick a random fakeout chance based on mode
+    const fakeChance = g.mode === "fakeout" ? 0.35 : g.mode === "chaos" ? 0.4 : 0;
+    upd["gameData.isFakeout"] = Math.random() < fakeChance;
+    await _gameUpdate(msgId, upd);
+    // Schedule the "live" transition (host only)
+    const delay = (g.mode === "chaos") ? (400 + Math.random()*1500)
+                : (g.mode === "fakeout") ? (1200 + Math.random()*2500)
+                : (1500 + Math.random()*2500);
+    setTimeout(async () => {
+      // Re-fetch the message in case state changed
+      const fresh = state.messages.find(x => x.id === msgId);
+      if (!fresh || fresh.gameData?.state !== "armed") return;
+      await _gameUpdate(msgId, { "gameData.state": "live", "gameData.liveAt": Date.now() });
+    }, delay);
+    return;
+  }
+  if (action === "sahur-react") {
+    if (!g.players?.[myUid]) { showToast("Join the game first"); return; }
+    if (g.state === "armed") {
+      // Pressed too early — penalty
+      const newStreak = 0;
+      const newScore = Math.max(0, (g.scores?.[myUid]||0) - 1);
+      const penalties = { ...(g.fakeoutPenalties||{}), [myUid]: (g.fakeoutPenalties?.[myUid]||0)+1 };
+      await _gameUpdate(msgId, {
+        [`gameData.scores.${myUid}`]: newScore,
+        [`gameData.streaks.${myUid}`]: newStreak,
+        "gameData.fakeoutPenalties": penalties
+      });
+      showToast("⚡ Too early! -1 point");
+      return;
+    }
+    if (g.state !== "live") return;
+    // Typing mode — must type "sahur"
+    if (g.mode === "typing") {
+      const inp = $(`#sahur-${msgId}`);
+      const val = (inp?.value||"").trim().toLowerCase();
+      if (val !== "sahur") { showToast("Type 'sahur'"); return; }
+      if (inp) inp.value = "";
+    }
+    // Fakeout — winner gets penalty
+    if (g.isFakeout) {
+      const newStreak = 0;
+      const newScore = Math.max(0, (g.scores?.[myUid]||0) - 1);
+      await _gameUpdate(msgId, {
+        [`gameData.scores.${myUid}`]: newScore,
+        [`gameData.streaks.${myUid}`]: newStreak,
+        "gameData.state": "resolving",
+        "gameData.lastWinner": null,
+        "gameData.lastReaction": null
+      });
+      return;
+    }
+    // Real winner
+    const reactionMs = Date.now() - (g.liveAt || Date.now());
+    const newStreak = (g.streaks?.[myUid]||0) + 1;
+    const bestStreak = Math.max(g.bestStreak?.[myUid]||0, newStreak);
+    const points = newStreak >= 3 ? 2 : 1; // streak bonus
+    const newScore = (g.scores?.[myUid]||0) + points;
+    const bestReaction = g.bestReaction || {};
+    if (!bestReaction[myUid] || reactionMs < bestReaction[myUid]) bestReaction[myUid] = reactionMs;
+    await _gameUpdate(msgId, {
+      [`gameData.scores.${myUid}`]: newScore,
+      [`gameData.streaks.${myUid}`]: newStreak,
+      [`gameData.bestStreak.${myUid}`]: bestStreak,
+      "gameData.bestReaction": bestReaction,
+      "gameData.state": "resolving",
+      "gameData.lastWinner": myUid,
+      "gameData.lastReaction": reactionMs
+    });
+    return;
+  }
+  if (action === "sahur-next") {
+    if (g.host !== myUid) { showToast("Only the host can advance"); return; }
+    const round = g.round || 1;
+    const total = g.totalRounds || 5;
+    if (round >= total) {
+      await _gameUpdate(msgId, { "gameData.state": "finished" });
+      return;
+    }
+    // Reset streaks for users who didn't win the last round
+    const upd = { "gameData.state": "armed", "gameData.round": round + 1, "gameData.armedAt": Date.now() };
+    for (const uid of Object.keys(g.players||{})) {
+      if (uid !== g.lastWinner) upd[`gameData.streaks.${uid}`] = 0;
+    }
+    const fakeChance = g.mode === "fakeout" ? 0.35 : g.mode === "chaos" ? 0.4 : 0;
+    upd["gameData.isFakeout"] = Math.random() < fakeChance;
+    await _gameUpdate(msgId, upd);
+    const delay = (g.mode === "chaos") ? (400 + Math.random()*1500)
+                : (g.mode === "fakeout") ? (1200 + Math.random()*2500)
+                : (1500 + Math.random()*2500);
+    setTimeout(async () => {
+      const fresh = state.messages.find(x => x.id === msgId);
+      if (!fresh || fresh.gameData?.state !== "armed") return;
+      await _gameUpdate(msgId, { "gameData.state": "live", "gameData.liveAt": Date.now() });
+    }, delay);
+    return;
+  }
+
+  // ── Hangman ──
+  if (action === "hm-guess") {
+    if (g.winner) return;
+    const ch = (btn.dataset.hmLetter||"").toLowerCase();
+    if (!ch || (g.guessed||[]).includes(ch)) return;
+    const guessed = [...(g.guessed||[]), ch];
+    const word = (g.word||"").toLowerCase();
+    const wrong = (g.wrong||0) + (word.includes(ch) ? 0 : 1);
+    const fullySolved = word.split("").every(c => guessed.includes(c));
+    const upd = {
+      "gameData.guessed": guessed,
+      "gameData.wrong": wrong,
+      "gameData.lastGuesser": myUid,
+      "gameData.revealed": word.split("").map(c => guessed.includes(c) ? c : "_").join("")
+    };
+    if (fullySolved) upd["gameData.winner"] = myUid;
+    await _gameUpdate(msgId, upd);
+    return;
+  }
+
+  // ── 20 Questions ──
+  if (action === "q20-set") {
+    if (g.host !== myUid) return;
+    const inp = $(`#q20s-${msgId}`);
+    const subj = (inp?.value||"").trim();
+    if (!subj) { showToast("Enter a subject"); return; }
+    if (inp) inp.value = "";
+    await _gameUpdate(msgId, { "gameData.subject": subj });
+    return;
+  }
+  if (action === "q20-ask") {
+    if (g.winner) return;
+    if (!g.subject) { showToast("Host hasn't set a subject yet"); return; }
+    const inp = $(`#q20q-${msgId}`);
+    const text = (inp?.value||"").trim();
+    if (!text) return;
+    if (text.length > 100) { showToast("Too long"); return; }
+    const guessMatch = text.match(/^(?:guess[:\s]+)(.+)$/i);
+    if (guessMatch) {
+      const guessTxt = guessMatch[1].trim().toLowerCase();
+      const correct = guessTxt.includes(g.subject.toLowerCase()) || g.subject.toLowerCase().includes(guessTxt);
+      const newGuesses = [...(g.guesses||[]), { uid: myUid, name: state.user.displayName, value: guessTxt, correct }];
+      const upd = { "gameData.guesses": newGuesses };
+      if (correct) upd["gameData.winner"] = myUid;
+      if (inp) inp.value = "";
+      state._gameInputWasFocused = !correct;
+      await _gameUpdate(msgId, upd);
+      return;
+    }
+    // Regular question
+    const q = { uid: myUid, askerName: state.user.displayName, text, answer: null, asked: Date.now() };
+    const newQs = [...(g.questions||[]), q];
+    if (inp) inp.value = "";
+    if (newQs.length >= (g.qLimit||20)) {
+      // Out of questions — host wins
+      await _gameUpdate(msgId, { "gameData.questions": newQs, "gameData.winner": g.host });
+    } else {
+      await _gameUpdate(msgId, { "gameData.questions": newQs });
+    }
+    return;
+  }
+  if (action === "q20-answer") {
+    if (g.host !== myUid) return;
+    const ans = btn.dataset.q20Ans;
+    const qs = [...(g.questions||[])];
+    const last = qs[qs.length-1];
+    if (!last || last.answer) return;
+    last.answer = ans;
+    await _gameUpdate(msgId, { "gameData.questions": qs });
+    return;
+  }
+
   // ── Connect 4 ──
   if (action === "c4-join") {
     if (g.players?.p2 || g.players?.p1 === myUid) return;
@@ -7189,6 +7980,18 @@ document.addEventListener("click", async e => {
     await _gameUpdate(msgId, {
       "gameData.players.p2": myUid,
       "gameData.colors.p2": myColor
+    });
+    return;
+  }
+  if (action === "c4-firstmover") {
+    if (g.host !== myUid) { showToast("Only the host picks who goes first"); return; }
+    let pick = btn.dataset.firstmover;
+    if (pick === "random") {
+      pick = Math.random() < 0.5 ? g.players.p1 : g.players.p2;
+    }
+    await _gameUpdate(msgId, {
+      "gameData.firstMover": pick,
+      "gameData.turn": pick
     });
     return;
   }
@@ -7201,47 +8004,43 @@ document.addEventListener("click", async e => {
     if (g.turn !== myUid) { showToast("Not your turn"); return; }
     const col = parseInt(btn.dataset.c4Col, 10);
     if (isNaN(col) || col < 0 || col > 6) return;
-    // Find the lowest empty row in this column
-    const board = g.board.map(r => [...r]);
+    // FLAT board (length 42, idx = row*7+col). Find the lowest empty row.
+    const board = [...(g.board || new Array(42).fill(""))];
+    if (board.length !== 42) { showToast("Board corrupted — try refreshing"); return; }
     let row = -1;
     for (let r = 5; r >= 0; r--) {
-      if (!board[r][col]) { row = r; break; }
+      if (!board[r*7 + col]) { row = r; break; }
     }
     if (row < 0) { showToast("Column full"); return; }
     const piece = isP1 ? "1" : "2";
-    board[row][col] = piece;
-    // Win check — 4 in a row in any direction
+    board[row*7 + col] = piece;
     const w = _connect4Check(board, row, col, piece);
     let winner = null;
     if (w) winner = isP1 ? g.players.p1 : g.players.p2;
-    else if (board.every(r => r.every(Boolean))) winner = "draw";
+    else if (board.every(Boolean)) winner = "draw";
     const nextTurn = winner ? g.turn : (g.turn === g.players.p1 ? g.players.p2 : g.players.p1);
     await _gameUpdate(msgId, {
       "gameData.board": board,
       "gameData.turn": nextTurn,
       "gameData.winner": winner
     });
-    // Play "ding" sound for everyone after a successful drop (unless we won)
     if (!winner) playSound("message");
     return;
   }
 });
 
-// Connect-4 win checker
+// Connect-4 win checker on FLAT board (length 42)
 function _connect4Check(board, row, col, piece) {
+  const at = (r, c) => (r<0||r>5||c<0||c>6) ? "" : board[r*7+c];
   const dirs = [[0,1],[1,0],[1,1],[1,-1]];
   for (const [dr, dc] of dirs) {
     let count = 1;
-    // Forward
     for (let k = 1; k < 4; k++) {
-      const r = row + dr*k, c = col + dc*k;
-      if (r<0||r>5||c<0||c>6||board[r][c] !== piece) break;
+      if (at(row + dr*k, col + dc*k) !== piece) break;
       count++;
     }
-    // Backward
     for (let k = 1; k < 4; k++) {
-      const r = row - dr*k, c = col - dc*k;
-      if (r<0||r>5||c<0||c>6||board[r][c] !== piece) break;
+      if (at(row - dr*k, col - dc*k) !== piece) break;
       count++;
     }
     if (count >= 4) return true;
@@ -7476,6 +8275,32 @@ $("#composer-poll-btn")?.addEventListener("click", () => openPollBuilder());
 
 /* ---------- Composer + (plus) menu ---------- */
 let _silentNextMessage = false; // when true, the next message is sent with @silent prefix
+
+function _setSilentArmed(on) {
+  _silentNextMessage = !!on;
+  $("#composer-plus-btn")?.classList.toggle("plus-silent-armed", _silentNextMessage);
+  $("#composer-silent-ribbon")?.classList.toggle("hidden", !_silentNextMessage);
+  // Also tint the textarea so it's obvious
+  $("#composer-input")?.classList.toggle("silent-armed", _silentNextMessage);
+}
+$("#silent-ribbon-cancel")?.addEventListener("click", () => _setSilentArmed(false));
+
+// Empty-state action buttons (delegated)
+document.addEventListener("click", e => {
+  const btn = e.target.closest("[data-empty-action]");
+  if (!btn) return;
+  const action = btn.dataset.emptyAction;
+  if (action === "open-activities") openActivitiesPicker();
+  else if (action === "open-add-friend") {
+    // Switch to Add Friend tab
+    $$(".tab").forEach(t => t.classList.remove("active"));
+    $('.tab[data-tab="add"]')?.classList.add("active");
+    $$(".tab-panel").forEach(p => p.classList.add("hidden"));
+    $('.tab-panel[data-panel="add"]')?.classList.remove("hidden");
+    $("#add-friend-input")?.focus();
+  }
+  else if (action === "open-create-group") $("#rail-create-group")?.click();
+});
 $("#composer-plus-btn")?.addEventListener("click", e => {
   e.stopPropagation();
   document.getElementById("composer-plus-menu")?.remove();
@@ -7493,9 +8318,9 @@ $("#composer-plus-btn")?.addEventListener("click", e => {
       <span class="cpm-icon" style="background:rgba(167,139,250,.18);color:#a78bfa;">🎮</span>
       <div class="cpm-meta"><div class="cpm-title">Activity / Mini-game</div><div class="cpm-sub">Tic-Tac-Toe, RPS, trivia &amp; more</div></div>
     </button>
-    <button class="cpm-item" data-cpm="commands">
+    <button class="cpm-item" data-cpm="help">
       <span class="cpm-icon" style="background:rgba(245,158,11,.18);color:#fbbf24;">⚡</span>
-      <div class="cpm-meta"><div class="cpm-title">Slash Commands</div><div class="cpm-sub">/8ball /joke /coinflip — show all</div></div>
+      <div class="cpm-meta"><div class="cpm-title">Slash Commands</div><div class="cpm-sub">Browse all commands &amp; games</div></div>
     </button>
     <button class="cpm-item ${_silentNextMessage?'active':''}" data-cpm="silent">
       <span class="cpm-icon" style="background:rgba(148,163,184,.18);color:#94a3b8;">🔕</span>
@@ -7522,12 +8347,12 @@ $("#composer-plus-btn")?.addEventListener("click", e => {
       if (c) { c.focus(); c.value = "/"; c.dispatchEvent(new Event("input", {bubbles:true})); }
     }
     else if (what === "silent") {
-      _silentNextMessage = !_silentNextMessage;
-      $("#composer-plus-btn")?.classList.toggle("plus-silent-armed", _silentNextMessage);
+      _setSilentArmed(!_silentNextMessage);
       showToast(_silentNextMessage
         ? "🔕 Next message will be silent (no notification)"
         : "🔔 Silent disarmed");
     }
+    else if (what === "help") openCommandsHelp();
   });
   // Close on outside click
   setTimeout(() => document.addEventListener("click", function _close(e3) {

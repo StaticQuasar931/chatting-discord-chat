@@ -267,7 +267,11 @@ export function buildUI() {
             </div>
             <h3 class="panel-title" id="all-count">All Friends</h3>
             <div class="friends-list" id="friends-list"></div>
-            <p class="empty" id="friends-empty" hidden>You don't have any friends yet. Try the Add Friend tab.</p>
+            <div class="empty empty-state" id="friends-empty" hidden>
+              <div class="empty-icon">👋</div>
+              <div class="empty-title">No friends yet</div>
+              <div class="empty-desc">Find someone using the <button class="empty-action" data-empty-action="open-add-friend">Add Friend</button> tab — search by username or username#discriminator.</div>
+            </div>
           </div>
           <div class="tab-panel hidden" data-panel="pending">
             <h3 class="panel-title">Incoming Requests</h3>
@@ -398,16 +402,22 @@ export function buildUI() {
           <!-- Markdown preview (toggleable, shows above composer) -->
           <div id="md-preview" class="md-preview hidden"></div>
 
+          <!-- Silent-armed ribbon — appears above the composer when + → Silent is on -->
+          <div id="composer-silent-ribbon" class="composer-silent-ribbon hidden" aria-live="polite">
+            <span>🔕 Next message will be sent silently — no notification will play for recipients.</span>
+            <button type="button" class="silent-ribbon-cancel" id="silent-ribbon-cancel" title="Cancel silent">✕</button>
+          </div>
+
           <div class="composer-inner">
-            <div class="composer-input-wrap">
-              <textarea id="composer-input" placeholder="Message… or /help for commands" rows="1"></textarea>
-            </div>
-            <!-- + button (consolidates polls, activities, commands, silent message) -->
+            <!-- + button moved to the LEFT of the textarea -->
             <button class="icon-btn composer-plus-btn" id="composer-plus-btn" title="More — polls, games, commands, silent">
               <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
                 <path fill="currentColor" d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6z"/>
               </svg>
             </button>
+            <div class="composer-input-wrap">
+              <textarea id="composer-input" placeholder="Message… or /help for commands" rows="1"></textarea>
+            </div>
             <button class="icon-btn composer-md-btn" id="md-preview-btn" title="Toggle Markdown preview">
               <svg viewBox="0 0 24 24" width="18" height="18" fill="none" aria-hidden="true">
                 <path fill="currentColor" d="M2.5 5h19c.83 0 1.5.67 1.5 1.5v11c0 .83-.67 1.5-1.5 1.5h-19C1.67 19 1 18.33 1 17.5v-11C1 5.67 1.67 5 2.5 5zm3 11.5v-5L8 14l2.5-2.5v5h-2v-2L8 15l-1.5-1.5v3H5.5zm12 .25 3-3.25h-2v-3h-2v3h-2l3 3.25z"/>
@@ -1346,6 +1356,50 @@ export function buildUI() {
     </div>
   </div>
 
+  <!-- Bug Reporter Modal -->
+  <div class="modal hidden" id="bug-report-modal">
+    <div class="modal-card" style="max-width:500px;width:96vw;">
+      <div class="modal-head">
+        <h2>🪲 Report a Bug</h2>
+        <button class="icon-btn modal-close" data-close="bug-report-modal">
+          <svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </div>
+      <div class="modal-body" style="padding:16px 20px;">
+        <p class="hint" style="margin:0 0 10px;">Found a problem? Tell me what happened. Your browser, current page, and any recent error are auto-attached so I can debug.</p>
+        <label class="modal-label">What went wrong?</label>
+        <textarea id="bug-report-text" maxlength="1500" rows="5" placeholder="e.g. clicking 'Join as O' on tic-tac-toe didn't work…"></textarea>
+        <label class="modal-label" style="margin-top:14px;">Steps to reproduce <span class="label-optional">optional</span></label>
+        <textarea id="bug-report-steps" maxlength="800" rows="3" placeholder="1. open chat&#10;2. click X&#10;3. saw Y"></textarea>
+        <details style="margin-top:14px;font-size:12px;color:var(--t-muted);">
+          <summary style="cursor:pointer;">📋 Auto-attached info</summary>
+          <pre id="bug-report-meta" style="margin-top:6px;font-size:10.5px;background:var(--c-input-2);padding:8px;border-radius:var(--radius-sm);white-space:pre-wrap;word-break:break-all;"></pre>
+        </details>
+      </div>
+      <div class="modal-foot">
+        <button class="btn-secondary" data-close="bug-report-modal">Cancel</button>
+        <button class="btn-primary" id="bug-report-send-btn">Send Report</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Slash Commands Help Modal -->
+  <div class="modal hidden" id="commands-help-modal">
+    <div class="modal-card" style="max-width:560px;width:96vw;">
+      <div class="modal-head">
+        <h2>⚡ Slash Commands</h2>
+        <button class="icon-btn modal-close" data-close="commands-help-modal">
+          <svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </div>
+      <div class="modal-body" style="padding:14px 18px;max-height:75vh;overflow-y:auto;">
+        <input type="text" id="commands-help-search" placeholder="Search commands…" autocomplete="off" style="width:100%;padding:8px 12px;margin-bottom:10px;" />
+        <div id="commands-help-list" class="commands-help-list"></div>
+        <p class="hint" style="margin-top:10px;font-size:11px;text-align:center;">Click any command to insert it into your message — or click ▶ to launch it instantly.</p>
+      </div>
+    </div>
+  </div>
+
   <!-- Activities (mini-games) Picker Modal -->
   <div class="modal hidden" id="activities-modal">
     <div class="modal-card" style="max-width:500px;width:96vw;">
@@ -1403,6 +1457,26 @@ export function buildUI() {
             <div class="activity-name">Connect 4</div>
             <div class="activity-desc">Pick colors, drop pieces, 4-in-a-row</div>
           </button>
+          <button class="activity-card sahur-card" data-activity="sahur">
+            <div class="activity-icon">🥁</div>
+            <div class="activity-name">Tung Tung Sahur</div>
+            <div class="activity-desc">Reaction-rush meme game</div>
+          </button>
+          <button class="activity-card" data-activity="hangman">
+            <div class="activity-icon">📝</div>
+            <div class="activity-name">Hangman</div>
+            <div class="activity-desc">Guess the word — 6 wrong = out</div>
+          </button>
+          <button class="activity-card" data-activity="20q">
+            <div class="activity-icon">❓</div>
+            <div class="activity-name">20 Questions</div>
+            <div class="activity-desc">Yes/no — guess what host is thinking</div>
+          </button>
+        </div>
+        <!-- Search bar at bottom of grid -->
+        <div style="margin-top:12px;">
+          <input type="text" id="activities-search" placeholder="Search activities…" autocomplete="off"
+            style="width:100%;padding:8px 12px;font-size:13px;background:var(--c-input-2);border:1px solid var(--c-border-2);border-radius:var(--radius-sm);color:var(--t-primary);" />
         </div>
       </div>
     </div>
@@ -1435,6 +1509,16 @@ export function buildUI() {
         </div>
         <input type="hidden" id="poll-builder-duration" value="86400000" />
 
+        <label class="settings-toggle-row" style="margin-top:14px;">
+          <div class="settings-toggle-info">
+            <div class="settings-toggle-label">🕶️ Anonymous voting</div>
+            <div class="settings-toggle-sub">Hide who voted what — only counts shown. Reports still work.</div>
+          </div>
+          <span class="toggle-switch">
+            <input type="checkbox" id="poll-builder-anon" />
+            <span class="toggle-track"></span>
+          </span>
+        </label>
         <p class="hint" style="margin-top:14px;">Anyone in this chat can vote. You'll see live results as votes come in.</p>
       </div>
       <div class="modal-foot">

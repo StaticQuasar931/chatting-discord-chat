@@ -1743,12 +1743,29 @@ body.compact-mode .msg-head { gap: 4px; }
 }
 .full-profile-bio { font-size: 15px; color: var(--t-secondary); line-height: 1.6; word-break: break-word; }
 .full-profile-since { font-size: 13px; color: var(--t-muted); margin-top: 6px; }
-.fp-favgame { font-size: 13px; color: var(--t-secondary); margin-top: 6px; }
+/* Favorite game pill on full profile */
+.fp-favgame {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 13px; color: var(--t-secondary);
+  margin-top: 8px; padding: 8px 12px;
+  background: linear-gradient(135deg, rgba(167,139,250,.12), rgba(79,124,255,.08));
+  border: 1px solid rgba(167,139,250,.25);
+  border-radius: var(--radius-md);
+}
 .fp-favgame-link {
   color: var(--c-accent); text-decoration: none; font-weight: 700;
   border-bottom: 1px dashed var(--c-accent);
 }
-.fp-favgame-link:hover { color: #fff; background: var(--c-accent); padding: 0 4px; border-radius: 3px; border: none; }
+.fp-favgame-link:hover { color: #fff; background: var(--c-accent); padding: 1px 6px; border-radius: 3px; border: none; }
+/* Profile section spacing — clearer hierarchy */
+.full-profile-bio {
+  font-size: 14px; line-height: 1.55; color: var(--t-secondary);
+  padding: 8px 0; word-break: break-word;
+}
+.full-profile-since {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 13px; color: var(--t-muted); margin-top: 6px;
+}
 .full-profile-notes {
   width: 100%; min-height: 180px; max-height: 320px; resize: vertical;
   background: var(--c-input-2); border: 1px solid var(--c-border-2);
@@ -3551,6 +3568,158 @@ body[data-theme="oled"] .badge-icon-wrap {
   transition: transform .12s;
 }
 .c4-color-swatch:hover { transform: scale(1.15); border-color: #fff; }
+
+/* Composer silent ribbon */
+.composer-silent-ribbon {
+  margin: 0 12px 6px;
+  padding: 8px 12px;
+  background: linear-gradient(90deg, rgba(251,191,36,.18), rgba(251,191,36,.08));
+  border: 1px solid rgba(251,191,36,.4);
+  border-radius: var(--radius-sm);
+  font-size: 12px; color: var(--t-primary);
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  animation: card-pop .15s ease;
+}
+.composer-silent-ribbon.hidden { display: none; }
+.silent-ribbon-cancel {
+  background: transparent; border: none; color: var(--t-muted);
+  cursor: pointer; font-size: 14px; padding: 0 4px;
+}
+.silent-ribbon-cancel:hover { color: var(--c-danger); }
+.composer-input.silent-armed { border-color: rgba(251,191,36,.5); }
+
+/* Slash commands help */
+.commands-help-list {
+  display: flex; flex-direction: column; gap: 4px;
+}
+.ch-row {
+  display: grid; grid-template-columns: auto 1fr auto auto; gap: 10px;
+  align-items: center; padding: 8px 10px; border-radius: var(--radius-sm);
+  cursor: pointer; transition: background .12s; background: var(--c-input-2);
+}
+.ch-row:hover { background: var(--c-input); }
+.ch-name {
+  font-family: monospace; font-weight: 700; color: var(--c-accent);
+  font-size: 13px;
+}
+.ch-desc { font-size: 12px; color: var(--t-secondary); min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.ch-aliases { font-size: 10px; color: var(--t-muted); font-family: monospace; }
+.ch-launch {
+  background: var(--c-accent); color: #fff; border: none;
+  padding: 4px 10px; border-radius: var(--radius-sm); font-weight: 700;
+  cursor: pointer; font-size: 11px;
+}
+
+/* Empty states — hero card with action */
+.empty-state {
+  text-align: center; padding: 28px 18px;
+  display: flex; flex-direction: column; align-items: center; gap: 6px;
+}
+.empty-icon { font-size: 38px; opacity: .85; }
+.empty-title { font-weight: 700; font-size: 15px; color: var(--t-primary); }
+.empty-desc { font-size: 12.5px; color: var(--t-muted); max-width: 360px; line-height: 1.5; }
+.empty-action {
+  background: var(--c-accent); color: #fff; border: none;
+  padding: 2px 10px; border-radius: var(--radius-pill); font-weight: 700;
+  cursor: pointer; font-size: 12px;
+}
+.empty-action:hover { background: var(--c-accent-hover); }
+
+/* Anonymous poll tag */
+.poll-anon-tag {
+  display: inline-block; margin-left: 6px; padding: 1px 7px;
+  background: rgba(148,163,184,.18); color: #94a3b8;
+  border-radius: var(--radius-pill); font-size: 10px; font-weight: 700;
+  vertical-align: middle;
+}
+
+/* ─────── TUNG TUNG SAHUR ─────── */
+.game-sahur { border-color: rgba(251,191,36,.5); }
+.sahur-card {
+  background: linear-gradient(135deg, rgba(251,191,36,.18), rgba(167,139,250,.18)) !important;
+}
+.sahur-roster {
+  display: flex; flex-direction: column; gap: 4px;
+  margin: 8px 0;
+  padding: 6px 8px; background: var(--c-input-2); border-radius: var(--radius-sm);
+}
+.sahur-player {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 12px; color: var(--t-secondary);
+}
+.sahur-player.me { color: var(--c-accent); font-weight: 700; }
+.sahur-name { flex: 1; }
+.sahur-score { font-variant-numeric: tabular-nums; }
+.sahur-streak { color: #f97316; font-weight: 800; }
+.sahur-mode { font-size: 11px; color: var(--t-muted); margin: 6px 0; text-align: center; }
+.sahur-armed {
+  text-align: center; padding: 30px 0;
+  background: rgba(167,139,250,.1); border-radius: var(--radius-sm);
+  animation: sahur-anticipate 1.5s ease-in-out infinite;
+}
+@keyframes sahur-anticipate {
+  0%, 100% { background: rgba(167,139,250,.1); }
+  50% { background: rgba(167,139,250,.25); }
+}
+.sahur-warmup { font-size: 14px; color: var(--t-muted); }
+.sahur-callout {
+  font-size: 22px; font-weight: 900; text-align: center;
+  padding: 26px 8px; line-height: 1.1; letter-spacing: 0.04em;
+  background: linear-gradient(135deg, #fbbf24, #f97316, #ec4899);
+  -webkit-background-clip: text; background-clip: text; color: transparent;
+  text-shadow: 0 0 30px rgba(251,191,36,.5);
+  animation: sahur-pulse .4s ease-out;
+}
+.sahur-callout.sahur-fake {
+  background: var(--c-input); -webkit-background-clip: initial; background-clip: initial;
+  color: var(--t-muted); font-size: 16px; padding: 16px;
+}
+.sahur-callout.sahur-chaos { animation: sahur-shake .15s ease-in-out infinite; }
+@keyframes sahur-pulse { 0% { transform: scale(.5); opacity: 0; } 50% { transform: scale(1.15); } 100% { transform: scale(1); opacity: 1; } }
+@keyframes sahur-shake { 0%,100%{transform:translateX(0)} 25%{transform:translateX(-3px)} 75%{transform:translateX(3px)} }
+.sahur-tap-btn {
+  width: 100%; padding: 18px; font-size: 18px; font-weight: 900;
+  background: linear-gradient(135deg, #fbbf24, #f97316);
+  color: #fff; border: none; border-radius: var(--radius-md);
+  cursor: pointer; box-shadow: 0 4px 16px rgba(251,191,36,.4);
+  transition: transform .08s, box-shadow .15s;
+  margin-top: 8px;
+}
+.sahur-tap-btn:active { transform: scale(.96); }
+.sahur-result {
+  text-align: center; font-size: 15px; font-weight: 700;
+  padding: 14px; color: var(--c-accent);
+}
+
+/* ─────── HANGMAN ─────── */
+.hm-stage {
+  font-family: monospace; font-size: 14px; line-height: 1.05;
+  color: var(--t-secondary);
+  background: var(--c-input-2); padding: 8px;
+  border-radius: var(--radius-sm); white-space: pre;
+  text-align: center; margin: 8px 0;
+}
+.hm-word {
+  font-family: monospace; font-size: 22px; font-weight: 900;
+  letter-spacing: .15em; text-align: center;
+  color: var(--t-primary); padding: 12px 8px;
+  background: var(--c-input); border-radius: var(--radius-sm); margin-bottom: 8px;
+}
+.hm-keys {
+  display: grid; grid-template-columns: repeat(13, 1fr); gap: 3px;
+}
+.hm-key {
+  padding: 6px 0; border-radius: 3px; font-weight: 700;
+  background: var(--c-input); color: var(--t-primary); cursor: pointer;
+  border: 1px solid var(--c-border-2); font-size: 11px;
+  transition: all .1s;
+}
+.hm-key:hover:not(:disabled) { background: var(--c-accent-soft); border-color: var(--c-accent); }
+.hm-key.used { opacity: .4; cursor: default; }
+.hm-key.wrong { background: rgba(242,63,67,.2); border-color: var(--c-danger); color: var(--c-danger); }
+@media (max-width: 480px) {
+  .hm-keys { grid-template-columns: repeat(7, 1fr); }
+}
 
 /* Mobile polish for games */
 @media (max-width: 480px) {
