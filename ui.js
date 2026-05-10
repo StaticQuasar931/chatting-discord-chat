@@ -1415,62 +1415,74 @@ export function buildUI() {
           <button class="activity-card" data-activity="tictactoe">
             <div class="activity-icon">⨯⭘</div>
             <div class="activity-name">Tic-Tac-Toe</div>
-            <div class="activity-desc">Classic 3-in-a-row, 2 players</div>
+            <div class="activity-desc">Classic 3-in-a-row</div>
+            <div class="activity-players">👥 2 players</div>
           </button>
           <button class="activity-card" data-activity="rps">
             <div class="activity-icon">✊✋✌️</div>
             <div class="activity-name">Rock Paper Scissors</div>
-            <div class="activity-desc">Best-of-five, 2 players</div>
+            <div class="activity-desc">Best-of-five</div>
+            <div class="activity-players">👥 2 players</div>
           </button>
-          <button class="activity-card" data-activity="dice">
-            <div class="activity-icon">🎲</div>
-            <div class="activity-name">Dice Duel</div>
-            <div class="activity-desc">Roll the highest, anyone can play</div>
+          <button class="activity-card" data-activity="connect4">
+            <div class="activity-icon">🔴🟢</div>
+            <div class="activity-name">Connect 4</div>
+            <div class="activity-desc">Drop pieces, 4-in-a-row</div>
+            <div class="activity-players">👥 2 players</div>
           </button>
-          <button class="activity-card" data-activity="numguess">
-            <div class="activity-icon">🔢</div>
-            <div class="activity-name">Number Guess</div>
-            <div class="activity-desc">Higher or lower, race to guess</div>
+          <button class="activity-card" data-activity="hangman">
+            <div class="activity-icon">📝</div>
+            <div class="activity-name">Hangman</div>
+            <div class="activity-desc">Guess the word, 6 tries</div>
+            <div class="activity-players">👥 2+ players</div>
+          </button>
+          <button class="activity-card" data-activity="20q">
+            <div class="activity-icon">❓</div>
+            <div class="activity-name">20 Questions</div>
+            <div class="activity-desc">Yes/no guessing game</div>
+            <div class="activity-players">👥 2+ players</div>
           </button>
           <button class="activity-card" data-activity="trivia">
-            <div class="activity-icon">❓</div>
+            <div class="activity-icon">🧠</div>
             <div class="activity-name">Trivia</div>
-            <div class="activity-desc">First-to-answer wins the round</div>
+            <div class="activity-desc">First to answer wins</div>
+            <div class="activity-players">👥 2+ players</div>
           </button>
           <button class="activity-card" data-activity="wouldyou">
             <div class="activity-icon">🤔</div>
             <div class="activity-name">Would You Rather</div>
             <div class="activity-desc">Vote on a hard choice</div>
+            <div class="activity-players">👥 2+ players</div>
           </button>
           <button class="activity-card" data-activity="truthordare">
             <div class="activity-icon">💫</div>
             <div class="activity-name">Truth or Dare</div>
-            <div class="activity-desc">Personalized — host writes prompts</div>
+            <div class="activity-desc">Host writes prompts</div>
+            <div class="activity-players">👥 2+ players</div>
           </button>
           <button class="activity-card" data-activity="mostlikely">
             <div class="activity-icon">🌟</div>
             <div class="activity-name">Most Likely To…</div>
-            <div class="activity-desc">Vote which member fits best</div>
-          </button>
-          <button class="activity-card" data-activity="connect4">
-            <div class="activity-icon">🟡🔴</div>
-            <div class="activity-name">Connect 4</div>
-            <div class="activity-desc">Pick colors, drop pieces, 4-in-a-row</div>
+            <div class="activity-desc">Vote who fits best</div>
+            <div class="activity-players">👥 3+ players</div>
           </button>
           <button class="activity-card sahur-card" data-activity="sahur">
             <div class="activity-icon">🥁</div>
             <div class="activity-name">Tung Tung Sahur</div>
             <div class="activity-desc">Reaction-rush meme game</div>
+            <div class="activity-players">👥 2+ players</div>
           </button>
-          <button class="activity-card" data-activity="hangman">
-            <div class="activity-icon">📝</div>
-            <div class="activity-name">Hangman</div>
-            <div class="activity-desc">Guess the word — 6 wrong = out</div>
+          <button class="activity-card" data-activity="dice">
+            <div class="activity-icon">🎲</div>
+            <div class="activity-name">Dice Duel</div>
+            <div class="activity-desc">Roll the highest</div>
+            <div class="activity-players">👥 2+ players</div>
           </button>
-          <button class="activity-card" data-activity="20q">
-            <div class="activity-icon">❓</div>
-            <div class="activity-name">20 Questions</div>
-            <div class="activity-desc">Yes/no — guess what host is thinking</div>
+          <button class="activity-card" data-activity="numguess">
+            <div class="activity-icon">🔢</div>
+            <div class="activity-name">Number Guess</div>
+            <div class="activity-desc">Higher or lower, race!</div>
+            <div class="activity-players">👥 2+ players</div>
           </button>
         </div>
         <!-- Search bar at bottom of grid -->
