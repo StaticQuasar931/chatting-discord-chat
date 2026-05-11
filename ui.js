@@ -1130,6 +1130,40 @@ export function buildUI() {
             </div>
           </div>
 
+          <!-- ── Performance / Bandwidth ───────────────────────────── -->
+          <div class="settings-section-divider" style="margin-top:20px;margin-bottom:14px;">
+            <span>Performance &amp; Bandwidth</span>
+          </div>
+
+          <label class="settings-toggle-row">
+            <div class="settings-toggle-info">
+              <div class="settings-toggle-label">Low Bandwidth Mode</div>
+              <div class="settings-toggle-sub">Disables sidebar typing indicators and reduces background listener count. Helpful on slow connections or when usage is high.</div>
+            </div>
+            <span class="toggle-switch">
+              <input type="checkbox" id="settings-low-bandwidth-toggle" />
+              <span class="toggle-track"></span>
+            </span>
+          </label>
+
+          <div id="settings-debug-stats" style="margin-top:14px;padding:10px 12px;background:var(--bg-2);border-radius:8px;font-size:11px;color:var(--t-muted);display:none;">
+            <div style="font-weight:600;color:var(--t-normal);margin-bottom:6px;">🔧 Firestore Debug</div>
+            <div>Active listeners: <strong id="dbg-listener-count">0</strong></div>
+            <div>Presence writes (session): <strong id="dbg-presence-writes">0</strong></div>
+            <div>User cache entries: <strong id="dbg-cache-size">0</strong></div>
+            <div style="margin-top:6px;"><button class="btn-secondary" style="font-size:11px;padding:3px 8px;" id="dbg-show-listeners-btn">Show listener list</button></div>
+          </div>
+          <label class="settings-toggle-row" style="margin-top:10px;">
+            <div class="settings-toggle-info">
+              <div class="settings-toggle-label">Show Debug Stats</div>
+              <div class="settings-toggle-sub">Show Firestore listener count and cache stats (developer tool)</div>
+            </div>
+            <span class="toggle-switch">
+              <input type="checkbox" id="settings-debug-toggle" />
+              <span class="toggle-track"></span>
+            </span>
+          </label>
+
           <p class="hint" style="margin-top:20px;text-align:center;">All appearance &amp; preference changes apply instantly.</p>
         </div>
 

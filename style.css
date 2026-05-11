@@ -2377,6 +2377,44 @@ body[data-theme="oled"] .badge-icon-wrap {
 }
 
 /* =================================================
+   LOAD OLDER MESSAGES BUTTON
+   ================================================= */
+.load-older-wrap {
+  display: flex; justify-content: center;
+  padding: 10px 16px 4px;
+}
+.load-older-btn {
+  background: var(--bg-2);
+  border: 1px solid var(--bg-3);
+  color: var(--t-muted);
+  border-radius: 20px;
+  padding: 5px 16px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+.load-older-btn:hover:not(:disabled) {
+  background: var(--bg-3);
+  color: var(--t-normal);
+}
+.load-older-btn:disabled {
+  opacity: 0.5; cursor: default;
+}
+
+/* Settings section divider */
+.settings-section-divider {
+  display: flex; align-items: center; gap: 8px;
+  margin: 0 0 4px;
+  font-size: 11px; font-weight: 700; letter-spacing: 0.06em;
+  text-transform: uppercase; color: var(--t-muted);
+}
+.settings-section-divider::before,
+.settings-section-divider::after {
+  content: ""; flex: 1;
+  height: 1px; background: var(--bg-3);
+}
+
+/* =================================================
    TERMS OF USE OVERLAY
    ================================================= */
 .tos-overlay {

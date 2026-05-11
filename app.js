@@ -11,7 +11,7 @@ import {
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import {
   doc, collection, setDoc, getDoc, getDocs, addDoc,
-  updateDoc, deleteDoc, query, where, orderBy, limit, startAt, endAt,
+  updateDoc, deleteDoc, query, where, orderBy, limit, startAt, endAt, startAfter,
   onSnapshot, serverTimestamp, arrayUnion, writeBatch
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
@@ -440,6 +440,15 @@ const state = {
   avatarPosition:    localStorage.getItem("sc_avatar_pos") || "center center",
   favGifs: {},   // gifUrl → { url, previewUrl, title }
   favEmojis: {}, // emojiName → { name, char }
+  // Message pagination
+  _msgPaginationOldestCursor: null,   // Firestore doc snapshot for startAfter()
+  _msgPaginationHasMore: {},          // chatId → bool
+  _msgPaginationLoading: false,       // loading lock
+  _msgOlderMessages: {},              // chatId → array of older paginated messages
+  // Performance / bandwidth modes
+  lowBandwidthMode: localStorage.getItem("sc_low_bandwidth") === "true",
+  // Debug overlay
+  _dbgListenerCount: 0,               // tracked by _dbgListenerWrap
 };
 
 // Apply theme, compact mode, and text size before anything renders
@@ -1657,6 +1666,10 @@ function cleanupAllSubscriptions() {
   for (const fn of Object.values(state.sidebarTypingUnsubs)) { try { fn(); } catch(_){} }
   state.sidebarTypingUnsubs={}; state.sidebarTyping={};
   state.chatInitialized.clear(); state.incomingInitialized=false;
+  state._msgPaginationOldestCursor=null;
+  state._msgPaginationHasMore={};
+  state._msgPaginationLoading=false;
+  state._msgOlderMessages={};
 }
 
 function bootSubscriptions() {
@@ -1689,8 +1702,6 @@ function bootSubscriptions() {
   // Start presence heartbeat
   startPresenceHeartbeat();
 
-  // Live profile listeners for friends — key = uid, value = unsubscribe fn
-  const _friendProfileUnsubs = {};
   // Register cleanup with main unsubscribers so sign-out tears them down
   state.unsubscribers.friendProfiles = ()=>{
     for (const fn of Object.values(_friendProfileUnsubs)) { try{fn();}catch(_){} }
@@ -1707,19 +1718,26 @@ function bootSubscriptions() {
         const otherUid=data.users.find(u=>u!==uid);
         if (!otherUid) continue;
         seenUids.add(otherUid);
-        // Fresh fetch (bypass cache) so status is always current
-        delete state.userCache[otherUid];
+        // Use cache — live listener below keeps it fresh; no need to bust cache on every snapshot
         const profile=await fetchUserProfile(otherUid);
         list.push({ friendshipId:d.id, uid:otherUid,
           displayName:profile?.username||profile?.displayName||"Unknown",
           discriminator:profile?.discriminator||null, photoURL:profile?.photoURL||null });
         // Set up live listener for this friend's profile if not already listening
         if (!_friendProfileUnsubs[otherUid]) {
+          let _lastFriendStatus = state.userCache[otherUid]?.status;
+          let _lastFriendOnline = state.userCache[otherUid]?.isOnline;
           _friendProfileUnsubs[otherUid] = onSnapshot(doc(db,"users",otherUid), pSnap=>{
             if (!pSnap.exists()) return;
-            state.userCache[otherUid]=_augmentBadges({...pSnap.data(), uid:otherUid});
+            const pData = _augmentBadges({...pSnap.data(), uid:otherUid});
+            state.userCache[otherUid] = pData;
             renderFriendsList();
-            renderChatLists(); // update sidebar status dots live
+            // Only re-render chat list if status/online actually changed (avoids costly re-render on every keystroke update)
+            const newStatus = pData.status, newOnline = pData.isOnline;
+            if (newStatus !== _lastFriendStatus || newOnline !== _lastFriendOnline) {
+              _lastFriendStatus = newStatus; _lastFriendOnline = newOnline;
+              renderChatLists();
+            }
             if (state.activeChat?.type==="dm" &&
                 state.activeChat.members?.includes(otherUid)) renderChatHeader();
           }, ()=>{});
@@ -1756,10 +1774,12 @@ function bootSubscriptions() {
     async snap=>{
       const arr=[];
       for (const d of snap.docs) arr.push({id:d.id,...d.data()});
+      // Only fetch DM partner profiles that aren't already in cache.
+      // Friend profile listeners will keep them fresh — no need to re-fetch on every chat update.
       for (const c of arr) {
         if (c.type==="dm") {
           const o=c.members.find(m=>m!==uid);
-          if (o&&!state.userCache[o]) await fetchUserProfile(o);
+          if (o && !state.userCache[o]) await fetchUserProfile(o);
         }
       }
 
@@ -2627,6 +2647,11 @@ async function openChat(chatId) {
   }
 
   if (state.unsubscribers.messages) { state.unsubscribers.messages(); state.unsubscribers.messages=null; }
+  // Reset pagination state whenever a new chat is opened
+  state._msgPaginationOldestCursor = null;
+  state._msgPaginationHasMore[chatId] = false;
+  state._msgPaginationLoading = false;
+  state._msgOlderMessages = {};    // chatId → older prepended messages
 
   // Use cached messages immediately if available — no blank/loading flash on re-open
   const cachedMsgs = state.messageCache[chatId];
@@ -2638,20 +2663,31 @@ async function openChat(chatId) {
     $("#messages").innerHTML=`<div class="empty" style="margin:24px;">Loading messages…</div>`;
   }
 
+  const _MSG_LIMIT = 50; // Reduced from 200 — much cheaper; "Load older" button for history
+
   state.unsubscribers.messages=onSnapshot(
-    // Fetch newest 200 in descending order so we always see the latest messages,
+    // Fetch newest 50 in descending order so we always see the latest messages,
     // regardless of total chat size. Reverse before storing so rendering stays
     // oldest-to-newest. (The old asc+limit approach blocked new messages once
-    // a chat exceeded 200 total — "one delete = one new message" bug.)
-    query(collection(db,"chats",chatId,"messages"),orderBy("createdAt","desc"),limit(200)),
+    // a chat exceeded the limit — "one delete = one new message" bug.)
+    query(collection(db,"chats",chatId,"messages"),orderBy("createdAt","desc"),limit(_MSG_LIMIT)),
     snap=>{
       const prevNewestId = state.messages.length > 0
         ? state.messages[state.messages.length-1].id : null;
       const hadMessages=state.chatInitialized.has(chatId);
       // Reverse so messages render oldest → newest
-      state.messages=snap.docs.slice().reverse().map(d=>({id:d.id,...d.data()}));
+      const liveMsgs = snap.docs.slice().reverse().map(d=>({id:d.id,...d.data()}));
+      // Preserve any older pages already loaded (prepended via "Load older messages")
+      const older = state._msgOlderMessages[chatId] || [];
+      // Merge: older (paginated) + live window, dedup by id
+      const liveIds = new Set(liveMsgs.map(m=>m.id));
+      const olderFiltered = older.filter(m=>!liveIds.has(m.id));
+      state.messages = [...olderFiltered, ...liveMsgs];
       state.messageCache[chatId]=state.messages;
-      // "isNew" = the newest message ID changed (works even when window stays at 200)
+      // Track if there's likely more history available
+      state._msgPaginationHasMore[chatId] = snap.docs.length >= _MSG_LIMIT;
+      if (snap.docs.length > 0) state._msgPaginationOldestCursor = snap.docs[snap.docs.length-1]; // oldest doc (desc order)
+      // "isNew" = the newest message ID changed
       const newestMsg = state.messages[state.messages.length-1];
       const isNew = hadMessages && newestMsg && newestMsg.id !== prevNewestId;
       if (isNew) {
@@ -2675,6 +2711,58 @@ async function openChat(chatId) {
     },
     err=>{ console.error(err); $("#messages").innerHTML=`<div class="empty" style="color:var(--c-danger);margin:24px;">Could not load: ${escapeHtml(err.message)}</div>`; }
   );
+}
+
+/* Load older messages (pagination) — called when user clicks "Load older" button */
+async function loadOlderMessages() {
+  const chatId = state.activeChatId;
+  if (!chatId || state._msgPaginationLoading || !state._msgPaginationOldestCursor) return;
+  state._msgPaginationLoading = true;
+  const btn = document.getElementById("load-older-btn");
+  if (btn) { btn.disabled = true; btn.textContent = "Loading…"; }
+  try {
+    const _MSG_LOAD_MORE = 50;
+    // Use the oldest doc snapshot as cursor and fetch the next 50 before it
+    const snap = await getDocs(query(
+      collection(db,"chats",chatId,"messages"),
+      orderBy("createdAt","desc"),
+      limit(_MSG_LOAD_MORE),
+      startAfter(state._msgPaginationOldestCursor)
+    ));
+    if (snap.empty) {
+      state._msgPaginationHasMore[chatId] = false;
+      if (btn) { btn.textContent = "No more messages"; btn.disabled = true; }
+      state._msgPaginationLoading = false;
+      renderMessages(); // re-render to hide the button
+      return;
+    }
+    // These come back in desc order — reverse to get chronological order
+    const olderBatch = snap.docs.slice().reverse().map(d=>({id:d.id,...d.data()}));
+    // Move cursor to the new oldest doc
+    state._msgPaginationOldestCursor = snap.docs[snap.docs.length-1];
+    state._msgPaginationHasMore[chatId] = snap.docs.length >= _MSG_LOAD_MORE;
+    // Prepend to older cache, dedup by id
+    const existing = state._msgOlderMessages[chatId] || [];
+    const existingIds = new Set(existing.map(m=>m.id));
+    const newOlder = [...olderBatch.filter(m=>!existingIds.has(m.id)), ...existing];
+    state._msgOlderMessages[chatId] = newOlder;
+    // Build combined messages: all older + live window (dedup)
+    const liveIds = new Set((state.messageCache[chatId]||[]).map(m=>m.id));
+    const olderOnly = newOlder.filter(m=>!liveIds.has(m.id));
+    // Remember scroll anchor before re-render
+    const wrap = document.getElementById("messages");
+    const oldScrollHeight = wrap ? wrap.scrollHeight : 0;
+    const oldScrollTop = wrap ? wrap.scrollTop : 0;
+    state.messages = [...olderOnly, ...(state.messageCache[chatId]||[])];
+    renderMessages();
+    // Restore scroll so user stays at the same visual position
+    if (wrap) {
+      const added = wrap.scrollHeight - oldScrollHeight;
+      wrap.scrollTop = oldScrollTop + added;
+    }
+  } catch(e) { console.error("loadOlderMessages:", e); }
+  state._msgPaginationLoading = false;
+  if (btn) { btn.disabled = false; btn.textContent = "⬆ Load older messages"; }
 }
 
 
@@ -3087,6 +3175,11 @@ function renderMessages() {
     return;
   }
   const html=[];
+  // "Load older messages" button — shown when paginated history is available
+  const chatId = state.activeChatId;
+  if (chatId && state._msgPaginationHasMore[chatId]) {
+    html.push(`<div class="load-older-wrap"><button id="load-older-btn" class="load-older-btn" data-action="load-older-messages">⬆ Load older messages</button></div>`);
+  }
   let lastSenderUid=null, lastTime=0, lastWasAnon=false, lastAnonId=null;
   const c=state.activeChat;
   const leaders=Array.isArray(c?.leaders)?c.leaders:[];
@@ -4850,6 +4943,10 @@ function openSettingsModal(pane) {
   if($("#settings-gif-keep-frozen-toggle"))     $("#settings-gif-keep-frozen-toggle").checked=state.gifKeepFrozen;
   if($("#settings-gif-autofreeze-toggle"))      $("#settings-gif-autofreeze-toggle").checked=state.gifAutoFreeze;
   if($("#settings-compact-toggle"))            $("#settings-compact-toggle").checked=state.compactMode;
+  if($("#settings-low-bandwidth-toggle"))      $("#settings-low-bandwidth-toggle").checked=state.lowBandwidthMode;
+  if($("#settings-debug-toggle"))              $("#settings-debug-toggle").checked=!!localStorage.getItem("sc_debug_stats");
+  if($("#settings-debug-stats"))               $("#settings-debug-stats").style.display=localStorage.getItem("sc_debug_stats")?"":"none";
+  _updateDebugStats();
   $$(".text-size-btn").forEach(b=>b.classList.toggle("active", parseFloat(b.dataset.size)===state.textSize));
   if($("#settings-show-last-active-toggle"))   $("#settings-show-last-active-toggle").checked=state.showLastActive;
   if($("#settings-autoscroll-toggle"))         $("#settings-autoscroll-toggle").checked=state.autoScrollNew;
@@ -5044,6 +5141,30 @@ $("#settings-compact-toggle")?.addEventListener("change", e => {
   state.compactMode = e.target.checked;
   localStorage.setItem("sc_compact", e.target.checked ? "true" : "false");
   document.body.classList.toggle("compact-mode", e.target.checked);
+});
+$("#settings-low-bandwidth-toggle")?.addEventListener("change", e => {
+  state.lowBandwidthMode = e.target.checked;
+  localStorage.setItem("sc_low_bandwidth", e.target.checked ? "true" : "false");
+  // Immediately apply: tear down excess sidebar typing listeners
+  _updateSidebarTypingListeners();
+  _showToast(e.target.checked
+    ? "Low bandwidth mode on — sidebar typing indicators disabled"
+    : "Low bandwidth mode off — sidebar typing indicators re-enabled");
+});
+$("#settings-debug-toggle")?.addEventListener("change", e => {
+  if (e.target.checked) localStorage.setItem("sc_debug_stats","1");
+  else localStorage.removeItem("sc_debug_stats");
+  const panel = $("#settings-debug-stats");
+  if (panel) panel.style.display = e.target.checked ? "" : "none";
+  _updateDebugStats();
+});
+document.addEventListener("click", e => {
+  if (!e.target.closest("#dbg-show-listeners-btn")) return;
+  const names = Object.keys(state.unsubscribers).concat(
+    Object.keys(state.sidebarTypingUnsubs).map(id=>`sidebar:${id}`),
+    Object.keys(_friendProfileUnsubs||{}).map(uid=>`friend:${uid}`)
+  );
+  alert("Active listeners (" + names.length + "):\n" + names.join("\n"));
 });
 // Text size buttons — instant-apply
 document.addEventListener("click", e => {
@@ -9337,11 +9458,21 @@ function renderTypingIndicator(names=[]) {
   el.classList.remove("hidden");
 }
 
-/* Sidebar typing indicators — listen to top 15 recent chats so we can
-   show "typing…" in DM/group rows without opening them. */
+/* Sidebar typing indicators — listen to top 5 most-recent chats only.
+   15 was excessive (120 users × 15 = 1,800 listeners). Active chat gets
+   its own dedicated listener via startTypingListener(), so 5 covers the
+   rest of the visible sidebar without ballooning listener count. */
 function _updateSidebarTypingListeners() {
   if (!state.user) return;
-  const top = state.chats.slice(0, 15);
+  // Low-bandwidth mode: skip sidebar typing listeners entirely
+  if (state.lowBandwidthMode) {
+    for (const id of Object.keys(state.sidebarTypingUnsubs)) {
+      try { state.sidebarTypingUnsubs[id](); } catch(_){}
+    }
+    state.sidebarTypingUnsubs = {}; state.sidebarTyping = {};
+    return;
+  }
+  const top = state.chats.slice(0, 5);
   const wanted = new Set(top.map(c => c.id));
   for (const id of Object.keys(state.sidebarTypingUnsubs)) {
     if (!wanted.has(id)) {
@@ -9419,6 +9550,14 @@ function _setSilentArmed(on) {
   $("#composer-input")?.classList.toggle("silent-armed", _silentNextMessage);
 }
 $("#silent-ribbon-cancel")?.addEventListener("click", () => _setSilentArmed(false));
+
+// Load-older-messages button (delegated)
+document.addEventListener("click", e => {
+  if (e.target.closest("[data-action='load-older-messages']")) {
+    loadOlderMessages();
+    return;
+  }
+});
 
 // Empty-state action buttons (delegated)
 document.addEventListener("click", e => {
@@ -9679,6 +9818,28 @@ if (_composerEl) {
    PRESENCE TRACKING
    ===================================================================== */
 let _presenceTimer=null;
+let _lastPresenceWrite=0;  // ms timestamp of last successful presence write
+let _dbgPresenceWrites=0;  // session counter for debug display
+const _PRESENCE_MIN_INTERVAL = 60_000; // don't write more often than once per 60 s
+
+// Module-level friend profile listener map (key=uid, value=unsubscribe fn)
+// Declared here (not inside bootSubscriptions) so debug tools can inspect it
+const _friendProfileUnsubs = {};
+
+/* Update the debug stats panel (only when visible) */
+function _updateDebugStats() {
+  if (!localStorage.getItem("sc_debug_stats")) return;
+  const listenerCount =
+    Object.keys(state.unsubscribers||{}).filter(k=>typeof state.unsubscribers[k]==="function").length +
+    Object.keys(state.sidebarTypingUnsubs||{}).length +
+    Object.keys(_friendProfileUnsubs||{}).length;
+  const el = document.getElementById("dbg-listener-count");
+  if (el) el.textContent = listenerCount;
+  const el2 = document.getElementById("dbg-presence-writes");
+  if (el2) el2.textContent = _dbgPresenceWrites;
+  const el3 = document.getElementById("dbg-cache-size");
+  if (el3) el3.textContent = Object.keys(state.userCache||{}).length;
+}
 
 function resolveStatus(profile) {
   if (!profile) return "offline";
@@ -9691,19 +9852,26 @@ function resolveStatus(profile) {
   return "offline";
 }
 
-async function updatePresence() {
+async function updatePresence(force=false) {
   if (!state.user) return;
+  // Throttle: skip if we wrote within the last 60 s (unless forced)
+  const now = Date.now();
+  if (!force && (now - _lastPresenceWrite) < _PRESENCE_MIN_INTERVAL) return;
   try {
     await updateDoc(doc(db,"users",state.user.uid),{
       isOnline:true, lastSeen:serverTimestamp(), status:state.status
     });
+    _lastPresenceWrite = Date.now();
+    _dbgPresenceWrites++;
+    _updateDebugStats();
   } catch(_){}
 }
 
 function startPresenceHeartbeat() {
-  updatePresence();
+  updatePresence(true); // first write is always forced
   clearInterval(_presenceTimer);
-  _presenceTimer=setInterval(updatePresence, 90000);
+  // Heartbeat every 2 minutes (was 90s) — Firestore writes are expensive
+  _presenceTimer=setInterval(()=>updatePresence(), 120_000);
 }
 
 async function setOfflinePresence() {
@@ -9712,6 +9880,8 @@ async function setOfflinePresence() {
 }
 
 window.addEventListener("beforeunload", ()=>{ setOfflinePresence(); });
+// Use focus/blur for tab re-activation instead of visibilitychange (fires less often)
+window.addEventListener("focus", ()=>{ updatePresence(); });
 document.addEventListener("visibilitychange", ()=>{ if (!document.hidden) updatePresence(); });
 
 
