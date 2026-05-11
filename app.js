@@ -464,7 +464,9 @@ const state = {
    ===================================================================== */
 function _applyChatBackground() {
   const bg = localStorage.getItem("sc_chat_bg") || "none";
-  const messagesArea = $("#messages");
+  // Use document.querySelector directly — $ may not be declared yet when this
+  // is called at module parse time (before the const $ = … line below)
+  const messagesArea = document.querySelector("#messages");
   if (!messagesArea) return;
   messagesArea.style.removeProperty("--chat-bg-url");
   messagesArea.style.removeProperty("--chat-bg-size");
