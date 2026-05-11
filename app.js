@@ -588,6 +588,55 @@ const $ = s => document.querySelector(s);
 const $$ = s => document.querySelectorAll(s);
 
 
+/* =====================================================================
+   QUOTA EXCEEDED DETECTION
+   ===================================================================== */
+let _quotaShown = false;
+
+function _isQuotaError(err) {
+  if (!err) return false;
+  const code = err?.code || "";
+  const msg  = (err?.message || "").toLowerCase();
+  return code === "resource-exhausted" ||
+         msg.includes("quota") ||
+         msg.includes("resource-exhausted") ||
+         msg.includes("429");
+}
+
+function _showQuotaBanner() {
+  if (_quotaShown) return;
+  _quotaShown = true;
+  const overlay = document.getElementById("quota-overlay");
+  if (overlay) overlay.classList.remove("hidden");
+  // Poll every 30 s — hide the overlay as soon as a lightweight read succeeds
+  const _poll = setInterval(async () => {
+    try {
+      // Just a cheap existence check — getDoc on appConfig is a single read
+      await getDoc(doc(db, "appConfig", "update"));
+      // If we get here, quota is lifted
+      clearInterval(_poll);
+      _quotaShown = false;
+      if (overlay) overlay.classList.add("hidden");
+    } catch(e) {
+      if (!_isQuotaError(e)) {
+        // Different error (auth, network) — stop polling, don't hide
+        clearInterval(_poll);
+      }
+      // Still quota-exceeded → keep polling
+    }
+  }, 30_000);
+}
+
+/* Call this from any Firestore error handler */
+function _handleFirestoreError(err, label) {
+  if (_isQuotaError(err)) {
+    _showQuotaBanner();
+  } else if (err) {
+    console.error(label || "Firestore error:", err);
+  }
+}
+
+
 /* ---------- Per-chat color picker ---------- */
 function _showChatColorPicker(chatId, x, y) {
   document.getElementById("chat-color-popover")?.remove();
@@ -1699,7 +1748,7 @@ function bootSubscriptions() {
     state.userCache[uid] = _augmentBadges({ ...state.user, ...data });
     applyBlockedFromProfile(data);
     updateUserPanel();
-  }, err=>console.error("ownProfile:",err));
+  }, err=>_handleFirestoreError(err,"ownProfile"));
 
   // Start presence heartbeat
   startPresenceHeartbeat();
@@ -1752,7 +1801,7 @@ function bootSubscriptions() {
       list.sort((a,b)=>a.displayName.localeCompare(b.displayName));
       state.friends=list;
       renderFriendsList(); renderModalFriendList();
-    }, err=>console.error("friendships:",err));
+    }, err=>_handleFirestoreError(err,"friendships"));
 
   state.unsubscribers.incoming = onSnapshot(
     query(collection(db,"friendRequests"),where("toUid","==",uid)),
@@ -1762,12 +1811,12 @@ function bootSubscriptions() {
       if (state.incomingInitialized && state.incoming.length>prevLen) playSound("ping");
       state.incomingInitialized=true;
       renderPendingLists();
-    }, err=>console.error("incoming:",err));
+    }, err=>_handleFirestoreError(err,"incoming"));
 
   state.unsubscribers.outgoing = onSnapshot(
     query(collection(db,"friendRequests"),where("fromUid","==",uid)),
     snap=>{ state.outgoing=snap.docs.map(d=>({id:d.id,...d.data()})); renderPendingLists(); },
-    err=>console.error("outgoing:",err));
+    err=>_handleFirestoreError(err,"outgoing"));
 
   let _prevChatTimes = {};   // chatId → lastMessageAt ms (for background notifications)
 
@@ -1821,7 +1870,7 @@ function bootSubscriptions() {
         const updated=state.chats.find(c=>c.id===state.activeChatId);
         if (updated) { state.activeChat=updated; renderChatHeader(); }
       }
-    }, err=>console.error("chats:",err));
+    }, err=>_handleFirestoreError(err,"chats"));
 
   // ── Update notification banner ──────────────────────────────────────
   // sessionStorage is per-tab and clears when the tab closes.
@@ -1889,7 +1938,7 @@ async function fetchUserProfile(uid) {
       state.userCache[uid]=_augmentBadges(d.data());
       return state.userCache[uid];
     }
-  } catch(e){ console.error("fetchUserProfile:",e); }
+  } catch(e){ _handleFirestoreError(e,"fetchUserProfile"); }
   return null;
 }
 
@@ -2711,7 +2760,7 @@ async function openChat(chatId) {
         }
       }
     },
-    err=>{ console.error(err); $("#messages").innerHTML=`<div class="empty" style="color:var(--c-danger);margin:24px;">Could not load: ${escapeHtml(err.message)}</div>`; }
+    err=>{ _handleFirestoreError(err,"messages"); if (!_isQuotaError(err)) $("#messages").innerHTML=`<div class="empty" style="color:var(--c-danger);margin:24px;">Could not load: ${escapeHtml(err.message)}</div>`; }
   );
 }
 
@@ -6890,6 +6939,8 @@ window.addEventListener("error", e => {
 });
 window.addEventListener("unhandledrejection", e => {
   _lastError = "Unhandled promise: " + (e.reason?.message || String(e.reason));
+  // Catch quota errors that slip past explicit try/catch blocks
+  if (_isQuotaError(e.reason)) _showQuotaBanner();
 });
 
 function openBugReporter() {
