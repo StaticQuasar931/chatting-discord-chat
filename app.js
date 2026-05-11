@@ -447,7 +447,72 @@ const state = {
   document.body.dataset.theme = state.theme;
   if (state.compactMode) document.body.classList.add("compact-mode");
   if (state.textSize !== 15) document.body.style.setProperty("--msg-font-size", state.textSize + "px");
+  // Chat background is applied once DOM ready (see _applyChatBackground DOMContentLoaded listener)
 })();
+
+/* =====================================================================
+   CHAT BACKGROUND
+   ===================================================================== */
+function _applyChatBackground() {
+  const bg = localStorage.getItem("sc_chat_bg") || "none";
+  const messagesArea = $("#messages");
+  if (!messagesArea) return;
+  messagesArea.style.removeProperty("--chat-bg-url");
+  messagesArea.style.removeProperty("--chat-bg-size");
+  messagesArea.classList.remove("chat-bg-bubbles","chat-bg-dots","chat-bg-grid","chat-bg-waves","chat-bg-stars","chat-bg-custom-img");
+
+  if (bg === "none") return;
+  if (bg === "bubbles") { messagesArea.classList.add("chat-bg-bubbles"); return; }
+  if (bg === "dots")    { messagesArea.classList.add("chat-bg-dots");    return; }
+  if (bg === "grid")    { messagesArea.classList.add("chat-bg-grid");    return; }
+  if (bg === "waves")   { messagesArea.classList.add("chat-bg-waves");   return; }
+  if (bg === "stars")   { messagesArea.classList.add("chat-bg-stars");   return; }
+  if (bg.startsWith("img:")) {
+    const parts = bg.split("|");
+    const url     = parts[1] || "";
+    const size    = parts[2] || "cover";
+    const opacity = parts[3] || "30";
+    if (url) {
+      // Apply background via CSS variable so ::before can render it at reduced opacity
+      messagesArea.style.setProperty("--chat-bg-url", `url("${url}")`);
+      messagesArea.style.setProperty("--chat-bg-size", size);
+      messagesArea.style.setProperty("--chat-bg-opacity", (parseInt(opacity)||30) / 100);
+      messagesArea.classList.add("chat-bg-custom-img");
+    }
+  }
+}
+// Apply immediately (app.js is a module — DOMContentLoaded has already fired;
+// buildUI() has already injected #messages into the DOM at this point)
+_applyChatBackground();
+
+// Wire up chat background settings
+document.addEventListener("click", e => {
+  const preset = e.target.closest("[data-bg-preset]");
+  if (preset) {
+    const val = preset.dataset.bgPreset;
+    const imgRow = $("#chat-bg-img-row");
+    if (val === "custom-img") { if (imgRow) imgRow.style.display = ""; }
+    else { if (imgRow) imgRow.style.display = "none"; localStorage.setItem("sc_chat_bg", val); _applyChatBackground(); showToast("Background applied"); }
+    document.querySelectorAll(".chat-bg-preset").forEach(b => b.classList.toggle("active", b.dataset.bgPreset === val));
+    return;
+  }
+  if (e.target.id === "chat-bg-apply") {
+    const url = $("#chat-bg-img-url")?.value.trim();
+    if (!url) { showToast("Enter an image URL"); return; }
+    const size = $("#chat-bg-size")?.value || "cover";
+    const opacity = $("#chat-bg-opacity")?.value || "30";
+    localStorage.setItem("sc_chat_bg", `img:|${url}|${size}|${opacity}`);
+    _applyChatBackground();
+    showToast("Background applied");
+  }
+});
+document.addEventListener("input", e => {
+  if (e.target.id === "chat-bg-opacity") {
+    const val = e.target.value;
+    const span = $("#chat-bg-opacity-val");
+    if (span) span.textContent = val + "%";
+  }
+});
 
 // CSS custom properties set by the custom theme (must be cleared when switching away)
 const _CUSTOM_THEME_PROPS = [
@@ -3302,6 +3367,8 @@ function renderMessages() {
   hydrateLinkPreviews();
   // Re-focus a game input if user just submitted a wrong guess (rapid-fire mode)
   _maybeRefocusGameInput?.();
+  // Attach drawing canvas event handlers for Draw & Guess game
+  _attachDrawCanvases?.();
 }
 
 // Unread divider dismiss — click to clear the marker and hide the bar
@@ -3650,7 +3717,7 @@ async function sendCurrentMessage() {
   // Also: /tictactoe, /ttt, /rps, /dice, /numguess, /trivia, /wyr, /wouldyourather,
   //       /truthordare, /tod, /mostlikelyto, /mlt, /connect4, /c4 — direct launch
   // /gamestop — end the most recent active game in this chat
-  const directGameMatch = text.match(/^\/(activit(?:y|ies)|games?|tictactoe|ttt|rps|rockpaperscissors|dice|numguess|number|trivia|wyr|wouldyourather|truthordare|tod|mostlikelyto|mlt|connect4|c4|hangman|sahur|tungtung|tts|20q|20questions|typingrace|typing|reaction|reactiontest|gamestop|stopgame)\s*(.*)/i);
+  const directGameMatch = text.match(/^\/(activit(?:y|ies)|games?|tictactoe|ttt|rps|rockpaperscissors|dice|numguess|number|trivia|wyr|wouldyourather|truthordare|tod|mostlikelyto|mlt|connect4|c4|hangman|sahur|tungtung|tts|20q|20questions|typingrace|typing|reaction|reactiontest|gamestop|stopgame|cups|shellgame|uno|draw|drawing)\s*(.*)/i);
   if (directGameMatch) {
     composer.value = ""; composer.style.height = "auto"; updateSendBtn(); clearReplyTo();
     const cmd = directGameMatch[1].toLowerCase();
@@ -3681,7 +3748,10 @@ async function sendCurrentMessage() {
           hangman:"hangman", sahur:"sahur", tungtung:"sahur", tts:"sahur",
           "20q":"20q", "20questions":"20q",
           typingrace:"typingrace", typing:"typingrace",
-          reaction:"reactiontest", reactiontest:"reactiontest" };
+          reaction:"reactiontest", reactiontest:"reactiontest",
+          cups:"cups", shellgame:"cups",
+          uno:"uno",
+          draw:"draw", drawing:"draw" };
       const k = map[rest.toLowerCase()];
         if (k) { _launchGame(k); return; }
         showToast("Unknown game: " + rest); return;
@@ -3704,6 +3774,9 @@ async function sendCurrentMessage() {
       "20q": "20q", "20questions": "20q",
       typingrace: "typingrace", typing: "typingrace",
       reaction: "reactiontest", reactiontest: "reactiontest",
+      cups: "cups", shellgame: "cups",
+      uno: "uno",
+      draw: "draw", drawing: "draw",
     };
     const kind = directMap[cmd];
     if (kind) { _launchGame(kind, rest); return; }
@@ -4925,13 +4998,30 @@ function _refreshSettingsPreview(u) {
   } else if (banner) {
     banner.style.background = "linear-gradient(135deg,var(--c-input-2),var(--c-rail))";
   }
+
+  // Favorite game
+  const previewFavGame = $("#settings-preview-favgame");
+  if (previewFavGame) {
+    const fgName = ($("#settings-favgame-name")?.value || "").trim();
+    const fgUrl  = ($("#settings-favgame-url")?.value  || "").trim();
+    const safeFgUrl = /^https?:\/\/sites\.google\.com\/view\//i.test(fgUrl) ? fgUrl : "";
+    if (fgName && safeFgUrl) {
+      previewFavGame.innerHTML = `🎮 <a href="${escapeHtml(safeFgUrl)}" class="spp-favgame-link" target="_blank" rel="noopener noreferrer">${escapeHtml(fgName)}</a>`;
+      previewFavGame.style.display = "";
+    } else if (fgName) {
+      previewFavGame.textContent = `🎮 ${fgName}`;
+      previewFavGame.style.display = "";
+    } else {
+      previewFavGame.style.display = "none";
+    }
+  }
 }
 
 // Keep legacy name so other call sites still work
 function _updateSettingsPreview() { _refreshSettingsPreview(); }
 
 // Settings live preview — update on any field change
-["settings-photo-input","settings-username-input","settings-bio-input","settings-custom-status-input"].forEach(id=>{
+["settings-photo-input","settings-username-input","settings-bio-input","settings-custom-status-input","settings-favgame-name","settings-favgame-url"].forEach(id=>{
   document.addEventListener("input",e=>{ if(e.target.id===id) _refreshSettingsPreview(); });
 });
 
@@ -7046,6 +7136,80 @@ function _allMLT() {
   return [..._MLT_BY_CAT.funnyschool, ..._MLT_BY_CAT.gamer, ..._MLT_BY_CAT.real];
 }
 
+/* =====================================================================
+   CUPS (SHELL GAME) HELPERS
+   ===================================================================== */
+function _genShuffleSeq(startPos) {
+  // Generate a sequence of swap pairs to shuffle the cups 8 times
+  const swaps = [];
+  let pos = startPos;
+  for (let i = 0; i < 8; i++) {
+    const others = [0,1,2].filter(x => x !== pos);
+    const swapWith = others[Math.floor(Math.random() * 2)];
+    swaps.push([pos, swapWith]);
+    pos = swapWith;
+  }
+  return { swaps, finalPos: pos };
+}
+
+/* =====================================================================
+   UNO HELPERS
+   ===================================================================== */
+function _buildUnoDeck() {
+  const colors = ["red","yellow","green","blue"];
+  const deck = [];
+  for (const c of colors) {
+    deck.push({c, v:"0"});
+    for (const v of ["1","2","3","4","5","6","7","8","9","skip","reverse","draw2"]) {
+      deck.push({c,v}); deck.push({c,v});
+    }
+  }
+  for (let i=0;i<4;i++) { deck.push({c:"wild",v:"wild"}); deck.push({c:"wild",v:"draw4"}); }
+  return deck;
+}
+function _shuffleDeck(arr) { for(let i=arr.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[arr[i],arr[j]]=[arr[j],arr[i]];} return arr; }
+function _unoCardLabel(card) {
+  if (!card) return "?";
+  const v = card.v;
+  if (v === "skip") return "⊘";
+  if (v === "reverse") return "↩";
+  if (v === "draw2") return "+2";
+  if (v === "wild") return "🌈";
+  if (v === "draw4") return "+4";
+  return v;
+}
+function _unoPickColor() {
+  return new Promise(resolve => {
+    const pop = document.createElement("div");
+    pop.id = "uno-color-picker";
+    pop.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:2000;display:flex;align-items:center;justify-content:center;";
+    pop.innerHTML = `<div style="background:var(--c-overlay);border-radius:16px;padding:24px;text-align:center;">
+      <div style="font-size:15px;font-weight:700;color:var(--t-primary);margin-bottom:14px;">Choose a color</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+        <button data-col="red"    style="padding:14px 20px;background:#ef4444;border:none;border-radius:10px;cursor:pointer;font-size:13px;color:#fff;font-weight:700;">🔴 Red</button>
+        <button data-col="yellow" style="padding:14px 20px;background:#eab308;border:none;border-radius:10px;cursor:pointer;font-size:13px;color:#fff;font-weight:700;">🟡 Yellow</button>
+        <button data-col="green"  style="padding:14px 20px;background:#22c55e;border:none;border-radius:10px;cursor:pointer;font-size:13px;color:#fff;font-weight:700;">🟢 Green</button>
+        <button data-col="blue"   style="padding:14px 20px;background:#3b82f6;border:none;border-radius:10px;cursor:pointer;font-size:13px;color:#fff;font-weight:700;">🔵 Blue</button>
+      </div>
+    </div>`;
+    document.body.appendChild(pop);
+    pop.addEventListener("click", e => {
+      const btn = e.target.closest("[data-col]");
+      if (btn) { pop.remove(); resolve(btn.dataset.col); }
+      else if (e.target === pop) { pop.remove(); resolve(null); }
+    });
+  });
+}
+function _unoCanPlay(card, top, drawPending) {
+  if (!top) return true;
+  if (drawPending > 0) return card.v === "draw2" || card.v === "draw4";
+  const topColor = top.activeColor || top.c;
+  if (card.c === "wild") return true;
+  if (card.c === topColor) return true;
+  if (card.v === top.v) return true;
+  return false;
+}
+
 async function _launchGame(kind, opts) {
   const chatId = state.activeChatId;
   if (!chatId || !state.user) { showToast("Open a chat first"); return; }
@@ -7188,6 +7352,29 @@ async function _launchGame(kind, opts) {
     gameData = { kind, host: state.user.uid, phase: "waiting", // waiting | countdown | live | results
       armedAt: null, liveAt: null, results: {}, players: {}, winner: null };
     preview = `⚡ Reaction Test — who clicks fastest?`;
+  } else if (kind === "cups") {
+    // 3 cups, ball under one, shuffle animation
+    const ballPos = Math.floor(Math.random() * 3); // 0,1,2
+    gameData = { kind, host: state.user.uid, ballPos, phase: "show", // show → shuffle → guess → reveal
+      guesses: {}, winner: null, players: {}, shuffleSeq: _genShuffleSeq(ballPos) };
+    preview = "🎩 Shell Game — find the ball!";
+  } else if (kind === "uno") {
+    const deck = _buildUnoDeck();
+    _shuffleDeck(deck);
+    gameData = { kind, host: state.user.uid, deck,
+      hands: {}, discardTop: null, direction: 1, turn: null,
+      phase: "waiting", players: [], winner: null,
+      drawPending: 0,
+      unoCalled: {}
+    };
+    preview = "🃏 UNO — join and play!";
+  } else if (kind === "draw") {
+    const words = ["cat","dog","house","car","tree","pizza","phone","star","heart","fish","sun","moon","cloud","boat","ball","hat","chair","book","flower","guitar"];
+    const word = words[Math.floor(Math.random() * words.length)];
+    gameData = { kind, host: state.user.uid, word, strokes: [], guesses: {}, winner: null,
+      phase: "drawing", // drawing → finished
+      drawer: state.user.uid, players: {} };
+    preview = "🎨 Draw & Guess — what is the drawer drawing?";
   } else { showToast("Couldn't start: unknown game. Try refreshing the page."); return; }
 
   try {
@@ -7213,9 +7400,148 @@ document.addEventListener("click", async e => {
   if (e.target.closest("[data-fav-game]")) return;
   const card = e.target.closest("[data-activity]");
   if (!card) return;
+  const ACTIVITY_HAS_OPTIONS = new Set(["hangman","truthordare","wouldyou","20q"]);
+  if (ACTIVITY_HAS_OPTIONS.has(card.dataset.activity)) {
+    _showGameOptions(card.dataset.activity);
+    return;
+  }
   closeModal("activities-modal");
   await _launchGame(card.dataset.activity);
 });
+
+function _showGameOptions(kind) {
+  closeModal("activities-modal");
+  const options = {
+    hangman: { label:"Hangman", opts:[
+      {label:"🎲 Random Word", val:""},
+      {label:"✏️ Custom Word", val:"custom"},
+    ]},
+    truthordare: { label:"Truth or Dare", opts:[
+      {label:"✏️ Write Your Own", val:""},
+      {label:"📋 Premade Prompts", val:"premade"},
+    ]},
+    wouldyou: { label:"Would You Rather", opts:[
+      {label:"🎲 Random Pair", val:""},
+      {label:"✏️ Custom (A | B)", val:"custom|"},
+    ]},
+    "20q": { label:"20 Questions", opts:[
+      {label:"🤔 Think of something (no hint)", val:""},
+      {label:"💡 Give subject hint", val:"_hint_"},
+    ]},
+  };
+  const o = options[kind]; if (!o) { _launchGame(kind); return; }
+
+  document.getElementById("game-options-modal")?.remove();
+  const modal = document.createElement("div");
+  modal.id = "game-options-modal";
+  modal.className = "modal";
+  modal.innerHTML = `
+    <div class="modal-card" style="max-width:380px;width:96vw;">
+      <div class="modal-head"><h2>${o.label} Options</h2>
+        <button class="icon-btn" onclick="document.getElementById('game-options-modal').remove()">✕</button>
+      </div>
+      <div class="modal-body" style="padding:16px 20px;display:flex;flex-direction:column;gap:8px;">
+        ${o.opts.map(opt => `
+          <button class="game-option-btn" data-opt-kind="${kind}" data-opt-val="${escapeHtml(opt.val)}"
+            style="padding:12px 16px;background:var(--c-input-2);border:1.5px solid var(--c-border-2);border-radius:var(--radius-md);cursor:pointer;text-align:left;font-size:13px;color:var(--t-primary);font-weight:600;transition:all .1s;">
+            ${opt.label}
+          </button>
+        `).join("")}
+        ${kind === "wouldyou" ? `<div style="margin-top:4px;">
+          <label style="font-size:12px;color:var(--t-muted);">Custom WYR (format: Option A | Option B)</label>
+          <input type="text" id="game-opt-wyr-input" placeholder="e.g. Eat pizza | Eat tacos" style="width:100%;margin-top:4px;" />
+        </div>` : ""}
+        ${kind === "20q" ? `<div style="margin-top:4px;" id="game-opt-20q-hint-row">
+          <input type="text" id="game-opt-20q-hint" placeholder="e.g. It's an animal" style="width:100%;" />
+        </div>` : ""}
+      </div>
+    </div>`;
+  document.body.appendChild(modal);
+
+  modal.addEventListener("click", async e => {
+    const btn = e.target.closest(".game-option-btn");
+    if (!btn) return;
+    let val = btn.dataset.optVal;
+    const k = btn.dataset.optKind;
+    if (k === "wouldyou" && val === "custom|") {
+      val = document.getElementById("game-opt-wyr-input")?.value || "";
+    }
+    if (k === "20q" && val === "_hint_") {
+      val = document.getElementById("game-opt-20q-hint")?.value || "";
+    }
+    modal.remove();
+    await _launchGame(k, val);
+  });
+}
+
+/* =====================================================================
+   DRAW & GUESS — CANVAS STROKE SYNC
+   ===================================================================== */
+function _redrawCanvas(canvas, strokes) {
+  const ctx = canvas.getContext("2d");
+  ctx.fillStyle = "#fff";
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.strokeStyle = "#222";
+  ctx.lineWidth = 2.5;
+  ctx.lineCap = "round";
+  for (const s of (strokes||[])) _drawStroke(ctx, s);
+}
+
+function _drawStroke(ctx, s) {
+  ctx.beginPath();
+  ctx.moveTo(s.x0, s.y0);
+  ctx.lineTo(s.x1, s.y1);
+  ctx.stroke();
+}
+
+function _attachDrawCanvases() {
+  document.querySelectorAll(".draw-canvas").forEach(canvas => {
+    if (canvas.dataset.attached) return;
+    canvas.dataset.attached = "1";
+    const msgId = canvas.id.replace("draw-canvas-","");
+    const msg = state.messages.find(mm => mm.id === msgId);
+    if (!msg || !msg.gameData) return;
+    const g = msg.gameData;
+
+    // Draw existing strokes
+    _redrawCanvas(canvas, g.strokes || []);
+
+    // If this user is the drawer, enable drawing
+    if (g.drawer !== state.user?.uid || g.phase !== "drawing") return;
+
+    let drawing = false, lastX = 0, lastY = 0;
+    // Batch strokes locally and flush to Firestore every 300ms to avoid hammering
+    let _pendingStrokes = [], _flushTimer = null;
+    const _flushStrokes = async () => {
+      if (!_pendingStrokes.length) return;
+      const batch = _pendingStrokes.splice(0);
+      const currentMsg = state.messages.find(mm=>mm.id===msgId);
+      const strokes = [...(currentMsg?.gameData?.strokes||[]), ...batch];
+      await _gameUpdate(msgId, { "gameData.strokes": strokes }).catch(()=>{});
+    };
+    const getPos = (e, c) => {
+      const rect = c.getBoundingClientRect();
+      const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+      const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+      return [(clientX - rect.left) * (c.width / rect.width), (clientY - rect.top) * (c.height / rect.height)];
+    };
+
+    canvas.addEventListener("mousedown", e => { drawing=true; [lastX,lastY]=getPos(e,canvas); });
+    canvas.addEventListener("mousemove", e => {
+      if (!drawing) return;
+      const [x,y]=getPos(e,canvas);
+      const stroke = {x0:Math.round(lastX),y0:Math.round(lastY),x1:Math.round(x),y1:Math.round(y)};
+      [lastX,lastY]=[x,y];
+      _drawStroke(canvas.getContext("2d"), stroke);
+      _pendingStrokes.push(stroke);
+      clearTimeout(_flushTimer);
+      _flushTimer = setTimeout(_flushStrokes, 300);
+    });
+    const stopDraw = () => { drawing = false; clearTimeout(_flushTimer); _flushStrokes(); };
+    canvas.addEventListener("mouseup", stopDraw);
+    canvas.addEventListener("mouseleave", stopDraw);
+  });
+}
 
 /* Render a game card given its gameData. Returns HTML string. */
 function renderGameCard(m) {
@@ -7243,7 +7569,7 @@ function renderGameCard(m) {
       const youAre = isP1 ? "You're <strong style='color:#4f7cff'>X</strong>" : isP2 ? "You're <strong style='color:#f43f5e'>O</strong>" : "Watching";
       status = `${turnLabel} — ${youAre}`;
     }
-    return `<div class="game-card game-tictactoe">
+    return `<div class="game-card game-tictactoe"><button class="game-fullscreen-btn" data-game-action="fullscreen" title="Fullscreen">⛶</button>
       <div class="game-title">⨯⭘ Tic-Tac-Toe</div>
       <div class="game-board ttt-board">${cells}</div>
       <div class="game-status">${status}</div>
@@ -7273,7 +7599,7 @@ function renderGameCard(m) {
         <button class="rps-btn" data-game-action="rps-pick" data-game-msg="${escapeHtml(m.id)}" data-rps="paper">✋ Paper</button>
         <button class="rps-btn" data-game-action="rps-pick" data-game-msg="${escapeHtml(m.id)}" data-rps="scissors">✌️ Scissors</button>
       </div>` : (myChoice && !finished ? `<div class="game-status" style="opacity:.7;">You picked ${myChoice}. Waiting…</div>` : "");
-    return `<div class="game-card game-rps">
+    return `<div class="game-card game-rps"><button class="game-fullscreen-btn" data-game-action="fullscreen" title="Fullscreen">⛶</button>
       <div class="game-title">✊✋✌️ Rock Paper Scissors</div>
       <div class="game-status">${scoreLine} (first to 3)</div>
       ${moves}
@@ -7289,7 +7615,7 @@ function renderGameCard(m) {
       .join("");
     const rollBtn = myRoll ? `<div class="game-status">You rolled ${myRoll.value}.</div>`
       : `<button class="btn-primary game-join-btn" data-game-action="dice-roll" data-game-msg="${escapeHtml(m.id)}">🎲 Roll</button>`;
-    return `<div class="game-card game-dice">
+    return `<div class="game-card game-dice"><button class="game-fullscreen-btn" data-game-action="fullscreen" title="Fullscreen">⛶</button>
       <div class="game-title">🎲 Dice Duel</div>
       <div class="dice-list">${rollList}</div>
       ${rollBtn}
@@ -7310,7 +7636,7 @@ function renderGameCard(m) {
       <input type="number" class="numguess-input game-input" id="numguess-${escapeHtml(m.id)}" data-enter-action="numguess-submit" data-enter-msg="${escapeHtml(m.id)}" min="1" max="100" placeholder="1-100" autocomplete="off" />
       <button class="btn-primary" data-game-action="numguess-submit" data-game-msg="${escapeHtml(m.id)}">Guess</button>
     </div>`;
-    return `<div class="game-card game-numguess">
+    return `<div class="game-card game-numguess"><button class="game-fullscreen-btn" data-game-action="fullscreen" title="Fullscreen">⛶</button>
       <div class="game-title">🔢 Number Guess (1–100)</div>
       <div class="numguess-list">${lastFew||'<div class="game-status" style="opacity:.6">No guesses yet…</div>'}</div>
       ${action}
@@ -7345,7 +7671,7 @@ function renderGameCard(m) {
         <button class="btn-primary" data-game-action="trivia-submit" data-game-msg="${escapeHtml(m.id)}">Answer</button>
       </div>`;
     }
-    return `<div class="game-card game-trivia">
+    return `<div class="game-card game-trivia"><button class="game-fullscreen-btn" data-game-action="fullscreen" title="Fullscreen">⛶</button>
       <div class="game-title">❓ Trivia <span style="font-size:11px;opacity:.7;">— Q${num}/${total}</span></div>
       <div class="game-question">${escapeHtml(g.question)}</div>
       <div class="numguess-list">${lastFew}</div>
@@ -7362,7 +7688,7 @@ function renderGameCard(m) {
     const bPct = total ? Math.round((bCount/total)*100) : 0;
     const isHost = g.host === myUid;
     const round = g.round || 1;
-    return `<div class="game-card game-wyr">
+    return `<div class="game-card game-wyr"><button class="game-fullscreen-btn" data-game-action="fullscreen" title="Fullscreen">⛶</button>
       <div class="game-title">🤔 Would You Rather… <span style="font-size:11px;opacity:.6;">(Round ${round})</span></div>
       <button class="wyr-option ${myVote==="a"?"selected":""}" data-game-action="wyr-vote" data-game-msg="${escapeHtml(m.id)}" data-wyr="a">
         <span class="wyr-bar" style="width:${aPct}%"></span>
@@ -7424,7 +7750,7 @@ function renderGameCard(m) {
         </div>` : ""}
         <div class="game-status" style="font-size:10px;color:var(--t-muted);">⚠️ Inappropriate content can be reported via right-click on this message.</div>`;
     }
-    return `<div class="game-card game-tod">
+    return `<div class="game-card game-tod"><button class="game-fullscreen-btn" data-game-action="fullscreen" title="Fullscreen">⛶</button>
       <div class="game-title">💫 Truth or Dare</div>
       ${body}
     </div>`;
@@ -7452,7 +7778,7 @@ function renderGameCard(m) {
         <span class="wyr-count">${count} · ${pct}%</span>
       </button>`;
     }).join("");
-    return `<div class="game-card game-mlt">
+    return `<div class="game-card game-mlt"><button class="game-fullscreen-btn" data-game-action="fullscreen" title="Fullscreen">⛶</button>
       <div class="game-title">🌟 Most Likely To…</div>
       <div class="game-question">${escapeHtml(g.prompt)}</div>
       ${buttons}
@@ -7548,7 +7874,7 @@ function renderGameCard(m) {
         ${bestStreaks && bestStreaks[1]>1 ? `<div class="game-status" style="font-size:11px;">🔥 Longest streak: ${escapeHtml(players[bestStreaks[0]]||"?")} (${bestStreaks[1]})</div>`:""}
         ${isHost ? `<button class="btn-primary game-join-btn" data-game-action="sahur-replay" data-game-msg="${escapeHtml(m.id)}">↻ Play again</button>`:""}`;
     }
-    return `<div class="game-card game-sahur game-sahur-${mode}">
+    return `<div class="game-card game-sahur game-sahur-${mode}"><button class="game-fullscreen-btn" data-game-action="fullscreen" title="Fullscreen">⛶</button>
       <div class="game-title">🥁 Tung Tung Sahur!</div>
       ${body}
     </div>`;
@@ -7560,7 +7886,7 @@ function renderGameCard(m) {
     // Word-setting setup phase
     if (!g.wordSet && !g.word) {
       if (isHost) {
-        return `<div class="game-card game-hangman">
+        return `<div class="game-card game-hangman"><button class="game-fullscreen-btn" data-game-action="fullscreen" title="Fullscreen">⛶</button>
           <div class="game-title">📝 Hangman</div>
           <div class="game-status" style="font-size:11px;">Choose a word for others to guess (they won't see it):</div>
           <div class="numguess-input-row">
@@ -7570,7 +7896,7 @@ function renderGameCard(m) {
           <button class="btn-secondary" style="margin-top:6px;font-size:11px;" data-game-action="hm-random" data-game-msg="${escapeHtml(m.id)}">🎲 Use random word</button>
         </div>`;
       } else {
-        return `<div class="game-card game-hangman">
+        return `<div class="game-card game-hangman"><button class="game-fullscreen-btn" data-game-action="fullscreen" title="Fullscreen">⛶</button>
           <div class="game-title">📝 Hangman</div>
           <div class="game-status">Waiting for ${escName(g.host)} to choose a word…</div>
         </div>`;
@@ -7602,7 +7928,7 @@ function renderGameCard(m) {
     if (g.winner) status = `🏆 ${escName(g.winner)} solved it! Word was <strong>${escapeHtml(word.toUpperCase())}</strong>`;
     else if (lost) status = `💀 You ran out of guesses. Word was <strong>${escapeHtml(word.toUpperCase())}</strong>`;
     else status = `${g.wrong||0} / ${g.maxWrong} wrong${g.lastGuesser?` — last guess by ${escName(g.lastGuesser)}`:""}`;
-    return `<div class="game-card game-hangman">
+    return `<div class="game-card game-hangman"><button class="game-fullscreen-btn" data-game-action="fullscreen" title="Fullscreen">⛶</button>
       <div class="game-title">📝 Hangman</div>
       <pre class="hm-stage">${stage}</pre>
       <div class="hm-word">${revealed}</div>
@@ -7651,7 +7977,7 @@ function renderGameCard(m) {
             <button class="rps-btn" data-game-action="q20-answer" data-game-msg="${escapeHtml(m.id)}" data-q20-ans="maybe">🤷 Maybe</button>
           </div>` : ""}`;
     }
-    return `<div class="game-card game-20q">
+    return `<div class="game-card game-20q"><button class="game-fullscreen-btn" data-game-action="fullscreen" title="Fullscreen">⛶</button>
       <div class="game-title">❓ 20 Questions</div>
       ${body}
     </div>`;
@@ -7726,7 +8052,7 @@ function renderGameCard(m) {
       const youAre = myColor ? `You're ${dot}` : "Watching";
       status = `${turnLabel} — ${youAre}`;
     }
-    return `<div class="game-card game-c4">
+    return `<div class="game-card game-c4"><button class="game-fullscreen-btn" data-game-action="fullscreen" title="Fullscreen">⛶</button>
       <div class="game-title">🔴🟢 Connect 4</div>
       <div class="c4-board">${rows.join("")}</div>
       <div class="game-status">${status}</div>
@@ -7744,7 +8070,7 @@ function renderGameCard(m) {
       const startBtn = isHost && playerCount >= 2
         ? `<button class="game-btn" data-game-action="tr-start" data-game-msg="${escapeHtml(m.id)}" style="margin-top:6px;">🏁 Start Race</button>`
         : isHost ? `<div class="game-status" style="color:var(--t-muted);font-size:11px;">Need at least 2 players to start.</div>` : "";
-      return `<div class="game-card game-typingrace">
+      return `<div class="game-card game-typingrace"><button class="game-fullscreen-btn" data-game-action="fullscreen" title="Fullscreen">⛶</button>
         <div class="game-title">⌨️ Typing Race</div>
         <div class="game-status" style="margin-bottom:8px;">Type the phrase as fast as you can!</div>
         <div style="background:var(--c-input-2);border-radius:var(--radius-sm);padding:10px 12px;font-style:italic;color:var(--t-primary);font-size:13px;line-height:1.5;margin-bottom:10px;">"${escapeHtml(g.phrase || "")}"</div>
@@ -7765,20 +8091,20 @@ function renderGameCard(m) {
           <span style="color:var(--t-muted);font-size:12px;">${(r.ms/1000).toFixed(2)}s</span>
         </div>`
       ).join("");
-      return `<div class="game-card game-typingrace">
+      return `<div class="game-card game-typingrace"><button class="game-fullscreen-btn" data-game-action="fullscreen" title="Fullscreen">⛶</button>
         <div class="game-title">⌨️ Typing Race — Finished!</div>
         <div style="margin:8px 0;">${rows}</div>
       </div>`;
     }
     // Race active — show input
     if (myResult) {
-      return `<div class="game-card game-typingrace">
+      return `<div class="game-card game-typingrace"><button class="game-fullscreen-btn" data-game-action="fullscreen" title="Fullscreen">⛶</button>
         <div class="game-title">⌨️ Typing Race</div>
         <div class="game-status" style="color:var(--c-success);">✅ You finished in ${(myResult.ms/1000).toFixed(2)}s — waiting for others…</div>
         <div style="background:var(--c-input-2);border-radius:var(--radius-sm);padding:10px 12px;font-style:italic;color:var(--t-muted);font-size:13px;">"${escapeHtml(g.phrase||"")}"</div>
       </div>`;
     }
-    return `<div class="game-card game-typingrace">
+    return `<div class="game-card game-typingrace"><button class="game-fullscreen-btn" data-game-action="fullscreen" title="Fullscreen">⛶</button>
       <div class="game-title">⌨️ Typing Race</div>
       <div style="background:var(--c-input-2);border-radius:var(--radius-sm);padding:10px 12px;font-style:italic;color:var(--t-primary);font-size:13px;line-height:1.5;margin-bottom:8px;user-select:none;">"${escapeHtml(g.phrase||"")}"</div>
       <input type="text" class="game-input" id="tr-inp-${escapeHtml(m.id)}" placeholder="Type the phrase above…" autocomplete="off" autocorrect="off" spellcheck="false"
@@ -7804,26 +8130,26 @@ function renderGameCard(m) {
           <span style="color:var(--t-muted);font-size:12px;">${(r.ms/1000).toFixed(3)}s</span>
         </div>`
       ).join("");
-      return `<div class="game-card game-reactiontest">
+      return `<div class="game-card game-reactiontest"><button class="game-fullscreen-btn" data-game-action="fullscreen" title="Fullscreen">⛶</button>
         <div class="game-title">⚡ Reaction Test — Results</div>
         <div style="margin:8px 0;">${rows}</div>
       </div>`;
     }
     if (g.phase === "live") {
       if (myResult) {
-        return `<div class="game-card game-reactiontest">
+        return `<div class="game-card game-reactiontest"><button class="game-fullscreen-btn" data-game-action="fullscreen" title="Fullscreen">⛶</button>
           <div class="game-title">⚡ Reaction Test</div>
           <div class="game-status" style="color:var(--c-success);">✅ You reacted in ${(myResult.ms/1000).toFixed(3)}s — waiting for others…</div>
         </div>`;
       }
-      return `<div class="game-card game-reactiontest">
+      return `<div class="game-card game-reactiontest"><button class="game-fullscreen-btn" data-game-action="fullscreen" title="Fullscreen">⛶</button>
         <div class="game-title">⚡ Reaction Test</div>
         <button class="game-btn reaction-live-btn" data-game-action="rt-react" data-game-msg="${escapeHtml(m.id)}"
           style="width:100%;height:80px;font-size:22px;background:var(--c-success);border-radius:12px;animation:reaction-pulse .35s ease-in-out infinite alternate;">⚡ CLICK NOW!</button>
       </div>`;
     }
     if (g.phase === "countdown") {
-      return `<div class="game-card game-reactiontest">
+      return `<div class="game-card game-reactiontest"><button class="game-fullscreen-btn" data-game-action="fullscreen" title="Fullscreen">⛶</button>
         <div class="game-title">⚡ Reaction Test</div>
         <div class="game-status" style="font-size:22px;text-align:center;padding:20px;">🟡 Get ready…</div>
       </div>`;
@@ -7835,11 +8161,158 @@ function renderGameCard(m) {
     const startBtn = isHost && playerCount >= 2
       ? `<button class="game-btn" data-game-action="rt-start" data-game-msg="${escapeHtml(m.id)}" style="margin-top:6px;">▶️ Start</button>`
       : isHost ? `<div class="game-status" style="color:var(--t-muted);font-size:11px;">Need 2+ players.</div>` : "";
-    return `<div class="game-card game-reactiontest">
+    return `<div class="game-card game-reactiontest"><button class="game-fullscreen-btn" data-game-action="fullscreen" title="Fullscreen">⛶</button>
       <div class="game-title">⚡ Reaction Test</div>
       <div class="game-status" style="margin-bottom:8px;">Click the button the instant it flashes!</div>
       <div class="game-status" style="margin-bottom:6px;">👥 ${playerCount} player${playerCount===1?"":"s"} joined</div>
       ${joinBtn}${startBtn}
+    </div>`;
+  }
+
+  if (g.kind === "cups") {
+    const isHost = g.host === myUid;
+    const myGuess = (g.guesses||{})[myUid];
+    const totalPlayers = Object.keys(g.players||{}).length;
+
+    if (g.phase === "show") {
+      const cups = [0,1,2].map(i => {
+        const hasBall = i === g.ballPos;
+        return `<div class="cup-container" data-cup="${i}" style="cursor:default">
+          <div class="cup" style="font-size:32px;text-align:center;">🎩</div>
+          <div class="cup-ball" style="text-align:center;font-size:24px;min-height:28px;">${hasBall ? "⚽" : ""}</div>
+        </div>`;
+      });
+      const startBtn = isHost ? `<button class="game-btn" data-game-action="cups-shuffle" data-game-msg="${escapeHtml(m.id)}" style="margin-top:10px;">🔀 Shuffle!</button>` : `<div class="game-status">Waiting for host to shuffle…</div>`;
+      return `<div class="game-card game-cups"><button class="game-fullscreen-btn" data-game-action="fullscreen" title="Fullscreen">⛶</button>
+        <div class="game-title">🎩 Shell Game</div>
+        <div class="game-status" style="margin-bottom:10px;">Remember where the ball is!</div>
+        <div class="cups-row">${cups.join("")}</div>
+        ${startBtn}
+      </div>`;
+    }
+
+    if (g.phase === "shuffle") {
+      const cups = [0,1,2].map(() => `<div class="cup-container cup-shuffling"><div class="cup" style="font-size:32px;text-align:center;">🎩</div></div>`);
+      return `<div class="game-card game-cups"><button class="game-fullscreen-btn" data-game-action="fullscreen" title="Fullscreen">⛶</button>
+        <div class="game-title">🎩 Shell Game</div>
+        <div class="game-status" style="margin-bottom:10px;">Shuffling… 👀</div>
+        <div class="cups-row">${cups.join("")}</div>
+      </div>`;
+    }
+
+    if (g.phase === "guess" || g.phase === "reveal") {
+      const revealed = g.phase === "reveal";
+      const cups = [0,1,2].map(i => {
+        const hasBall = revealed && i === g.ballPos;
+        const myPick = myGuess === i;
+        const border = myPick ? "2px solid var(--c-accent)" : "2px solid transparent";
+        return `<div class="cup-container${revealed && hasBall ? " cup-winner" : ""}"
+          data-game-action="${!myGuess && !revealed ? "cups-guess" : ""}"
+          data-cup-idx="${i}" data-game-msg="${escapeHtml(m.id)}"
+          style="cursor:${!myGuess && !revealed ? "pointer" : "default"};border:${border};border-radius:8px;padding:4px;">
+          <div class="cup" style="font-size:32px;text-align:center;">🎩</div>
+          <div class="cup-ball" style="text-align:center;font-size:24px;min-height:28px;">${hasBall ? "⚽" : (myPick && revealed ? "❌" : "")}</div>
+        </div>`;
+      });
+      const guessCount = Object.keys(g.guesses||{}).length;
+      let status = "";
+      if (revealed) {
+        const winnerName = g.winner ? escapeHtml((g.players||{})[g.winner] || "Someone") : "Nobody";
+        const myCorrect = myGuess === g.ballPos;
+        status = g.winner ? `🎉 ${winnerName} found it!${myCorrect ? " You got it too!" : ""}` : "Nobody got it right!";
+      } else if (myGuess !== undefined) {
+        status = `✅ You picked cup ${myGuess+1} — waiting for others… (${guessCount}/${totalPlayers})`;
+      } else {
+        status = "🤔 Pick a cup!";
+      }
+      return `<div class="game-card game-cups"><button class="game-fullscreen-btn" data-game-action="fullscreen" title="Fullscreen">⛶</button>
+        <div class="game-title">🎩 Shell Game</div>
+        <div class="game-status" style="margin-bottom:10px;">${status}</div>
+        <div class="cups-row">${cups.join("")}</div>
+      </div>`;
+    }
+    return `<div class="game-card"><div class="game-status">Unknown cups phase</div></div>`;
+  }
+
+  if (g.kind === "uno") {
+    const isHost = g.host === myUid;
+    const inGame = (g.players||[]).includes(myUid);
+    const myHand = (g.hands||{})[myUid] || [];
+    const isMyTurn = g.turn === myUid && g.phase === "playing";
+    const UNO_COLOR = {red:"#ef4444",yellow:"#eab308",green:"#22c55e",blue:"#3b82f6",wild:"#8b5cf6"};
+
+    if (g.phase === "waiting") {
+      const pc = (g.players||[]).length;
+      return `<div class="game-card game-uno"><button class="game-fullscreen-btn" data-game-action="fullscreen" title="Fullscreen">⛶</button>
+        <div class="game-title">🃏 UNO</div>
+        <div class="game-status">👥 ${pc} player${pc===1?"":"s"} joined</div>
+        ${!inGame ? `<button class="game-btn" data-game-action="uno-join" data-game-msg="${escapeHtml(m.id)}">Join</button>` : `<span class="game-status" style="color:var(--c-success)">✅ Joined</span>`}
+        ${isHost && pc>=2 ? `<button class="game-btn" data-game-action="uno-start" data-game-msg="${escapeHtml(m.id)}" style="margin-top:6px;">▶️ Deal Cards</button>` : isHost ? `<div class="game-status" style="font-size:11px;">Need 2+ players</div>` : ""}
+      </div>`;
+    }
+
+    if (g.phase === "playing" || g.phase === "finished") {
+      const top = g.discardTop;
+      const topColor = top ? UNO_COLOR[top.activeColor || top.c] : "#888";
+      const topLabel = top ? _unoCardLabel(top) : "?";
+
+      const handHtml = myHand.map((card, idx) => {
+        const canPlay = isMyTurn && _unoCanPlay(card, top, g.drawPending);
+        const bg = UNO_COLOR[card.c] || "#888";
+        return `<button class="uno-card${canPlay?" playable":""}"
+          data-game-action="${canPlay?"uno-play":""}" data-game-msg="${escapeHtml(m.id)}"
+          data-card-idx="${idx}" style="background:${bg};"
+          title="${_unoCardLabel(card)}"
+          ${canPlay?"":"disabled"}>
+          <span class="uno-card-val">${_unoCardLabel(card)}</span>
+        </button>`;
+      }).join("");
+
+      const turnName = g.turn ? escapeHtml((state.userCache[g.turn]?.username || state.userCache[g.turn]?.displayName || "Player")) : "";
+      const statusMsg = g.phase === "finished"
+        ? `🎉 ${escapeHtml(state.userCache[g.winner]?.username || "Someone")} wins UNO!`
+        : isMyTurn ? "Your turn!" : `${turnName}'s turn`;
+
+      return `<div class="game-card game-uno"><button class="game-fullscreen-btn" data-game-action="fullscreen" title="Fullscreen">⛶</button>
+        <div class="game-title">🃏 UNO</div>
+        <div class="uno-play-area">
+          <div class="uno-discard" style="background:${topColor};" title="Discard pile">
+            <span>${topLabel}</span>
+          </div>
+          <div class="uno-deck-area">
+            <button class="uno-deck-btn" data-game-action="uno-draw" data-game-msg="${escapeHtml(m.id)}" ${!isMyTurn?"disabled":""}>Draw</button>
+            ${g.drawPending>0?`<div class="uno-draw-pending">+${g.drawPending}</div>`:""}
+          </div>
+        </div>
+        <div class="game-status" style="margin:6px 0;">${statusMsg}</div>
+        ${inGame ? `<div class="uno-hand">${handHtml || "<span style='color:var(--t-muted)'>No cards</span>"}</div>` : `<div class="game-status" style="color:var(--t-muted);">Spectating</div>`}
+        ${myHand.length === 1 && isMyTurn ? `<button class="game-btn uno-btn" data-game-action="uno-call" data-game-msg="${escapeHtml(m.id)}" style="margin-top:6px;background:var(--c-danger);">UNO! 🎴</button>` : ""}
+      </div>`;
+    }
+  }
+
+  if (g.kind === "draw") {
+    const isDrawer = g.drawer === myUid;
+    const wordDisplay = isDrawer ? `<div class="game-status" style="background:var(--c-accent-soft);border-radius:6px;padding:6px 10px;margin-bottom:8px;">🎨 Draw: <strong>${escapeHtml(g.word)}</strong></div>`
+      : `<div class="game-status" style="margin-bottom:8px;">🤔 Guess what's being drawn!</div>`;
+    const canvasHtml = `<canvas id="draw-canvas-${escapeHtml(m.id)}" width="300" height="200" class="draw-canvas" style="cursor:${isDrawer?"crosshair":"not-allowed"};"></canvas>`;
+    const guessInput = !isDrawer && g.phase === "drawing" && !Object.values(g.guesses||{}).find(gv=>gv.correct)
+      ? `<div style="display:flex;gap:6px;margin-top:6px;">
+          <input type="text" class="game-input" id="draw-guess-${escapeHtml(m.id)}" placeholder="Type your guess…" data-enter-action="draw-guess" data-enter-msg="${escapeHtml(m.id)}" style="flex:1;" />
+          <button class="game-btn" data-game-action="draw-guess" data-game-msg="${escapeHtml(m.id)}" style="padding:6px 12px;">Guess</button>
+        </div>` : "";
+    const winner = g.winner;
+    const winMsg = winner ? `<div class="game-status" style="color:var(--c-success);font-weight:700;margin-top:6px;">🎉 ${escapeHtml(state.userCache[winner]?.username||"Someone")} guessed it!</div>` : "";
+
+    return `<div class="game-card game-draw"><button class="game-fullscreen-btn" data-game-action="fullscreen" title="Fullscreen">⛶</button>
+      <div class="game-title">🎨 Draw &amp; Guess</div>
+      ${wordDisplay}
+      ${canvasHtml}
+      ${isDrawer ? `<div style="display:flex;gap:6px;margin-top:6px;">
+        <button class="game-btn" data-game-action="draw-clear" data-game-msg="${escapeHtml(m.id)}" style="flex:1;font-size:12px;">🗑 Clear</button>
+        <button class="game-btn" data-game-action="draw-done" data-game-msg="${escapeHtml(m.id)}" style="flex:1;font-size:12px;background:var(--c-success);">✅ Reveal</button>
+      </div>` : guessInput}
+      ${winMsg}
     </div>`;
   }
 
@@ -7884,10 +8357,32 @@ function _maybeRefocusGameInput() {
   }
 }
 
+/* =====================================================================
+   GAME FULLSCREEN OVERLAY
+   ===================================================================== */
+document.addEventListener("click", e => {
+  if (e.target.closest("[data-game-action='fullscreen']")) {
+    const card = e.target.closest(".game-card");
+    if (!card) return;
+    const ov = document.createElement("div");
+    ov.id = "game-fullscreen-overlay";
+    ov.innerHTML = `<button id="game-fs-close" title="Close fullscreen">✕</button>` + card.outerHTML;
+    document.body.appendChild(ov);
+    ov.querySelector("#game-fs-close").onclick = () => ov.remove();
+    ov.onclick = e => { if (e.target === ov) ov.remove(); };
+    document.addEventListener("keydown", function esc(ev) { if (ev.key === "Escape") { ov.remove(); document.removeEventListener("keydown", esc); } }, { once: true });
+    return;
+  }
+  if (e.target.id === "game-fs-close" || e.target.closest("#game-fullscreen-overlay") === e.target) {
+    document.getElementById("game-fullscreen-overlay")?.remove();
+  }
+});
+
 document.addEventListener("click", async e => {
   const btn = e.target.closest("[data-game-action]");
   if (!btn) return;
   const action = btn.dataset.gameAction;
+  if (action === "fullscreen") return; // handled by the overlay handler above
   const msgId = btn.dataset.gameMsg;
   const msg = state.messages.find(m => m.id === msgId);
   if (!msg || !msg.gameData) return;
@@ -7906,6 +8401,7 @@ document.addEventListener("click", async e => {
   }
   const g = msg.gameData;
   const myUid = state.user.uid;
+  const isMyTurn = g.turn === myUid;
 
   // ── Tic-Tac-Toe ──
   if (action === "ttt-join") {
@@ -8456,6 +8952,154 @@ document.addEventListener("click", async e => {
     const upd = { [`gameData.results.${myUid}`]: { ms, name: state.user.displayName||"Player" } };
     if (allDone) upd["gameData.winner"] = winner;
     await _gameUpdate(msgId, upd);
+    return;
+  }
+
+  // ── Shell Game (Cups) ──
+  if (action === "cups-shuffle") {
+    if (g.host !== myUid) return;
+    await _gameUpdate(msgId, { "gameData.phase": "shuffle" });
+    setTimeout(async () => {
+      await _gameUpdate(msgId, { "gameData.phase": "guess" });
+    }, 2500);
+    return;
+  }
+  if (action === "cups-guess") {
+    if (g.phase !== "guess" || (g.guesses||{})[myUid] !== undefined) return;
+    const cupIdx = parseInt(btn.dataset.cupIdx);
+    if (!(g.players||{})[myUid]) {
+      await _gameUpdate(msgId, {
+        [`gameData.players.${myUid}`]: state.user.displayName || "Player",
+        [`gameData.guesses.${myUid}`]: cupIdx
+      });
+    } else {
+      await _gameUpdate(msgId, { [`gameData.guesses.${myUid}`]: cupIdx });
+    }
+    const newGuesses = { ...(g.guesses||{}), [myUid]: cupIdx };
+    const totalP = Object.keys({ ...(g.players||{}), [myUid]: true }).length;
+    if (Object.keys(newGuesses).length >= totalP) {
+      const correct = Object.entries(newGuesses).find(([,v]) => v === g.ballPos);
+      await _gameUpdate(msgId, { "gameData.phase": "reveal", "gameData.winner": correct ? correct[0] : null });
+    }
+    return;
+  }
+
+  // ── UNO ──
+  if (action === "uno-join") {
+    if ((g.players||[]).includes(myUid)) return;
+    await _gameUpdate(msgId, { "gameData.players": [...(g.players||[]), myUid] });
+    return;
+  }
+  if (action === "uno-start") {
+    if (g.host !== myUid || (g.players||[]).length < 2) return;
+    const deck = [...g.deck];
+    const hands = {};
+    const players = g.players;
+    for (const p of players) { hands[p] = deck.splice(0, 7); }
+    let topIdx = deck.findIndex(c => c.c !== "wild");
+    if (topIdx < 0) topIdx = 0;
+    const [discardTop] = deck.splice(topIdx, 1);
+    await _gameUpdate(msgId, {
+      "gameData.phase": "playing",
+      "gameData.hands": hands,
+      "gameData.deck": deck,
+      "gameData.discardTop": discardTop,
+      "gameData.turn": players[0],
+      "gameData.direction": 1
+    });
+    return;
+  }
+  if (action === "uno-play") {
+    if (!isMyTurn) return;
+    const idx = parseInt(btn.dataset.cardIdx);
+    const hand = [...(g.hands||{})[myUid] || []];
+    const card = hand[idx];
+    if (!card || !_unoCanPlay(card, g.discardTop, g.drawPending || 0)) return;
+    hand.splice(idx, 1);
+    if (card.c === "wild") {
+      // Show quick color picker and wait for selection
+      const chosen = await _unoPickColor();
+      if (!chosen) return; // user cancelled
+      card.activeColor = chosen;
+    }
+    const players = g.players || [];
+    const curIdx = players.indexOf(myUid);
+    let dir = g.direction || 1;
+    let skip = 1;
+    let newDrawPending = 0;
+    if (card.v === "reverse") dir = -dir;
+    if (card.v === "skip") skip = 2;
+    if (card.v === "draw2") newDrawPending = (g.drawPending||0) + 2;
+    if (card.v === "draw4") newDrawPending = (g.drawPending||0) + 4;
+    const nextIdx = ((curIdx + dir * skip) % players.length + players.length) % players.length;
+    const nextTurn = players[nextIdx];
+    const winner = hand.length === 0 ? myUid : null;
+    const upd = {
+      [`gameData.hands.${myUid}`]: hand,
+      "gameData.discardTop": card,
+      "gameData.turn": winner ? myUid : nextTurn,
+      "gameData.direction": dir,
+      "gameData.drawPending": newDrawPending,
+      ...(winner ? { "gameData.phase": "finished", "gameData.winner": winner } : {})
+    };
+    await _gameUpdate(msgId, upd);
+    return;
+  }
+  if (action === "uno-draw") {
+    if (!isMyTurn) return;
+    const deck = [...(g.deck||[])];
+    const drawPending = g.drawPending || 0;
+    const drawCount = drawPending > 0 ? drawPending : 1;
+    const hand = [...(g.hands||{})[myUid] || []];
+    if (deck.length < drawCount) { showToast("Deck empty!"); return; }
+    const drawn = deck.splice(0, drawCount);
+    hand.push(...drawn);
+    const players = g.players || [];
+    const curIdx = players.indexOf(myUid);
+    const dir = g.direction || 1;
+    const nextIdx = ((curIdx + dir) % players.length + players.length) % players.length;
+    await _gameUpdate(msgId, {
+      [`gameData.hands.${myUid}`]: hand,
+      "gameData.deck": deck,
+      "gameData.turn": players[nextIdx],
+      "gameData.drawPending": 0
+    });
+    return;
+  }
+  if (action === "uno-call") {
+    showToast("UNO! 🎴");
+    return;
+  }
+
+  // ── Draw & Guess ──
+  if (action === "draw-guess") {
+    if (g.drawer === myUid) return;
+    const inp = document.getElementById(`draw-guess-${msgId}`);
+    const guess = (inp?.value||"").trim().toLowerCase();
+    if (!guess) return;
+    const correct = guess === (g.word||"").toLowerCase();
+    if (correct) {
+      await _gameUpdate(msgId, {
+        [`gameData.guesses.${myUid}`]: {guess, correct:true},
+        "gameData.winner": myUid,
+        "gameData.phase": "finished"
+      });
+      showToast("🎉 Correct!");
+    } else {
+      showToast("Not quite… keep trying!");
+      if (inp) inp.value = "";
+    }
+    return;
+  }
+  if (action === "draw-clear") {
+    if (g.drawer !== myUid) return;
+    await _gameUpdate(msgId, { "gameData.strokes": [] });
+    return;
+  }
+  if (action === "draw-done") {
+    if (g.drawer !== myUid) return;
+    await _gameUpdate(msgId, { "gameData.phase": "finished" });
+    showToast(`The word was: ${g.word}`);
     return;
   }
 });

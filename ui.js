@@ -833,6 +833,7 @@ export function buildUI() {
                   <div class="spp-divider"></div>
                   <div class="spp-section-label">About Me</div>
                   <div class="spp-bio" id="settings-preview-bio"></div>
+                  <div class="spp-favgame" id="settings-preview-favgame" style="display:none"></div>
                   <div class="spp-section-label spp-since-label" id="settings-preview-since-wrap" style="display:none">
                     Member Since <span id="settings-preview-since"></span>
                   </div>
@@ -893,6 +894,36 @@ export function buildUI() {
               <button class="btn-secondary" id="ic-color-apply">Apply</button>
             </div>
           </div>
+
+          <!-- Chat Background / Wallpaper -->
+          <div class="settings-section-title" style="margin-top:20px;margin-bottom:8px;">Chat Background</div>
+          <div class="chat-bg-options">
+            <button class="chat-bg-preset" data-bg-preset="none">None</button>
+            <button class="chat-bg-preset" data-bg-preset="bubbles">Bubbles</button>
+            <button class="chat-bg-preset" data-bg-preset="dots">Dots</button>
+            <button class="chat-bg-preset" data-bg-preset="grid">Grid</button>
+            <button class="chat-bg-preset" data-bg-preset="waves">Waves</button>
+            <button class="chat-bg-preset" data-bg-preset="stars">Stars ✨</button>
+            <button class="chat-bg-preset" data-bg-preset="custom-img">📷 Custom Image</button>
+          </div>
+          <div id="chat-bg-img-row" style="display:none;margin-top:8px;">
+            <input type="text" id="chat-bg-img-url" placeholder="Image URL…" style="width:100%;margin-bottom:6px;" />
+            <div style="display:flex;gap:6px;margin-bottom:6px;">
+              <label style="font-size:11px;color:var(--t-muted);">Size</label>
+              <select id="chat-bg-size" style="flex:1;font-size:12px;background:var(--c-input-2);border:1px solid var(--c-border-2);border-radius:4px;color:var(--t-primary);padding:2px 6px;">
+                <option value="cover">Cover (fill)</option>
+                <option value="contain">Contain</option>
+                <option value="auto">Actual size</option>
+              </select>
+            </div>
+            <div style="display:flex;gap:6px;margin-bottom:6px;">
+              <label style="font-size:11px;color:var(--t-muted);">Opacity</label>
+              <input type="range" id="chat-bg-opacity" min="5" max="100" value="30" style="flex:1;" />
+              <span id="chat-bg-opacity-val" style="font-size:11px;color:var(--t-muted);width:28px;">30%</span>
+            </div>
+            <button class="btn-secondary" id="chat-bg-apply" style="width:100%;">Apply</button>
+          </div>
+          <div style="margin-top:4px;font-size:11px;color:var(--t-muted);">Background appears behind messages in all chats.</div>
 
           <div style="margin-top:24px;">
             <div class="settings-section-title" style="margin-bottom:10px;">Status</div>
@@ -1501,6 +1532,24 @@ export function buildUI() {
             <div class="activity-desc">Hit the button first!</div>
             <div class="activity-players">👥 2+ players</div>
           </button>
+          <button class="activity-card" data-activity="cups">
+            <div class="activity-icon">🎩</div>
+            <div class="activity-name">Shell Game</div>
+            <div class="activity-desc">Find the hidden ball</div>
+            <div class="activity-players">👥 2+ players</div>
+          </button>
+          <button class="activity-card" data-activity="uno">
+            <div class="activity-icon">🃏</div>
+            <div class="activity-name">UNO</div>
+            <div class="activity-desc">Color &amp; number matching</div>
+            <div class="activity-players">👥 2–8 players</div>
+          </button>
+          <button class="activity-card" data-activity="draw">
+            <div class="activity-icon">🎨</div>
+            <div class="activity-name">Draw &amp; Guess</div>
+            <div class="activity-desc">Draw it, guess it!</div>
+            <div class="activity-players">👥 2+ players</div>
+          </button>
         </div>
       </div>
     </div>
@@ -1709,11 +1758,16 @@ export function buildUI() {
             <div class="full-profile-divider"></div>
             <div class="full-profile-section-label">About Me</div>
             <div class="full-profile-bio" id="fp-bio"></div>
-            <div class="full-profile-since" id="fp-since"></div>
-            <div class="full-profile-since" id="fp-birthday" style="display:none"></div>
-            <div class="full-profile-since" id="fp-last-active" style="display:none"></div>
-            <div class="full-profile-since fp-friends-since-row" id="fp-friends-since" style="display:none"></div>
+            <!-- Fav game near top of about section -->
             <div class="fp-favgame" id="fp-favgame" style="display:none"></div>
+            <div class="full-profile-divider" style="margin:10px 0 8px;"></div>
+            <!-- Meta info in a compact 2-column grid -->
+            <div class="fp-meta-grid">
+              <div class="fp-meta-item" id="fp-since" style="display:none"></div>
+              <div class="fp-meta-item fp-friends-since-row" id="fp-friends-since" style="display:none"></div>
+              <div class="fp-meta-item" id="fp-birthday" style="display:none"></div>
+              <div class="fp-meta-item" id="fp-last-active" style="display:none"></div>
+            </div>
             <div id="fp-mutual-groups" style="display:none">
               <div class="full-profile-divider" style="margin:10px 0 8px;"></div>
               <div class="full-profile-section-label">Mutual Groups</div>
