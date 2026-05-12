@@ -19,6 +19,22 @@ import {
 buildUI();
 const _loadScreenShownAt = Date.now(); // record load time for minimum-display enforcement
 
+// ── Quota interceptor ────────────────────────────────────────────────────────
+// Firebase handles resource-exhausted internally with backoff and NEVER calls
+// our onSnapshot error callbacks. It only logs via console.log. Intercept that.
+(function _installQuotaInterceptor() {
+  const _orig = console.log.bind(console);
+  console.log = function(...args) {
+    _orig(...args);
+    const str = args.map(a => typeof a === "string" ? a : "").join(" ");
+    if (!window._quotaDetected && (str.includes("resource-exhausted") || str.includes("Quota exceeded"))) {
+      window._quotaDetected = true;
+      // _showQuotaBanner is a function declaration — hoisted, safe to call now
+      _showQuotaBanner();
+    }
+  };
+})();
+
 // Populate loading-screen tips + cycle them every 2s while screen is visible
 (function() {
   const tipEl = document.getElementById("loading-tip");
@@ -632,6 +648,7 @@ function _showQuotaBanner() {
       // Quota lifted — clean up
       clearInterval(_poll);
       _quotaShown = false;
+      window._quotaDetected = false;
       if (loadingQuota) loadingQuota.style.display = "none";
       if (loadingSpinner) loadingSpinner.style.display = "";
       if (loadingTip) loadingTip.style.display = "";
