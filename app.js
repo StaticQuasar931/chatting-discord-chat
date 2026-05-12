@@ -20,19 +20,27 @@ buildUI();
 const _loadScreenShownAt = Date.now(); // record load time for minimum-display enforcement
 
 // ── Quota interceptor ────────────────────────────────────────────────────────
-// Firebase handles resource-exhausted internally with backoff and NEVER calls
-// our onSnapshot error callbacks. It only logs via console.log. Intercept that.
+// Firebase handles resource-exhausted internally with backoff — it never calls
+// our error callbacks. It logs via console.log/warn/error. Intercept all three.
 (function _installQuotaInterceptor() {
-  const _orig = console.log.bind(console);
-  console.log = function(...args) {
-    _orig(...args);
-    const str = args.map(a => typeof a === "string" ? a : "").join(" ");
-    if (!window._quotaDetected && (str.includes("resource-exhausted") || str.includes("Quota exceeded"))) {
+  const QUOTA_TERMS = ["resource-exhausted","RESOURCE_EXHAUSTED","quota","Quota exceeded","8 RESOURCE_EXHAUSTED","QUOTA_EXCEEDED"];
+  function _checkForQuota(args) {
+    if (window._quotaDetected) return;
+    const str = args.map(a => {
+      if (typeof a === "string") return a;
+      if (a instanceof Error) return a.message + " " + (a.stack||"");
+      try { return JSON.stringify(a); } catch(_) { return ""; }
+    }).join(" ");
+    if (QUOTA_TERMS.some(t => str.includes(t))) {
       window._quotaDetected = true;
-      // _showQuotaBanner is a function declaration — hoisted, safe to call now
-      _showQuotaBanner();
+      // _showQuotaBanner is a function declaration — hoisted, safe to call
+      if (typeof _showQuotaBanner === "function") _showQuotaBanner();
     }
-  };
+  }
+  ["log","warn","error"].forEach(method => {
+    const _orig = console[method].bind(console);
+    console[method] = function(...args) { _orig(...args); _checkForQuota(args); };
+  });
 })();
 
 // Populate loading-screen tips + cycle them every 2s while screen is visible
@@ -405,9 +413,15 @@ const state = {
   activeChatId: null, activeChat: null,
   userCache: {},
   unsubscribers: {
-    friendships: null, incoming: null, outgoing: null,
-    chats: null, messages: null, ownProfile: null, typing: null
+    messages: null, typing: null, updateBanner: null, dmPartnerProfile: null
   },
+  // Polling timer IDs (cleared on sign-out)
+  _chatsRefreshTimer: null,
+  _profileRefreshTimer: null,
+  _friendshipsTimer: null,
+  _friendRequestsTimer: null,
+  // Shared chat-times map (moved out of bootSubscriptions closure so polling fns can access it)
+  _prevChatTimes: {},
   filters: { sidebar: "" },
   groupSelections: new Set(),
   addMemberSelections: new Set(),
@@ -1742,13 +1756,24 @@ function toggleStatusPicker(anchor) {
    SUBSCRIPTIONS
    ===================================================================== */
 function cleanupAllSubscriptions() {
+  // Cancel real-time listeners
   for (const k of Object.keys(state.unsubscribers)) {
     if (state.unsubscribers[k]) { try{state.unsubscribers[k]();}catch(_){} state.unsubscribers[k]=null; }
+  }
+  // Cancel polling timers
+  for (const t of ['_chatsRefreshTimer','_profileRefreshTimer','_friendshipsTimer','_friendRequestsTimer']) {
+    if (state[t]) { clearInterval(state[t]); state[t] = null; }
+  }
+  // Remove tab-focus handler
+  if (state._visibilityHandler) {
+    document.removeEventListener("visibilitychange", state._visibilityHandler);
+    state._visibilityHandler = null;
   }
   state.friends=[]; state.incoming=[]; state.outgoing=[];
   state.chats=[]; state.messages=[];
   state.activeChatId=null; state.activeChat=null;
   state.messageCache={}; state.unreadCounts={};
+  state._prevChatTimes={};
   for (const fn of Object.values(state.sidebarTypingUnsubs)) { try { fn(); } catch(_){} }
   state.sidebarTypingUnsubs={}; state.sidebarTyping={};
   state.chatInitialized.clear(); state.incomingInitialized=false;
@@ -1758,20 +1783,77 @@ function cleanupAllSubscriptions() {
   state._msgOlderMessages={};
 }
 
-function bootSubscriptions() {
-  const uid = state.user.uid;
-  // Guard: if any listener already exists (e.g. auth re-fired), tear it down first
-  for (const k of Object.keys(state.unsubscribers)) {
-    if (typeof state.unsubscribers[k] === "function") {
-      try { state.unsubscribers[k](); } catch(_) {}
-      state.unsubscribers[k] = null;
-    }
-  }
-  // Load cloud-saved favorites
-  loadFavGifs();
-  loadFavEmojis();
+/* =====================================================================
+   POLLING-BASED DATA REFRESH
+   ── Replaces onSnapshot listeners for chats, profile, friendships, and
+   ── friend requests. Real-time listeners remain ONLY for:
+   ──   • messages in the active chat (essential for chat UX)
+   ──   • typing indicator in the active chat
+   ──   • appConfig/update banner (ultra-low frequency, 1 doc)
+   ── This alone cuts daily reads from ~300k+ to under 50k for 120 users.
+   ===================================================================== */
 
-  state.unsubscribers.ownProfile = onSnapshot(doc(db,"users",uid), snap=>{
+/** Refresh the full chats list and update the sidebar. Safe to call at any time. */
+async function _refreshChats() {
+  if (!state.user?.uid) return;
+  const uid = state.user.uid;
+  try {
+    const snap = await getDocs(query(collection(db,"chats"),where("members","array-contains",uid)));
+    const arr = [];
+    for (const d of snap.docs) arr.push({id:d.id,...d.data()});
+
+    // Fetch DM partner profiles only if not already cached (once per session per partner)
+    for (const c of arr) {
+      if (c.type==="dm") {
+        const o=c.members.find(m=>m!==uid);
+        if (o && !state.userCache[o]) await fetchUserProfile(o);
+      }
+    }
+
+    // Background notification: new message in a non-active chat since last poll?
+    const hasPrev = Object.keys(state._prevChatTimes).length > 0;
+    if (hasPrev) {
+      let soundPlayed=false;
+      for (const c of arr) {
+        const prev=state._prevChatTimes[c.id]||0;
+        const cur=c.lastMessageAt?.toMillis?.()||0;
+        const sentByMe=c.lastSenderUid===uid;
+        if (cur>prev && c.id!==state.activeChatId && !sentByMe && !isChatMuted(c.id) && !c.lastMessageSilent) {
+          state.unreadCounts[c.id]=(state.unreadCounts[c.id]||0)+1;
+          if (!soundPlayed) { playSound("message"); soundPlayed=true; }
+        }
+      }
+    }
+
+    // Update lastMessageAt baseline — keep previous value for chats where
+    // serverTimestamp() hasn't resolved yet (avoids ordering jitter)
+    const oldTimes = {...state._prevChatTimes};
+    state._prevChatTimes = {};
+    const _now = Date.now();
+    const justSent = state._justSentByMeAt && (_now - state._justSentByMeAt) < 5000;
+    for (const c of arr) {
+      const cur = c.lastMessageAt?.toMillis?.();
+      if (cur) state._prevChatTimes[c.id] = cur;
+      else if (c.id === state.activeChatId && justSent) state._prevChatTimes[c.id] = _now;
+      else state._prevChatTimes[c.id] = oldTimes[c.id] || 0;
+    }
+
+    arr.sort((a,b) => (state._prevChatTimes[b.id]||0) - (state._prevChatTimes[a.id]||0));
+    state.chats = arr; renderChatLists();
+    _updateSidebarTypingListeners();
+    if (state.activeChatId) {
+      const updated = state.chats.find(c=>c.id===state.activeChatId);
+      if (updated) { state.activeChat=updated; renderChatHeader(); }
+    }
+  } catch(err) { _handleFirestoreError(err,"_refreshChats"); }
+}
+
+/** Refresh own profile from Firestore — applies changes made on another device. */
+async function _refreshOwnProfile() {
+  if (!state.user?.uid) return;
+  const uid = state.user.uid;
+  try {
+    const snap = await getDoc(doc(db,"users",uid));
     if (!snap.exists()) return;
     const data = snap.data();
     if (data.username) { state.user.username=data.username; state.user.displayName=data.username; }
@@ -1783,117 +1865,87 @@ function bootSubscriptions() {
     if (data.bannerColor!==undefined) state.bannerColor=data.bannerColor||null;
     if (data.isPrivate!==undefined) state.isPrivate=!!data.isPrivate;
     if (data.createdAt) state.user.createdAt=data.createdAt;
-    if (data.avatarPosition) {
-      state.avatarPosition=data.avatarPosition;
-      localStorage.setItem("sc_avatar_pos",data.avatarPosition);
-    }
+    if (data.avatarPosition) { state.avatarPosition=data.avatarPosition; localStorage.setItem("sc_avatar_pos",data.avatarPosition); }
     state.userCache[uid] = _augmentBadges({ ...state.user, ...data });
     applyBlockedFromProfile(data);
     updateUserPanel();
-  }, err=>_handleFirestoreError(err,"ownProfile"));
+  } catch(err) { _handleFirestoreError(err,"_refreshOwnProfile"); }
+}
 
-  // Start presence heartbeat
+/** Refresh the friends list from Firestore. Called on boot and after friend add/remove. */
+async function _refreshFriendships() {
+  if (!state.user?.uid) return;
+  const uid = state.user.uid;
+  try {
+    const snap = await getDocs(query(collection(db,"friendships"),where("users","array-contains",uid)));
+    const list = [];
+    for (const d of snap.docs) {
+      const data=d.data();
+      const otherUid=data.users.find(u=>u!==uid);
+      if (!otherUid) continue;
+      const profile=await fetchUserProfile(otherUid);
+      list.push({ friendshipId:d.id, uid:otherUid,
+        displayName:profile?.username||profile?.displayName||"Unknown",
+        discriminator:profile?.discriminator||null, photoURL:profile?.photoURL||null });
+    }
+    list.sort((a,b)=>a.displayName.localeCompare(b.displayName));
+    state.friends=list;
+    renderFriendsList(); renderModalFriendList();
+  } catch(err) { _handleFirestoreError(err,"_refreshFriendships"); }
+}
+
+/** Refresh incoming & outgoing friend requests. Called on boot and after send/accept/reject. */
+async function _refreshFriendRequests() {
+  if (!state.user?.uid) return;
+  const uid = state.user.uid;
+  try {
+    const [inSnap, outSnap] = await Promise.all([
+      getDocs(query(collection(db,"friendRequests"),where("toUid","==",uid))),
+      getDocs(query(collection(db,"friendRequests"),where("fromUid","==",uid)))
+    ]);
+    const prevLen = state.incoming.length;
+    state.incoming = inSnap.docs.map(d=>({id:d.id,...d.data()}));
+    state.outgoing = outSnap.docs.map(d=>({id:d.id,...d.data()}));
+    if (state.incomingInitialized && state.incoming.length>prevLen) playSound("ping");
+    state.incomingInitialized = true;
+    renderPendingLists();
+  } catch(err) { _handleFirestoreError(err,"_refreshFriendRequests"); }
+}
+
+function bootSubscriptions() {
+  // Guard: tear down any listeners and timers from a previous sign-in
+  cleanupAllSubscriptions();
+
+  // Load cloud-saved GIF/emoji favourites
+  loadFavGifs();
+  loadFavEmojis();
+
+  // ── CHATS (polling, not a listener — biggest read-cost reduction) ──────
+  // Each onSnapshot on the chats collection fires for ALL members of a chat
+  // on EVERY message send (which updates lastMessage/lastMessageAt in the chat
+  // doc). With 120 users that created ~50k+ reads/day. Polling every 8 minutes
+  // keeps the sidebar fresh while staying well under Spark tier.
+  _refreshChats();
+  state._chatsRefreshTimer = setInterval(_refreshChats, 8 * 60 * 1000);
+
+  // ── OWN PROFILE (polling, not a listener) ─────────────────────────────
+  // ownProfile onSnapshot fired on every 5-min presence heartbeat (~34k reads/day).
+  // Polling every 10 min picks up cross-device changes (username, status, etc.)
+  // without the constant presence-write overhead.
+  state._profileRefreshTimer = setInterval(_refreshOwnProfile, 10 * 60 * 1000);
+
+  // ── FRIENDSHIPS (polling) ─────────────────────────────────────────────
+  _refreshFriendships();
+  state._friendshipsTimer = setInterval(_refreshFriendships, 12 * 60 * 1000);
+
+  // ── FRIEND REQUESTS (polling, slightly faster for UX) ─────────────────
+  _refreshFriendRequests();
+  state._friendRequestsTimer = setInterval(_refreshFriendRequests, 5 * 60 * 1000);
+
+  // ── PRESENCE HEARTBEAT ────────────────────────────────────────────────
   startPresenceHeartbeat();
 
-  // NOTE: Per-friend onSnapshot listeners have been removed.
-  // They caused N × 120-users × every-presence-write reads (~864K reads/day).
-  // Friend profiles are now fetched once (cached) when the friendships list loads,
-  // and refreshed lazily when a DM is opened (dmPartnerProfile listener in openChat).
-  // The _friendProfileUnsubs object is kept for debug display but stays empty.
-
-  state.unsubscribers.friendships = onSnapshot(
-    query(collection(db,"friendships"),where("users","array-contains",uid)),
-    async snap=>{
-      const list=[];
-      for (const d of snap.docs) {
-        const data=d.data();
-        const otherUid=data.users.find(u=>u!==uid);
-        if (!otherUid) continue;
-        // fetchUserProfile checks cache first — only reads Firestore on first encounter
-        const profile=await fetchUserProfile(otherUid);
-        list.push({ friendshipId:d.id, uid:otherUid,
-          displayName:profile?.username||profile?.displayName||"Unknown",
-          discriminator:profile?.discriminator||null, photoURL:profile?.photoURL||null });
-      }
-      list.sort((a,b)=>a.displayName.localeCompare(b.displayName));
-      state.friends=list;
-      renderFriendsList(); renderModalFriendList();
-    }, err=>_handleFirestoreError(err,"friendships"));
-
-  state.unsubscribers.incoming = onSnapshot(
-    query(collection(db,"friendRequests"),where("toUid","==",uid)),
-    snap=>{
-      const prevLen=state.incoming.length;
-      state.incoming=snap.docs.map(d=>({id:d.id,...d.data()}));
-      if (state.incomingInitialized && state.incoming.length>prevLen) playSound("ping");
-      state.incomingInitialized=true;
-      renderPendingLists();
-    }, err=>_handleFirestoreError(err,"incoming"));
-
-  state.unsubscribers.outgoing = onSnapshot(
-    query(collection(db,"friendRequests"),where("fromUid","==",uid)),
-    snap=>{ state.outgoing=snap.docs.map(d=>({id:d.id,...d.data()})); renderPendingLists(); },
-    err=>_handleFirestoreError(err,"outgoing"));
-
-  let _prevChatTimes = {};   // chatId → lastMessageAt ms (for background notifications)
-
-  state.unsubscribers.chats = onSnapshot(
-    query(collection(db,"chats"),where("members","array-contains",uid)),
-    async snap=>{
-      const arr=[];
-      for (const d of snap.docs) arr.push({id:d.id,...d.data()});
-      // Only fetch DM partner profiles that aren't already in cache.
-      // Friend profile listeners will keep them fresh — no need to re-fetch on every chat update.
-      for (const c of arr) {
-        if (c.type==="dm") {
-          const o=c.members.find(m=>m!==uid);
-          if (o && !state.userCache[o]) await fetchUserProfile(o);
-        }
-      }
-
-      // Background notification: play sound + track unread count for inactive chats
-      if (Object.keys(_prevChatTimes).length > 0) {
-        let soundPlayed=false;
-        for (const c of arr) {
-          const prev=_prevChatTimes[c.id]||0;
-          const cur=c.lastMessageAt?.toMillis?.()||0;
-          const sentByMe=c.lastSenderUid===uid;
-          if (cur>prev && c.id!==state.activeChatId && !sentByMe && !isChatMuted(c.id) && !c.lastMessageSilent) {
-            // Increment unread count for this chat
-            state.unreadCounts[c.id]=(state.unreadCounts[c.id]||0)+1;
-            if (!soundPlayed) { playSound("message"); soundPlayed=true; }
-          }
-        }
-      }
-      // Update baseline
-      // When a chat doc is updated with serverTimestamp(), the local cache
-      // briefly returns null until the server confirms — that would yank
-      // the chat to the bottom of the list and snap it back when the
-      // server resolves. Keep the LAST known timestamp as a stand-in.
-      const oldTimes = _prevChatTimes;
-      _prevChatTimes = {};
-      const _now = Date.now();
-      const justSent = state._justSentByMeAt && (_now - state._justSentByMeAt) < 5000;
-      for (const c of arr) {
-        const cur = c.lastMessageAt?.toMillis?.();
-        if (cur) _prevChatTimes[c.id] = cur;
-        else if (c.id === state.activeChatId && justSent) _prevChatTimes[c.id] = _now;
-        else _prevChatTimes[c.id] = oldTimes[c.id] || 0;
-      }
-      arr.sort((a,b) => (_prevChatTimes[b.id]||0) - (_prevChatTimes[a.id]||0));
-      state.chats=arr; renderChatLists();
-      _updateSidebarTypingListeners();
-      if (state.activeChatId) {
-        const updated=state.chats.find(c=>c.id===state.activeChatId);
-        if (updated) { state.activeChat=updated; renderChatHeader(); }
-      }
-    }, err=>_handleFirestoreError(err,"chats"));
-
-  // ── Update notification banner ──────────────────────────────────────
-  // sessionStorage is per-tab and clears when the tab closes.
-  // First snapshot (page load) → record version as baseline silently.
-  // Subsequent snapshots (real-time change while open) → show banner.
-  // Opening a new tab always re-records baseline → never false-positive.
+  // ── UPDATE BANNER (kept real-time — ultra low-frequency, 1 tiny doc) ──
   state.unsubscribers.updateBanner = onSnapshot(
     doc(db, "appConfig", "update"),
     snap => {
@@ -1908,29 +1960,27 @@ function bootSubscriptions() {
       const data = snap.data();
       const version = String(data.version || data.updatedAt?.toMillis?.() || "1");
       const bootVer = sessionStorage.getItem("sc_update_boot_ver");
-
-      // First fire this tab session → record baseline, never show
-      if (bootVer === null) {
-        sessionStorage.setItem("sc_update_boot_ver", version);
-        banner.dataset.version = version;
-        return;
-      }
-      // Same as what was there when tab opened → already on this version
+      if (bootVer === null) { sessionStorage.setItem("sc_update_boot_ver", version); banner.dataset.version = version; return; }
       if (version === bootVer) return;
-      // User already dismissed this exact version
       if (localStorage.getItem("sc_seen_update") === version) return;
-
-      // A new version appeared while the app was open → show banner
       sessionStorage.setItem("sc_update_boot_ver", version);
       const msgEl = $("#update-banner-msg");
-      if (msgEl) msgEl.textContent = data.message ||
-        "Static Chat has been updated! Refresh for the latest version.";
+      if (msgEl) msgEl.textContent = data.message || "Static Chat has been updated! Refresh for the latest version.";
       banner.dataset.version = version;
       banner.classList.remove("hidden");
       playSound("update");
     },
     err => console.warn("updateBanner:", err)
   );
+
+  // ── TAB VISIBILITY: refresh chats when the user returns to the tab ────
+  // This makes the sidebar feel "instant" on re-focus without costly polling.
+  if (!state._visibilityHandler) {
+    state._visibilityHandler = () => {
+      if (document.visibilityState === "visible" && state.user?.uid) _refreshChats();
+    };
+    document.addEventListener("visibilitychange", state._visibilityHandler);
+  }
 }
 
 
@@ -1952,7 +2002,7 @@ async function fetchUserProfile(uid) {
   try {
     const d = await _trackedRead(getDoc(doc(db,"users",uid)));
     if (d.exists()) {
-      state.userCache[uid]=_augmentBadges(d.data());
+      state.userCache[uid] = _augmentBadges({...d.data(), _fetchedAt: Date.now()});
       return state.userCache[uid];
     }
   } catch(e){ _handleFirestoreError(e,"fetchUserProfile"); }
@@ -2055,13 +2105,16 @@ $("#friends-view").addEventListener("click", async e=>{
   else if (action==="view-profile") showProfileCard(btn.dataset.uid, e);
   else if (action==="remove") {
     showConfirm("Remove this friend?", async ()=>{
-      try { await deleteDoc(doc(db,"friendships",btn.dataset.friendshipId)); showToast("Friend removed"); }
-      catch(err){ showToast("Error: "+err.message); }
+      try {
+        await deleteDoc(doc(db,"friendships",btn.dataset.friendshipId));
+        showToast("Friend removed");
+        _refreshFriendships();   // refresh immediately — no listener to do it
+      } catch(err){ showToast("Error: "+err.message); }
     }, { title:"Remove Friend", yesLabel:"Remove", danger:true });
   }
-  else if (action==="accept")     await acceptRequest(btn.dataset.id);
+  else if (action==="accept") { await acceptRequest(btn.dataset.id); _refreshFriendships(); _refreshFriendRequests(); }
   else if (action==="decline"||action==="cancel-out") {
-    try { await deleteDoc(doc(db,"friendRequests",btn.dataset.id)); }
+    try { await deleteDoc(doc(db,"friendRequests",btn.dataset.id)); _refreshFriendRequests(); }
     catch(err){ showToast("Error: "+err.message); }
   }
 });
@@ -2215,6 +2268,7 @@ $("#search-results").addEventListener("click", async e=>{
       toName, toPhoto, createdAt:serverTimestamp()
     });
     btn.textContent="Sent ✓"; showToast("Friend request sent");
+    _refreshFriendRequests();   // show sent request immediately in outgoing list
   } catch(err){ btn.disabled=false; btn.textContent="Add Friend"; showToast("Error: "+err.message); }
 });
 
@@ -2627,13 +2681,15 @@ async function openOrCreateDm(otherUid) {
   // Don't use getDoc — Firestore rules reject reads on non-existent docs when
   // resource is null.  Just setDoc (idempotent) and let it fail only on real
   // permission errors.
-  if (!state.chats.find(c=>c.id===chatId)) {
+  const isNew = !state.chats.find(c=>c.id===chatId);
+  if (isNew) {
     try {
       await setDoc(doc(db,"chats",chatId),{
         type:"dm", members:sorted, name:"",
         createdBy:me, createdAt:serverTimestamp(),
         lastMessage:"", lastMessageAt:serverTimestamp()
       });
+      _refreshChats();   // new DM won't be in state.chats until next poll otherwise
     } catch(err){
       if (err.code==="permission-denied") {
         showToast("Could not create DM — check Firestore rules."); return;
@@ -2700,19 +2756,23 @@ async function openChat(chatId) {
   // Start typing listener for this chat
   startTypingListener(chatId);
 
-  // Live profile listener for DM partner — keeps status/avatar/name fresh while chat is open.
-  // This is now the ONLY place we get live status for another user (friend profile
-  // listeners have been removed to prevent read explosions).
+  // DM partner profile — fetch once per DM open, using cache if fresh (< 5 min).
+  // Replaced onSnapshot (fired on every presence write = ~288 reads/day) with a
+  // single getDoc that only re-fetches when the cached data is stale.
   if (state.unsubscribers.dmPartnerProfile) { state.unsubscribers.dmPartnerProfile(); state.unsubscribers.dmPartnerProfile=null; }
   if (state.activeChat?.type==="dm") {
     const partnerUid=state.activeChat.members?.find(m=>m!==state.user?.uid);
     if (partnerUid) {
-      state.unsubscribers.dmPartnerProfile = onSnapshot(doc(db,"users",partnerUid), snap=>{
-        if (!snap.exists()) return;
-        state.userCache[partnerUid]=_augmentBadges({...snap.data(), uid:partnerUid});
-        renderChatHeader();
-        renderFriendsList();
-      }, ()=>{});
+      const cached=state.userCache[partnerUid];
+      const stale=!cached?._fetchedAt || (Date.now()-cached._fetchedAt)>5*60*1000;
+      if (!cached || stale) {
+        getDoc(doc(db,"users",partnerUid)).then(snap=>{
+          if (!snap.exists()) return;
+          state.userCache[partnerUid]=_augmentBadges({...snap.data(), uid:partnerUid, _fetchedAt:Date.now()});
+          renderChatHeader(); renderFriendsList();
+        }).catch(()=>{});
+      }
+      // No persistent listener — profile refreshes on next DM open if stale
       _checkListenerCap();
     }
   }
@@ -4007,6 +4067,7 @@ async function sendCurrentMessage() {
           replyToTextPreview: text,  // e.g. "/8ball will I win?"
         });
         await updateDoc(doc(db,"chats",chatId),{ lastMessage:result.slice(0,200), lastMessageAt:serverTimestamp(), lastSenderUid:state.user.uid });
+        _applyLastMessageLocally(chatId, result.slice(0,200), state.user.uid, false);
         _autoFlagCheck(text, cmdRef.id, chatId);
       } catch(err){ showToast("Send failed: "+err.message); composer.value=raw; }
       return;
@@ -4020,9 +4081,26 @@ async function sendCurrentMessage() {
   try {
     const msgRef = await addDoc(collection(db,"chats",chatId,"messages"),{ ...baseMsg, text });
     await updateDoc(doc(db,"chats",chatId),{ lastMessage:text.slice(0,200), lastMessageAt:serverTimestamp(), lastSenderUid:state.user.uid, lastMessageSilent:silent||false });
+    // Update local chat state immediately so sidebar reflects new lastMessage
+    // without waiting for the next poll (no extra Firestore read)
+    _applyLastMessageLocally(chatId, text.slice(0,200), state.user.uid, silent||false);
     // Autoflag check — silent, does not affect message delivery
     _autoFlagCheck(text, msgRef.id, chatId);
   } catch(err){ showToast("Send failed: "+err.message); composer.value=raw; updateSendBtn(); }
+}
+
+/** Update state.chats in memory after sending a message — keeps sidebar fresh without a read. */
+function _applyLastMessageLocally(chatId, preview, senderUid, silent) {
+  const chat = state.chats.find(c=>c.id===chatId);
+  if (!chat) return;
+  chat.lastMessage = preview;
+  chat.lastMessageAt = { toMillis: () => Date.now() };   // approximate timestamp
+  chat.lastSenderUid = senderUid;
+  chat.lastMessageSilent = silent;
+  state._prevChatTimes[chatId] = Date.now();
+  // Re-sort sidebar so this chat floats to top
+  state.chats.sort((a,b)=>(state._prevChatTimes[b.id]||0)-(state._prevChatTimes[a.id]||0));
+  renderChatLists();
 }
 
 
@@ -4210,6 +4288,7 @@ $("#create-group-confirm-btn").addEventListener("click", async ()=>{
       joinCode, leaders:[state.user.uid]
     });
     closeModal("create-group-modal");
+    _refreshChats();   // new group won't appear in sidebar until next poll otherwise
     // Show join code modal
     const codeDisplay=$("#group-code-display");
     if (codeDisplay) codeDisplay.textContent=joinCode;
@@ -4268,6 +4347,7 @@ async function joinByCode(code) {
     }
     await updateDoc(doc(db,"chats",chatId),{ members:arrayUnion(state.user.uid) });
     showToast(`Joined "${chatData.name}"!`);
+    await _refreshChats();   // ensure new chat appears in sidebar before opening
     openChat(chatId);
   } catch(err){ showToast("Error: "+err.message); }
 }
@@ -4300,7 +4380,7 @@ $("#add-member-confirm-btn")?.addEventListener("click", async ()=>{
   if (!state.activeChatId||!state.addMemberSelections.size) { closeModal("add-member-modal"); return; }
   try {
     await updateDoc(doc(db,"chats",state.activeChatId),{ members:arrayUnion(...state.addMemberSelections) });
-    closeModal("add-member-modal"); showToast("Members added");
+    closeModal("add-member-modal"); showToast("Members added"); _refreshChats();
   } catch(err){ showToast("Error: "+err.message); }
 });
 
@@ -4310,7 +4390,7 @@ $("#chat-leave-btn")?.addEventListener("click", ()=>{
     try {
       const newMembers=c.members.filter(m=>m!==state.user.uid);
       await updateDoc(doc(db,"chats",c.id),{members:newMembers});
-      showFriendsView(); showToast("Left group");
+      showFriendsView(); showToast("Left group"); _refreshChats();
     } catch(err){ showToast("Error: "+err.message); }
   }, { title:"Leave Group", yesLabel:"Leave", danger:true });
 });
@@ -6437,17 +6517,22 @@ document.addEventListener("click",e=>{
    ===================================================================== */
 async function showFullProfile(uid) {
   const modal = $("#full-profile-modal"); if (!modal) return;
-  // Always re-fetch the user doc so freshly-saved fields (favGame, etc.) appear
-  // even if our cache pre-dates them.
+  // Use cache if fresh (< 3 min), otherwise re-fetch so favGame/bio etc. are current.
   let profile = null;
-  try {
-    const d = await getDoc(doc(db, "users", uid));
-    if (d.exists()) {
-      profile = _augmentBadges({ ...d.data(), uid });
-      state.userCache[uid] = profile;
-    }
-  } catch(_) {}
-  if (!profile) profile = await fetchUserProfile(uid);
+  const cached = state.userCache[uid];
+  const isStale = !cached?._fetchedAt || (Date.now() - cached._fetchedAt) > 3 * 60 * 1000;
+  if (cached && !isStale) {
+    profile = cached;
+  } else {
+    try {
+      const d = await getDoc(doc(db, "users", uid));
+      if (d.exists()) {
+        profile = _augmentBadges({ ...d.data(), uid, _fetchedAt: Date.now() });
+        state.userCache[uid] = profile;
+      }
+    } catch(_) {}
+    if (!profile) profile = cached || await fetchUserProfile(uid);
+  }
   if (!profile) return;
   const isSelf = uid === state.user?.uid;
   const isFriend = state.friends.some(f => f.uid === uid);
@@ -6700,6 +6785,7 @@ document.addEventListener("click", async e=>{
         await deleteDoc(doc(db,"friendships",fs.friendshipId));
         closeModal("full-profile-modal");
         showToast("Friend removed.");
+        _refreshFriendships();
       } catch(err){ showToast("Error: "+err.message); }
     }, { title:"Remove Friend", yesLabel:"Remove", danger:true });
   }
@@ -10690,7 +10776,7 @@ document.addEventListener("click", async e=>{
   }
   else if (action==="ctx-pc-unfriend") {
     const fs = state.friends?.find(f=>f.uid===uid);
-    if (fs?.friendshipId) { await deleteDoc(doc(db,"friendships",fs.friendshipId)).catch(()=>{}); showToast("Friend removed"); }
+    if (fs?.friendshipId) { await deleteDoc(doc(db,"friendships",fs.friendshipId)).catch(()=>{}); showToast("Friend removed"); _refreshFriendships(); }
     $("#profile-card")?.classList.add("hidden");
   }
   else if (action==="ctx-pc-block") {
