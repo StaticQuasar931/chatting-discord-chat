@@ -4721,10 +4721,15 @@ async function _leaveAllSchoolChatsFor(domain) {
     // Primary deterministic school chat
     const chatId = _schoolChatId(domain);
     try {
-      const snap = await getDoc(doc(db, "chats", chatId));
-      if (snap.exists() && snap.data().members?.includes(state.user.uid)) {
-        const members = snap.data().members.filter(m => m !== state.user.uid);
-        const leaders = (snap.data().leaders||[]).filter(m => m !== state.user.uid);
+      // Use cached chat data first; only hit Firestore if not in state
+      const cached = state.chats.find(c => c.id === chatId);
+      const chatData = cached || await (async () => {
+        const snap = await getDoc(doc(db, "chats", chatId));
+        return snap.exists() ? snap.data() : null;
+      })();
+      if (chatData && chatData.members?.includes(state.user.uid)) {
+        const members = chatData.members.filter(m => m !== state.user.uid);
+        const leaders = (chatData.leaders||[]).filter(m => m !== state.user.uid);
         await updateDoc(doc(db, "chats", chatId), { members, leaders });
         // If we were currently viewing it, leave the view
         if (state.activeChatId === chatId) showFriendsView();

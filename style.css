@@ -3671,6 +3671,7 @@ body[data-theme="oled"] .badge-icon-wrap {
   aspect-ratio: 1; background: rgba(0,0,0,.35); border-radius: 50%;
   display: flex; align-items: center; justify-content: center;
   transition: background .1s;
+  min-width: 32px; min-height: 32px;
 }
 .c4-cell.c4-droppable { cursor: pointer; }
 .c4-cell.c4-col-hl { background: rgba(255,255,255,.12); }
@@ -4103,7 +4104,9 @@ body.has-chat-accent .send-btn { background: var(--c-chat-accent, var(--c-accent
 .game-card { position:relative; }
 .game-card:hover .game-fullscreen-btn { opacity:1; background:rgba(0,0,0,.75); }
 #game-fullscreen-overlay { position:fixed; inset:0; background:rgba(0,0,0,.85); z-index:1000; display:flex; align-items:center; justify-content:center; padding:20px; }
-#game-fullscreen-overlay .game-card { max-width:640px; width:100%; max-height:90vh; overflow-y:auto; transform:none; position:relative; }
+#game-fs-content { width:100%; max-width:660px; display:flex; align-items:center; justify-content:center; }
+#game-fullscreen-overlay .game-card { max-width:660px; width:100%; max-height:90vh; overflow-y:auto; transform:none; position:relative; }
+#game-fullscreen-overlay .game-fullscreen-btn { display:none; }
 #game-fs-close { position:fixed; top:16px; right:16px; width:40px; height:40px; border-radius:50%; background:rgba(255,255,255,.12); border:none; color:#fff; font-size:20px; cursor:pointer; z-index:1001; }
 
 /* =====================================================================
@@ -4111,6 +4114,7 @@ body.has-chat-accent .send-btn { background: var(--c-chat-accent, var(--c-accent
    ===================================================================== */
 .cups-row { display:flex; gap:16px; justify-content:center; padding:8px 0; }
 .cup-container { display:flex; flex-direction:column; align-items:center; gap:4px; padding:6px; border-radius:8px; transition:all .2s; }
+.cup-ball { text-align:center; font-size:24px; min-height:28px; line-height:28px; }
 .cup-container[data-game-action="cups-guess"]:hover { background:rgba(255,255,255,.08); transform:translateY(-4px); }
 .cup-shuffling { animation: cup-shake 0.4s ease-in-out infinite alternate; }
 @keyframes cup-shake { from{transform:translateX(-12px)} to{transform:translateX(12px)} }
@@ -4187,7 +4191,9 @@ body.has-chat-accent .send-btn { background: var(--c-chat-accent, var(--c-accent
 .uno-deck-btn { background:linear-gradient(135deg,#2d3748,#1a202c);
   border:2px solid rgba(255,255,255,.15); border-radius:8px;
   width:52px; height:78px; font-size:24px; cursor:pointer; color:#fff;
-  transition:opacity .12s, transform .1s; display:flex; align-items:center; justify-content:center; }
+  transition:opacity .12s, transform .1s; display:flex; align-items:center; justify-content:center; position:relative; }
+.uno-deck-stack { position:absolute; inset:3px; border-radius:6px;
+  background:rgba(255,255,255,.06); border:1px solid rgba(255,255,255,.1); pointer-events:none; }
 .uno-deck-btn:not(:disabled):hover { transform:translateY(-2px); opacity:.85; }
 .uno-deck-btn:disabled { opacity:.4; cursor:default; }
 .uno-draw-pending { color:var(--c-danger); font-weight:800; font-size:12px;
