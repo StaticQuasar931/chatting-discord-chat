@@ -606,23 +606,38 @@ function _isQuotaError(err) {
 function _showQuotaBanner() {
   if (_quotaShown) return;
   _quotaShown = true;
+
+  // Show on loading screen if it's still visible (quota hit during boot)
+  const loadingScreen = document.getElementById("loading-screen");
+  const loadingQuota  = document.getElementById("loading-quota-msg");
+  const loadingSpinner = document.getElementById("loading-spinner");
+  const loadingTip    = document.getElementById("loading-tip");
+  const loadingOnScreen = loadingScreen && !loadingScreen.classList.contains("hidden") &&
+                          loadingScreen.style.display !== "none";
+
+  if (loadingOnScreen && loadingQuota) {
+    loadingQuota.style.display = "";
+    if (loadingSpinner) loadingSpinner.style.display = "none";
+    if (loadingTip) loadingTip.style.display = "none";
+  }
+
+  // Also show the full-app overlay (visible once the main UI loads)
   const overlay = document.getElementById("quota-overlay");
   if (overlay) overlay.classList.remove("hidden");
-  // Poll every 30 s — hide the overlay as soon as a lightweight read succeeds
+
+  // Poll every 30 s — hide everything as soon as a lightweight read succeeds
   const _poll = setInterval(async () => {
     try {
-      // Just a cheap existence check — getDoc on appConfig is a single read
       await getDoc(doc(db, "appConfig", "update"));
-      // If we get here, quota is lifted
+      // Quota lifted — clean up
       clearInterval(_poll);
       _quotaShown = false;
+      if (loadingQuota) loadingQuota.style.display = "none";
+      if (loadingSpinner) loadingSpinner.style.display = "";
+      if (loadingTip) loadingTip.style.display = "";
       if (overlay) overlay.classList.add("hidden");
     } catch(e) {
-      if (!_isQuotaError(e)) {
-        // Different error (auth, network) — stop polling, don't hide
-        clearInterval(_poll);
-      }
-      // Still quota-exceeded → keep polling
+      if (!_isQuotaError(e)) clearInterval(_poll); // stop on unrelated errors
     }
   }, 30_000);
 }
