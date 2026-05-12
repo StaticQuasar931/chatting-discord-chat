@@ -1270,7 +1270,8 @@ onAuthStateChanged(auth, async firebaseUser => {
       googlePhotoURL: firebaseUser.photoURL||null,
       createdAt: existing?.createdAt || null
     };
-    state.userCache[state.user.uid] = { ...state.user };
+    // Seed cache with full profile data from the signin read (avoids redundant getDoc calls)
+    state.userCache[state.user.uid] = _augmentBadges({ ...state.user, ...(existing||{}) });
 
     if (!existing?.username) {
       showProfileSetupModal();
@@ -1279,9 +1280,9 @@ onAuthStateChanged(auth, async firebaseUser => {
       showAppUI();
       bootSubscriptions();
       bootBlocklistCheck();
-      _syncAutoEarnedBadges(); // write OG badge to Firestore if earned
-      _updateSchoolRailVisibility(); // show "School" rail btn if eligible domain
-      loadCloudPrefs();              // pull synced settings from /users/{uid}.prefs
+      _syncAutoEarnedBadges(existing);   // pass data — avoids a 2nd getDoc
+      _updateSchoolRailVisibility();
+      loadCloudPrefs(existing);          // pass data — avoids a 3rd getDoc
     }
   } else {
     state.user = null;
@@ -1309,7 +1310,8 @@ async function upsertUserProfile() {
    Writes any auto-earned badges (OG etc.) to Firestore on every sign-in
    so they're always persisted and visible to other users.
    ===================================================================== */
-async function _syncAutoEarnedBadges() {
+// existingData: already-fetched Firestore user doc data (avoids redundant getDoc)
+async function _syncAutoEarnedBadges(existingData=null) {
   if (!state.user?.uid || !state.user.createdAt) return;
   try {
     const created = state.user.createdAt?.toDate
@@ -1319,15 +1321,16 @@ async function _syncAutoEarnedBadges() {
     if (created.getTime() < OG_CUTOFF_MS) autoEarned.push("og");
     if (!autoEarned.length) return;
 
-    // Read current badges to avoid unnecessary writes
-    const snap = await getDoc(doc(db,"users",state.user.uid));
-    if (!snap.exists()) return;
-    const cur = snap.data().badges||[];
+    // Use passed-in profile data (from sign-in read) — avoids a separate getDoc
+    const cur = (existingData?.badges) || (state.userCache[state.user.uid]?.badges) || [];
     const missing = autoEarned.filter(b=>!cur.includes(b));
     if (!missing.length) return;
 
     await updateDoc(doc(db,"users",state.user.uid),{ badges: arrayUnion(...missing) });
-    console.log("[badges] auto-wrote:", missing);
+    // Update local cache too
+    if (state.userCache[state.user.uid]) {
+      state.userCache[state.user.uid].badges = [...new Set([...cur, ...missing])];
+    }
   } catch(e){ console.warn("[badges] sync failed:", e); }
 }
 
@@ -1380,21 +1383,21 @@ function _scheduleCloudPrefsSync() {
   };
 })();
 
-// Pull prefs from Firestore on sign-in and merge into localStorage. Local wins
-// on conflicts (so a user toggling something quickly during sign-in doesn't get
-// stomped) — we only fill in keys that are currently missing locally.
-async function loadCloudPrefs() {
+// Pull prefs from Firestore on sign-in and merge into localStorage. Local wins.
+// existingData: already-fetched Firestore doc data (avoids a separate getDoc read).
+// Falls back to a fresh getDoc only when called without data (e.g. manual pref sync).
+async function loadCloudPrefs(existingData=null) {
   if (!state.user?.uid) return;
   try {
-    const snap = await getDoc(doc(db, "users", state.user.uid));
-    if (snap.exists()) {
-      const cloudPrefs = snap.data().prefs || {};
-      for (const [k, v] of Object.entries(cloudPrefs)) {
-        if (typeof k !== "string" || !_PREF_KEY_RE.test(k)) continue;
-        if (localStorage.getItem(k) === null) {
-          localStorage.setItem(k, v);
-        }
-      }
+    let prefs = existingData?.prefs;
+    if (!prefs) {
+      // Fallback: only read if no data was passed (e.g. called outside sign-in)
+      const snap = await getDoc(doc(db, "users", state.user.uid));
+      prefs = snap.exists() ? (snap.data().prefs || {}) : {};
+    }
+    for (const [k, v] of Object.entries(prefs)) {
+      if (typeof k !== "string" || !_PREF_KEY_RE.test(k)) continue;
+      if (localStorage.getItem(k) === null) localStorage.setItem(k, v);
     }
   } catch(e) { /* silent — local prefs still work */ }
   _prefsLoadedFromCloud = true;
@@ -1757,6 +1760,13 @@ function cleanupAllSubscriptions() {
 
 function bootSubscriptions() {
   const uid = state.user.uid;
+  // Guard: if any listener already exists (e.g. auth re-fired), tear it down first
+  for (const k of Object.keys(state.unsubscribers)) {
+    if (typeof state.unsubscribers[k] === "function") {
+      try { state.unsubscribers[k](); } catch(_) {}
+      state.unsubscribers[k] = null;
+    }
+  }
   // Load cloud-saved favorites
   loadFavGifs();
   loadFavEmojis();
@@ -1785,50 +1795,25 @@ function bootSubscriptions() {
   // Start presence heartbeat
   startPresenceHeartbeat();
 
-  // Register cleanup with main unsubscribers so sign-out tears them down
-  state.unsubscribers.friendProfiles = ()=>{
-    for (const fn of Object.values(_friendProfileUnsubs)) { try{fn();}catch(_){} }
-    Object.keys(_friendProfileUnsubs).forEach(k=>delete _friendProfileUnsubs[k]);
-  };
+  // NOTE: Per-friend onSnapshot listeners have been removed.
+  // They caused N × 120-users × every-presence-write reads (~864K reads/day).
+  // Friend profiles are now fetched once (cached) when the friendships list loads,
+  // and refreshed lazily when a DM is opened (dmPartnerProfile listener in openChat).
+  // The _friendProfileUnsubs object is kept for debug display but stays empty.
 
   state.unsubscribers.friendships = onSnapshot(
     query(collection(db,"friendships"),where("users","array-contains",uid)),
     async snap=>{
       const list=[];
-      const seenUids=new Set();
       for (const d of snap.docs) {
         const data=d.data();
         const otherUid=data.users.find(u=>u!==uid);
         if (!otherUid) continue;
-        seenUids.add(otherUid);
-        // Use cache — live listener below keeps it fresh; no need to bust cache on every snapshot
+        // fetchUserProfile checks cache first — only reads Firestore on first encounter
         const profile=await fetchUserProfile(otherUid);
         list.push({ friendshipId:d.id, uid:otherUid,
           displayName:profile?.username||profile?.displayName||"Unknown",
           discriminator:profile?.discriminator||null, photoURL:profile?.photoURL||null });
-        // Set up live listener for this friend's profile if not already listening
-        if (!_friendProfileUnsubs[otherUid]) {
-          let _lastFriendStatus = state.userCache[otherUid]?.status;
-          let _lastFriendOnline = state.userCache[otherUid]?.isOnline;
-          _friendProfileUnsubs[otherUid] = onSnapshot(doc(db,"users",otherUid), pSnap=>{
-            if (!pSnap.exists()) return;
-            const pData = _augmentBadges({...pSnap.data(), uid:otherUid});
-            state.userCache[otherUid] = pData;
-            renderFriendsList();
-            // Only re-render chat list if status/online actually changed (avoids costly re-render on every keystroke update)
-            const newStatus = pData.status, newOnline = pData.isOnline;
-            if (newStatus !== _lastFriendStatus || newOnline !== _lastFriendOnline) {
-              _lastFriendStatus = newStatus; _lastFriendOnline = newOnline;
-              renderChatLists();
-            }
-            if (state.activeChat?.type==="dm" &&
-                state.activeChat.members?.includes(otherUid)) renderChatHeader();
-          }, ()=>{});
-        }
-      }
-      // Remove listeners for removed friends
-      for (const fid of Object.keys(_friendProfileUnsubs)) {
-        if (!seenUids.has(fid)) { _friendProfileUnsubs[fid](); delete _friendProfileUnsubs[fid]; }
       }
       list.sort((a,b)=>a.displayName.localeCompare(b.displayName));
       state.friends=list;
@@ -1965,7 +1950,7 @@ function _augmentBadges(profile) {
 async function fetchUserProfile(uid) {
   if (state.userCache[uid]) return state.userCache[uid];
   try {
-    const d = await getDoc(doc(db,"users",uid));
+    const d = await _trackedRead(getDoc(doc(db,"users",uid)));
     if (d.exists()) {
       state.userCache[uid]=_augmentBadges(d.data());
       return state.userCache[uid];
@@ -2715,7 +2700,9 @@ async function openChat(chatId) {
   // Start typing listener for this chat
   startTypingListener(chatId);
 
-  // Live profile listener for DM partner — keeps status/avatar/name fresh
+  // Live profile listener for DM partner — keeps status/avatar/name fresh while chat is open.
+  // This is now the ONLY place we get live status for another user (friend profile
+  // listeners have been removed to prevent read explosions).
   if (state.unsubscribers.dmPartnerProfile) { state.unsubscribers.dmPartnerProfile(); state.unsubscribers.dmPartnerProfile=null; }
   if (state.activeChat?.type==="dm") {
     const partnerUid=state.activeChat.members?.find(m=>m!==state.user?.uid);
@@ -2726,6 +2713,7 @@ async function openChat(chatId) {
         renderChatHeader();
         renderFriendsList();
       }, ()=>{});
+      _checkListenerCap();
     }
   }
 
@@ -3545,6 +3533,8 @@ function renderMessages() {
   _maybeRefocusGameInput?.();
   // Attach drawing canvas event handlers for Draw & Guess game
   _attachDrawCanvases?.();
+  // Keep fullscreen overlay in sync with live game state
+  _syncFullscreenOverlay?.();
 }
 
 // Unread divider dismiss — click to clear the marker and hide the bar
@@ -6253,18 +6243,17 @@ async function showProfileCard(uid, event) {
   const badgesEl=$("#profile-card-badges");
   if (badgesEl) {
     badgesEl.innerHTML=renderBadges(profile.badges||[]);
-    // Async fetch extra badges from Firestore (won't block card show)
-    getDoc(doc(db,"userBadges",uid)).then(snap=>{
-      if (!snap.exists()) return;
-      const fb = snap.data()?.badges || [];
-      if (!fb.length) return;
-      const merged = [...new Set([...(profile.badges||[]), ...fb])];
-      // Cache so repeated opens are fast
-      state.userCache[uid] = {...profile, badges: merged};
-      if (!$("#profile-card")?.classList.contains("hidden")) {
-        badgesEl.innerHTML = renderBadges(merged);
-      }
-    }).catch(()=>{});
+    // Only fetch extra badges once per session per user (_badgesFetched flag in cache)
+    if (!state.userCache[uid]?._badgesFetched) {
+      _trackedRead(getDoc(doc(db,"userBadges",uid))).then(snap=>{
+        const fb = snap.exists() ? (snap.data()?.badges||[]) : [];
+        const merged = [...new Set([...(profile.badges||[]), ...fb])];
+        state.userCache[uid] = {...(state.userCache[uid]||profile), badges: merged, _badgesFetched: true};
+        if (!$("#profile-card")?.classList.contains("hidden")) {
+          badgesEl.innerHTML = renderBadges(merged);
+        }
+      }).catch(()=>{ if (state.userCache[uid]) state.userCache[uid]._badgesFetched = true; });
+    }
   }
 
   // Name / custom status / bio
@@ -6596,17 +6585,18 @@ async function showFullProfile(uid) {
     } else fpMutualGroups.style.display="none";
   } else if (fpMutualGroups) fpMutualGroups.style.display="none";
 
-  // Badges
+  // Badges — reuse cached result from profile card if available
   const fpBadges = $("#fp-badges");
   if (fpBadges) {
     fpBadges.innerHTML = renderBadges(profile.badges||[]);
-    getDoc(doc(db,"userBadges",uid)).then(snap=>{
-      if (!snap.exists()) return;
-      const fb = snap.data()?.badges||[];
-      if (!fb.length) return;
-      const merged = [...new Set([...(profile.badges||[]),...fb])];
-      fpBadges.innerHTML = renderBadges(merged);
-    }).catch(()=>{});
+    if (!state.userCache[uid]?._badgesFetched) {
+      _trackedRead(getDoc(doc(db,"userBadges",uid))).then(snap=>{
+        const fb = snap.exists() ? (snap.data()?.badges||[]) : [];
+        const merged = [...new Set([...(profile.badges||[]),...fb])];
+        state.userCache[uid] = {...(state.userCache[uid]||profile), badges: merged, _badgesFetched: true};
+        fpBadges.innerHTML = renderBadges(merged);
+      }).catch(()=>{ if (state.userCache[uid]) state.userCache[uid]._badgesFetched = true; });
+    }
   }
 
   // Notes — only shown for non-self
@@ -7346,13 +7336,14 @@ function _allMLT() {
    CUPS (SHELL GAME) HELPERS
    ===================================================================== */
 function _genShuffleSeq(startPos) {
-  // Generate a sequence of swap pairs to shuffle the cups 8 times
+  // Generate a sequence of swap pairs to shuffle the cups 8 times.
+  // Firestore bans nested arrays — store each pair as {a, b} objects instead.
   const swaps = [];
   let pos = startPos;
   for (let i = 0; i < 8; i++) {
     const others = [0,1,2].filter(x => x !== pos);
     const swapWith = others[Math.floor(Math.random() * 2)];
-    swaps.push([pos, swapWith]);
+    swaps.push({ a: pos, b: swapWith }); // ← was [pos, swapWith] — nested array not allowed
     pos = swapWith;
   }
   return { swaps, finalPos: pos };
@@ -7573,7 +7564,7 @@ async function _launchGame(kind, opts) {
       drawPending: 0,
       unoCalled: {}
     };
-    preview = "🃏 UNO — join and play!";
+    preview = "🃏 UNO [BETA] — join and play!";
   } else if (kind === "draw") {
     const words = ["cat","dog","house","car","tree","pizza","phone","star","heart","fish","sun","moon","cloud","boat","ball","hat","chair","book","flower","guitar"];
     const word = words[Math.floor(Math.random() * words.length)];
@@ -8447,52 +8438,92 @@ function renderGameCard(m) {
     const isMyTurn = g.turn === myUid && g.phase === "playing";
     const UNO_COLOR = {red:"#ef4444",yellow:"#eab308",green:"#22c55e",blue:"#3b82f6",wild:"#8b5cf6"};
 
+    const unoTitle = `<div class="uno-title-row"><span class="game-title">🃏 UNO</span><span class="uno-beta-badge">BETA</span></div>`;
+
     if (g.phase === "waiting") {
       const pc = (g.players||[]).length;
+      const playerNames = (g.players||[]).map(uid =>
+        escapeHtml(state.userCache[uid]?.username || state.userCache[uid]?.displayName || "Player")
+      ).join(", ");
       return `<div class="game-card game-uno"><button class="game-fullscreen-btn" data-game-action="fullscreen" title="Fullscreen">⛶</button>
-        <div class="game-title">🃏 UNO</div>
-        <div class="game-status">👥 ${pc} player${pc===1?"":"s"} joined</div>
-        ${!inGame ? `<button class="game-btn" data-game-action="uno-join" data-game-msg="${escapeHtml(m.id)}">Join</button>` : `<span class="game-status" style="color:var(--c-success)">✅ Joined</span>`}
-        ${isHost && pc>=2 ? `<button class="game-btn" data-game-action="uno-start" data-game-msg="${escapeHtml(m.id)}" style="margin-top:6px;">▶️ Deal Cards</button>` : isHost ? `<div class="game-status" style="font-size:11px;">Need 2+ players</div>` : ""}
+        ${unoTitle}
+        <div class="uno-lobby">
+          <div class="uno-lobby-players">
+            <div class="uno-lobby-count">👥 ${pc} / 8</div>
+            ${pc>0?`<div class="uno-lobby-names">${playerNames}</div>`:""}
+          </div>
+          ${!inGame
+            ? `<button class="btn-primary uno-join-btn" data-game-action="uno-join" data-game-msg="${escapeHtml(m.id)}">✋ Join Game</button>`
+            : `<div class="uno-joined-badge">✅ You're in!</div>`}
+          ${isHost && pc>=2
+            ? `<button class="btn-primary uno-start-btn" data-game-action="uno-start" data-game-msg="${escapeHtml(m.id)}">▶️ Start Game</button>`
+            : isHost
+              ? `<div class="game-status" style="font-size:11px;opacity:.7;">Waiting for at least 2 players…</div>`
+              : `<div class="game-status" style="font-size:11px;opacity:.7;">Waiting for host to start…</div>`}
+        </div>
       </div>`;
     }
 
     if (g.phase === "playing" || g.phase === "finished") {
       const top = g.discardTop;
-      const topColor = top ? UNO_COLOR[top.activeColor || top.c] : "#888";
+      const topColor = top ? UNO_COLOR[top.activeColor || top.c] : "#555";
       const topLabel = top ? _unoCardLabel(top) : "?";
+      const topColorName = top ? (top.activeColor || top.c) : "";
 
       const handHtml = myHand.map((card, idx) => {
         const canPlay = isMyTurn && _unoCanPlay(card, top, g.drawPending);
         const bg = UNO_COLOR[card.c] || "#888";
+        const label = _unoCardLabel(card);
         return `<button class="uno-card${canPlay?" playable":""}"
           data-game-action="${canPlay?"uno-play":""}" data-game-msg="${escapeHtml(m.id)}"
           data-card-idx="${idx}" style="background:${bg};"
-          title="${_unoCardLabel(card)}"
+          title="${label}"
           ${canPlay?"":"disabled"}>
-          <span class="uno-card-val">${_unoCardLabel(card)}</span>
+          <span class="uno-card-corner tl">${label}</span>
+          <span class="uno-card-center">${label}</span>
+          <span class="uno-card-corner br">${label}</span>
         </button>`;
       }).join("");
 
-      const turnName = g.turn ? escapeHtml((state.userCache[g.turn]?.username || state.userCache[g.turn]?.displayName || "Player")) : "";
+      const turnName = g.turn ? escapeHtml(state.userCache[g.turn]?.username || state.userCache[g.turn]?.displayName || "Player") : "";
       const statusMsg = g.phase === "finished"
-        ? `🎉 ${escapeHtml(state.userCache[g.winner]?.username || "Someone")} wins UNO!`
-        : isMyTurn ? "Your turn!" : `${turnName}'s turn`;
+        ? `🎉 ${escapeHtml(state.userCache[g.winner]?.username || "Someone")} wins!`
+        : isMyTurn
+          ? (g.drawPending>0 ? `⚡ Your turn — draw +${g.drawPending} or play a card!` : "⭐ Your turn!")
+          : `${turnName}'s turn`;
+      const statusColor = g.phase==="finished" ? "var(--c-success)" : isMyTurn ? "var(--c-accent)" : "var(--t-muted)";
 
       return `<div class="game-card game-uno"><button class="game-fullscreen-btn" data-game-action="fullscreen" title="Fullscreen">⛶</button>
-        <div class="game-title">🃏 UNO</div>
-        <div class="uno-play-area">
-          <div class="uno-discard" style="background:${topColor};" title="Discard pile">
-            <span>${topLabel}</span>
+        ${unoTitle}
+        <div class="uno-table">
+          <div class="uno-discard-wrap">
+            <div class="uno-discard-label">Discard</div>
+            <div class="uno-discard" style="background:${topColor};">
+              <span class="uno-discard-corner tl">${topLabel}</span>
+              <span class="uno-discard-center">${topLabel}</span>
+              <span class="uno-discard-corner br">${topLabel}</span>
+            </div>
+            ${topColorName?`<div class="uno-active-color" style="background:${topColor};">${topColorName}</div>`:""}
           </div>
-          <div class="uno-deck-area">
-            <button class="uno-deck-btn" data-game-action="uno-draw" data-game-msg="${escapeHtml(m.id)}" ${!isMyTurn?"disabled":""}>Draw</button>
+          <div class="uno-deck-wrap">
+            <div class="uno-discard-label">Draw</div>
+            <button class="uno-deck-btn" data-game-action="uno-draw" data-game-msg="${escapeHtml(m.id)}" ${!isMyTurn?"disabled":""}>
+              <span class="uno-deck-stack"></span>
+              🂠
+            </button>
             ${g.drawPending>0?`<div class="uno-draw-pending">+${g.drawPending}</div>`:""}
           </div>
         </div>
-        <div class="game-status" style="margin:6px 0;">${statusMsg}</div>
-        ${inGame ? `<div class="uno-hand">${handHtml || "<span style='color:var(--t-muted)'>No cards</span>"}</div>` : `<div class="game-status" style="color:var(--t-muted);">Spectating</div>`}
-        ${myHand.length === 1 && isMyTurn ? `<button class="game-btn uno-btn" data-game-action="uno-call" data-game-msg="${escapeHtml(m.id)}" style="margin-top:6px;background:var(--c-danger);">UNO! 🎴</button>` : ""}
+        <div class="uno-status-bar" style="color:${statusColor};">${statusMsg}</div>
+        ${inGame
+          ? `<div class="uno-hand-wrap">
+               <div class="uno-hand-label">Your hand (${myHand.length})</div>
+               <div class="uno-hand">${handHtml || `<span class="uno-no-cards">No cards</span>`}</div>
+             </div>`
+          : `<div class="game-status" style="color:var(--t-muted);margin-top:8px;">👀 Spectating</div>`}
+        ${myHand.length === 1 && isMyTurn
+          ? `<button class="uno-call-btn" data-game-action="uno-call" data-game-msg="${escapeHtml(m.id)}">🗣 UNO!</button>`
+          : ""}
       </div>`;
     }
   }
@@ -8570,19 +8601,46 @@ document.addEventListener("click", e => {
   if (e.target.closest("[data-game-action='fullscreen']")) {
     const card = e.target.closest(".game-card");
     if (!card) return;
+    // Find the msgId so we can live-update the overlay on every renderMessages()
+    const msgId = card.querySelector("[data-game-msg]")?.dataset?.gameMsg
+               || card.dataset?.gameMsgId || null;
+    document.getElementById("game-fullscreen-overlay")?.remove(); // close any existing
     const ov = document.createElement("div");
     ov.id = "game-fullscreen-overlay";
-    ov.innerHTML = `<button id="game-fs-close" title="Close fullscreen">✕</button>` + card.outerHTML;
+    if (msgId) ov.dataset.fsMsgId = msgId;
+    ov.innerHTML = `<button id="game-fs-close" title="Close (Esc)">✕</button><div id="game-fs-content"></div>`;
+    ov.querySelector("#game-fs-content").innerHTML = card.outerHTML;
     document.body.appendChild(ov);
     ov.querySelector("#game-fs-close").onclick = () => ov.remove();
-    ov.onclick = e => { if (e.target === ov) ov.remove(); };
-    document.addEventListener("keydown", function esc(ev) { if (ev.key === "Escape") { ov.remove(); document.removeEventListener("keydown", esc); } }, { once: true });
+    ov.onclick = ev => { if (ev.target === ov) ov.remove(); };
+    document.addEventListener("keydown", function esc(ev) {
+      if (ev.key === "Escape") { ov.remove(); document.removeEventListener("keydown", esc); }
+    }, { once: true });
     return;
   }
   if (e.target.id === "game-fs-close" || e.target.closest("#game-fullscreen-overlay") === e.target) {
     document.getElementById("game-fullscreen-overlay")?.remove();
   }
 });
+
+/* Keep the fullscreen overlay in sync with live game state.
+   Called at the end of renderMessages() so every Firestore update reflects immediately. */
+function _syncFullscreenOverlay() {
+  const ov = document.getElementById("game-fullscreen-overlay");
+  if (!ov) return;
+  const msgId = ov.dataset.fsMsgId;
+  if (!msgId) return;
+  const msg = state.messages.find(m => m.id === msgId);
+  if (!msg || !msg.gameData) return;
+  const content = document.getElementById("game-fs-content");
+  if (!content) return;
+  const newHtml = renderGameCard(msg);
+  if (newHtml) {
+    content.innerHTML = newHtml;
+    // Re-attach draw canvases if this is a drawing game
+    if (msg.gameData.kind === "draw") _attachDrawCanvases();
+  }
+}
 
 document.addEventListener("click", async e => {
   const btn = e.target.closest("[data-game-action]");
@@ -9543,21 +9601,21 @@ function renderTypingIndicator(names=[]) {
   el.classList.remove("hidden");
 }
 
-/* Sidebar typing indicators — listen to top 5 most-recent chats only.
-   15 was excessive (120 users × 15 = 1,800 listeners). Active chat gets
-   its own dedicated listener via startTypingListener(), so 5 covers the
-   rest of the visible sidebar without ballooning listener count. */
+/* Sidebar typing indicators.
+   DISABLED: Sidebar typing listeners (even just 5) cost 120_users × 5 × every_keystroke reads.
+   With a busy chat that's 100K+ reads/day from typing alone.
+   The active chat uses startTypingListener() (1 listener). Sidebar just won't show "typing…".
+   Re-enable by removing the early return below if usage allows it. */
 function _updateSidebarTypingListeners() {
   if (!state.user) return;
-  // Low-bandwidth mode: skip sidebar typing listeners entirely
-  if (state.lowBandwidthMode) {
-    for (const id of Object.keys(state.sidebarTypingUnsubs)) {
-      try { state.sidebarTypingUnsubs[id](); } catch(_){}
-    }
-    state.sidebarTypingUnsubs = {}; state.sidebarTyping = {};
-    return;
+  // Always tear down any existing sidebar typing listeners and return
+  for (const id of Object.keys(state.sidebarTypingUnsubs)) {
+    try { state.sidebarTypingUnsubs[id](); } catch(_){}
   }
-  const top = state.chats.slice(0, 5);
+  state.sidebarTypingUnsubs = {}; state.sidebarTyping = {};
+  return; // ← sidebar typing disabled to prevent read explosion
+  // eslint-disable-next-line no-unreachable
+  const top = state.chats.slice(0, 0);
   const wanted = new Set(top.map(c => c.id));
   for (const id of Object.keys(state.sidebarTypingUnsubs)) {
     if (!wanted.has(id)) {
@@ -9905,25 +9963,52 @@ if (_composerEl) {
 let _presenceTimer=null;
 let _lastPresenceWrite=0;  // ms timestamp of last successful presence write
 let _dbgPresenceWrites=0;  // session counter for debug display
-const _PRESENCE_MIN_INTERVAL = 60_000; // don't write more often than once per 60 s
+// Min 4 min between writes — avoids hammering on focus/blur spam.
+// Each write triggers ownProfile onSnapshot for the writer, so less = fewer reads.
+const _PRESENCE_MIN_INTERVAL = 240_000;
 
 // Module-level friend profile listener map (key=uid, value=unsubscribe fn)
 // Declared here (not inside bootSubscriptions) so debug tools can inspect it
 const _friendProfileUnsubs = {};
 
+/* ── Global read counter (debug mode only) ────────────────────────────── */
+let _dbgReadCount = 0;   // counts getDoc / getDocs calls this session
+
+/* Wrap a getDoc/getDocs call with the debug counter.
+   Usage: _trackedRead(getDoc(ref))   or   _trackedRead(getDocs(q)) */
+function _trackedRead(promise) {
+  if (localStorage.getItem("sc_debug_stats")) {
+    _dbgReadCount++;
+    _updateDebugStats();
+  }
+  return promise;
+}
+
+/* Listener cap: warn in console when count exceeds this threshold */
+const _LISTENER_CAP = 20;
+function _checkListenerCap() {
+  const count =
+    Object.keys(state.unsubscribers||{}).filter(k=>typeof state.unsubscribers[k]==="function").length +
+    Object.keys(state.sidebarTypingUnsubs||{}).length +
+    Object.keys(_friendProfileUnsubs||{}).filter(k=>typeof _friendProfileUnsubs[k]==="function").length;
+  if (count > _LISTENER_CAP) {
+    console.warn(`[SC:listeners] Cap exceeded — ${count} active (limit ${_LISTENER_CAP}). Check for leaks.`);
+  }
+  return count;
+}
+
 /* Update the debug stats panel (only when visible) */
 function _updateDebugStats() {
   if (!localStorage.getItem("sc_debug_stats")) return;
-  const listenerCount =
-    Object.keys(state.unsubscribers||{}).filter(k=>typeof state.unsubscribers[k]==="function").length +
-    Object.keys(state.sidebarTypingUnsubs||{}).length +
-    Object.keys(_friendProfileUnsubs||{}).length;
+  const listenerCount = _checkListenerCap();
   const el = document.getElementById("dbg-listener-count");
-  if (el) el.textContent = listenerCount;
+  if (el) el.textContent = listenerCount + (listenerCount > _LISTENER_CAP ? " ⚠️" : "");
   const el2 = document.getElementById("dbg-presence-writes");
   if (el2) el2.textContent = _dbgPresenceWrites;
   const el3 = document.getElementById("dbg-cache-size");
   if (el3) el3.textContent = Object.keys(state.userCache||{}).length;
+  const el4 = document.getElementById("dbg-read-count");
+  if (el4) el4.textContent = _dbgReadCount;
 }
 
 function resolveStatus(profile) {
@@ -9955,8 +10040,8 @@ async function updatePresence(force=false) {
 function startPresenceHeartbeat() {
   updatePresence(true); // first write is always forced
   clearInterval(_presenceTimer);
-  // Heartbeat every 2 minutes (was 90s) — Firestore writes are expensive
-  _presenceTimer=setInterval(()=>updatePresence(), 120_000);
+  // Heartbeat every 5 minutes — each write triggers ownProfile listener read
+  _presenceTimer=setInterval(()=>updatePresence(), 300_000);
 }
 
 async function setOfflinePresence() {

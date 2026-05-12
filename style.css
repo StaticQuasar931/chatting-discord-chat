@@ -4099,9 +4099,9 @@ body.has-chat-accent .send-btn { background: var(--c-chat-accent, var(--c-accent
 /* =====================================================================
    GAME FULLSCREEN OVERLAY
    ===================================================================== */
-.game-fullscreen-btn { position:absolute; top:8px; right:8px; width:28px; height:28px; border-radius:6px; background:rgba(0,0,0,.35); border:none; color:var(--t-secondary); cursor:pointer; font-size:14px; display:flex; align-items:center; justify-content:center; opacity:0; transition:opacity .15s; }
+.game-fullscreen-btn { position:absolute; top:8px; right:8px; width:28px; height:28px; border-radius:6px; background:rgba(0,0,0,.55); border:1px solid rgba(255,255,255,.18); color:#fff; cursor:pointer; font-size:14px; display:flex; align-items:center; justify-content:center; opacity:.55; transition:opacity .15s, background .15s; }
 .game-card { position:relative; }
-.game-card:hover .game-fullscreen-btn { opacity:1; }
+.game-card:hover .game-fullscreen-btn { opacity:1; background:rgba(0,0,0,.75); }
 #game-fullscreen-overlay { position:fixed; inset:0; background:rgba(0,0,0,.85); z-index:1000; display:flex; align-items:center; justify-content:center; padding:20px; }
 #game-fullscreen-overlay .game-card { max-width:640px; width:100%; max-height:90vh; overflow-y:auto; transform:none; position:relative; }
 #game-fs-close { position:fixed; top:16px; right:16px; width:40px; height:40px; border-radius:50%; background:rgba(255,255,255,.12); border:none; color:#fff; font-size:20px; cursor:pointer; z-index:1001; }
@@ -4160,17 +4160,71 @@ body.has-chat-accent .send-btn { background: var(--c-chat-accent, var(--c-accent
 /* =====================================================================
    UNO GAME
    ===================================================================== */
-.uno-play-area { display:flex; gap:12px; align-items:center; justify-content:center; padding:8px; }
-.uno-discard { width:56px; height:84px; border-radius:8px; display:flex; align-items:center; justify-content:center; font-size:22px; font-weight:700; color:#fff; box-shadow:0 3px 10px rgba(0,0,0,.3); border:2px solid rgba(255,255,255,.3); }
-.uno-deck-btn { background:var(--c-input-2); border:2px solid var(--c-border-2); border-radius:8px; width:56px; height:84px; font-size:12px; cursor:pointer; color:var(--t-primary); font-weight:700; }
-.uno-deck-btn:disabled { opacity:.5; cursor:default; }
-.uno-draw-pending { color:var(--c-danger); font-weight:700; font-size:13px; text-align:center; margin-top:4px; }
-.uno-hand { display:flex; flex-wrap:wrap; gap:4px; justify-content:center; padding:6px 0; }
-.uno-card { width:40px; height:60px; border-radius:6px; border:2px solid rgba(255,255,255,.2); color:#fff; font-size:13px; font-weight:700; cursor:default; opacity:.65; transition:all .12s; display:flex; align-items:center; justify-content:center; }
-.uno-card.playable { opacity:1; cursor:pointer; transform:translateY(-4px); box-shadow:0 4px 12px rgba(0,0,0,.4); border-color:rgba(255,255,255,.5); }
-.uno-card.playable:hover { transform:translateY(-8px); }
-.uno-card-val { font-size:14px; pointer-events:none; }
-.uno-btn { font-weight:800; letter-spacing:.5px; }
+/* Title row with BETA badge */
+.uno-title-row { display:flex; align-items:center; gap:8px; margin-bottom:2px; }
+.uno-beta-badge { font-size:9px; font-weight:800; letter-spacing:.08em; text-transform:uppercase;
+  background:#f97316; color:#fff; padding:2px 6px; border-radius:4px; flex-shrink:0; }
+
+/* Lobby (waiting phase) */
+.uno-lobby { display:flex; flex-direction:column; align-items:center; gap:10px; padding:8px 0 4px; }
+.uno-lobby-players { text-align:center; }
+.uno-lobby-count { font-size:18px; font-weight:700; color:var(--t-normal); }
+.uno-lobby-names { font-size:11px; color:var(--t-muted); margin-top:2px; }
+.uno-join-btn { font-size:14px; font-weight:700; padding:10px 28px; border-radius:10px; min-width:140px; }
+.uno-joined-badge { background:rgba(34,197,94,.15); border:1px solid rgba(34,197,94,.4);
+  color:#22c55e; border-radius:8px; padding:7px 18px; font-size:13px; font-weight:600; }
+.uno-start-btn { font-size:13px; padding:8px 20px; border-radius:8px; }
+
+/* Table (playing phase) */
+.uno-table { display:flex; gap:20px; align-items:flex-start; justify-content:center; padding:10px 0 6px; }
+.uno-discard-wrap, .uno-deck-wrap { display:flex; flex-direction:column; align-items:center; gap:4px; }
+.uno-discard-label { font-size:10px; font-weight:600; text-transform:uppercase;
+  letter-spacing:.06em; color:var(--t-muted); }
+.uno-discard { width:52px; height:78px; border-radius:8px; position:relative;
+  display:flex; align-items:center; justify-content:center;
+  font-size:20px; font-weight:700; color:#fff;
+  box-shadow:0 4px 14px rgba(0,0,0,.4); border:2px solid rgba(255,255,255,.35); }
+.uno-deck-btn { background:linear-gradient(135deg,#2d3748,#1a202c);
+  border:2px solid rgba(255,255,255,.15); border-radius:8px;
+  width:52px; height:78px; font-size:24px; cursor:pointer; color:#fff;
+  transition:opacity .12s, transform .1s; display:flex; align-items:center; justify-content:center; }
+.uno-deck-btn:not(:disabled):hover { transform:translateY(-2px); opacity:.85; }
+.uno-deck-btn:disabled { opacity:.4; cursor:default; }
+.uno-draw-pending { color:var(--c-danger); font-weight:800; font-size:12px;
+  background:rgba(239,68,68,.15); border-radius:4px; padding:1px 5px; }
+.uno-active-color { font-size:9px; font-weight:700; text-transform:uppercase;
+  padding:2px 6px; border-radius:4px; color:#fff; opacity:.85; letter-spacing:.05em; }
+
+/* Card corners label (like real UNO cards) */
+.uno-discard-corner, .uno-card-corner { position:absolute; font-size:10px; font-weight:800; line-height:1; pointer-events:none; }
+.uno-discard-corner.tl, .uno-card-corner.tl { top:4px; left:5px; }
+.uno-discard-corner.br, .uno-card-corner.br { bottom:4px; right:5px; transform:rotate(180deg); }
+.uno-discard-center, .uno-card-center { font-size:20px; pointer-events:none; }
+.uno-discard { position:relative; }
+
+/* Status bar */
+.uno-status-bar { font-size:13px; font-weight:600; text-align:center; padding:4px 0; margin:2px 0; }
+
+/* Hand */
+.uno-hand-wrap { display:flex; flex-direction:column; gap:4px; width:100%; }
+.uno-hand-label { font-size:10px; font-weight:600; text-transform:uppercase;
+  letter-spacing:.06em; color:var(--t-muted); }
+.uno-hand { display:flex; flex-wrap:wrap; gap:5px; justify-content:center; padding:4px 0; }
+.uno-no-cards { font-size:12px; color:var(--t-muted); }
+.uno-card { width:44px; height:66px; border-radius:7px; position:relative;
+  border:2px solid rgba(255,255,255,.2); color:#fff;
+  cursor:default; opacity:.55; transition:all .12s;
+  display:flex; align-items:center; justify-content:center; flex-shrink:0; }
+.uno-card.playable { opacity:1; cursor:pointer; transform:translateY(-5px);
+  box-shadow:0 5px 14px rgba(0,0,0,.45); border-color:rgba(255,255,255,.6); }
+.uno-card.playable:hover { transform:translateY(-10px); box-shadow:0 8px 18px rgba(0,0,0,.5); }
+
+/* UNO! call button */
+.uno-call-btn { width:100%; margin-top:8px; padding:9px;
+  background:var(--c-danger); color:#fff; border:none; border-radius:8px;
+  font-size:14px; font-weight:800; letter-spacing:.04em; cursor:pointer;
+  transition:opacity .12s; }
+.uno-call-btn:hover { opacity:.85; }
 
 /* =====================================================================
    DRAW & GUESS GAME

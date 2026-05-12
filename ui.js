@@ -1159,7 +1159,8 @@ export function buildUI() {
 
           <div id="settings-debug-stats" style="margin-top:14px;padding:10px 12px;background:var(--bg-2);border-radius:8px;font-size:11px;color:var(--t-muted);display:none;">
             <div style="font-weight:600;color:var(--t-normal);margin-bottom:6px;">🔧 Firestore Debug</div>
-            <div>Active listeners: <strong id="dbg-listener-count">0</strong></div>
+            <div>Active listeners: <strong id="dbg-listener-count">0</strong> <span style="opacity:.6;font-size:10px;">(cap: 20)</span></div>
+            <div>getDoc reads (session): <strong id="dbg-read-count">0</strong></div>
             <div>Presence writes (session): <strong id="dbg-presence-writes">0</strong></div>
             <div>User cache entries: <strong id="dbg-cache-size">0</strong></div>
             <div style="margin-top:6px;"><button class="btn-secondary" style="font-size:11px;padding:3px 8px;" id="dbg-show-listeners-btn">Show listener list</button></div>
