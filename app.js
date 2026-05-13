@@ -420,6 +420,12 @@ const state = {
   _profileRefreshTimer: null,
   _friendshipsTimer: null,
   _friendRequestsTimer: null,
+  // Concurrency guards — prevent overlapping poll fetches
+  _refreshChatsInProgress: false,
+  _refreshFriendshipsInProgress: false,
+  _refreshFriendRequestsInProgress: false,
+  // Visibility-change cooldown — timestamp of last tab-focus refresh
+  _visibilityLastRefresh: 0,
   // Shared chat-times map (moved out of bootSubscriptions closure so polling fns can access it)
   _prevChatTimes: {},
   filters: { sidebar: "" },
@@ -1795,7 +1801,8 @@ function cleanupAllSubscriptions() {
 
 /** Refresh the full chats list and update the sidebar. Safe to call at any time. */
 async function _refreshChats() {
-  if (!state.user?.uid) return;
+  if (!state.user?.uid || state._refreshChatsInProgress) return;
+  state._refreshChatsInProgress = true;
   const uid = state.user.uid;
   try {
     const snap = await getDocs(query(collection(db,"chats"),where("members","array-contains",uid)));
@@ -1846,6 +1853,7 @@ async function _refreshChats() {
       if (updated) { state.activeChat=updated; renderChatHeader(); }
     }
   } catch(err) { _handleFirestoreError(err,"_refreshChats"); }
+  finally { state._refreshChatsInProgress = false; }
 }
 
 /** Refresh own profile from Firestore — applies changes made on another device. */
@@ -1874,7 +1882,8 @@ async function _refreshOwnProfile() {
 
 /** Refresh the friends list from Firestore. Called on boot and after friend add/remove. */
 async function _refreshFriendships() {
-  if (!state.user?.uid) return;
+  if (!state.user?.uid || state._refreshFriendshipsInProgress) return;
+  state._refreshFriendshipsInProgress = true;
   const uid = state.user.uid;
   try {
     const snap = await getDocs(query(collection(db,"friendships"),where("users","array-contains",uid)));
@@ -1886,17 +1895,20 @@ async function _refreshFriendships() {
       const profile=await fetchUserProfile(otherUid);
       list.push({ friendshipId:d.id, uid:otherUid,
         displayName:profile?.username||profile?.displayName||"Unknown",
-        discriminator:profile?.discriminator||null, photoURL:profile?.photoURL||null });
+        discriminator:profile?.discriminator||null, photoURL:profile?.photoURL||null,
+        friendshipCreatedAt: data.createdAt || null });
     }
     list.sort((a,b)=>a.displayName.localeCompare(b.displayName));
     state.friends=list;
     renderFriendsList(); renderModalFriendList();
   } catch(err) { _handleFirestoreError(err,"_refreshFriendships"); }
+  finally { state._refreshFriendshipsInProgress = false; }
 }
 
 /** Refresh incoming & outgoing friend requests. Called on boot and after send/accept/reject. */
 async function _refreshFriendRequests() {
-  if (!state.user?.uid) return;
+  if (!state.user?.uid || state._refreshFriendRequestsInProgress) return;
+  state._refreshFriendRequestsInProgress = true;
   const uid = state.user.uid;
   try {
     const [inSnap, outSnap] = await Promise.all([
@@ -1910,6 +1922,7 @@ async function _refreshFriendRequests() {
     state.incomingInitialized = true;
     renderPendingLists();
   } catch(err) { _handleFirestoreError(err,"_refreshFriendRequests"); }
+  finally { state._refreshFriendRequestsInProgress = false; }
 }
 
 function bootSubscriptions() {
@@ -1977,7 +1990,14 @@ function bootSubscriptions() {
   // This makes the sidebar feel "instant" on re-focus without costly polling.
   if (!state._visibilityHandler) {
     state._visibilityHandler = () => {
-      if (document.visibilityState === "visible" && state.user?.uid) _refreshChats();
+      if (document.visibilityState === "visible" && state.user?.uid) {
+        const now = Date.now();
+        // 30-second cooldown prevents rapid tab-switching from causing many reads
+        if (now - state._visibilityLastRefresh > 30_000) {
+          state._visibilityLastRefresh = now;
+          _refreshChats();
+        }
+      }
     };
     document.addEventListener("visibilitychange", state._visibilityHandler);
   }
@@ -3047,6 +3067,9 @@ const QUICK_REACTS = new Proxy([], { get: (_, p) => {
 // OG cutoff — any account created before this timestamp gets an OG badge automatically
 const OG_CUTOFF_MS = new Date("2026-05-04T00:00:00Z").getTime();
 
+// Module-level cache for appConfig/favGameAllowlist — fetched once per session
+let _favGameAllowlistCache = null;
+
 /* Badge tiers: 1=Official/Rare, 2=Notable, 3=Achievement, 4=Activity
    how: shown as subtitle in tooltip; grant: how to give it (for admin reference) */
 const BADGE_DEFS = {
@@ -4042,6 +4065,7 @@ async function sendCurrentMessage() {
       await updateDoc(doc(db, "chats", chatId), {
         lastMessage: `📊 Poll: ${question.slice(0, 100)}`, lastMessageAt: serverTimestamp(), lastSenderUid: state.user.uid
       });
+      _applyLastMessageLocally(chatId, `📊 Poll: ${question.slice(0, 100)}`, state.user.uid, false);
     } catch(err) { showToast("Send failed: " + err.message); composer.value = raw; }
     return;
   }
@@ -5518,12 +5542,16 @@ $("#settings-save-btn")?.addEventListener("click", async ()=>{
       const pathMatch = favGameUrl.match(/sites\.google\.com\/view\/([^\/?#]+)/i);
       const creator = pathMatch ? pathMatch[1].toLowerCase() : "";
       // Default allowlist — admin can add more by editing /appConfig/favGameAllowlist.allowed
+      // Cache result in module variable so subsequent saves skip the getDoc entirely
       let allowed = ["staticquasar931"];
       try {
-        const cfgSnap = await getDoc(doc(db, "appConfig", "favGameAllowlist"));
-        if (cfgSnap.exists() && Array.isArray(cfgSnap.data().allowed)) {
-          allowed = cfgSnap.data().allowed.map(s => String(s).toLowerCase());
+        if (!_favGameAllowlistCache) {
+          const cfgSnap = await getDoc(doc(db, "appConfig", "favGameAllowlist"));
+          _favGameAllowlistCache = (cfgSnap.exists() && Array.isArray(cfgSnap.data().allowed))
+            ? cfgSnap.data().allowed.map(s => String(s).toLowerCase())
+            : ["staticquasar931"];
         }
+        allowed = _favGameAllowlistCache;
       } catch(_){}
       if (!allowed.includes(creator)) {
         // Silent admin-only flag — no UI feedback to user
@@ -5903,6 +5931,7 @@ $("#emoji-picker")?.addEventListener("click", async e=>{
       });
       showToast("⭐ Emoji saved!");
     }
+    _persistFavEmojisCache();
     // If we're on the favorites tab, rebuild
     if (state.activeCat==="favorites") buildEmojiGrid(emojiSearch?.value||"");
     return;
@@ -6644,15 +6673,14 @@ async function showFullProfile(uid) {
       const fs = state.friends.find(f=>f.uid===uid);
       if (fs?.friendshipId) {
         fpFriendsSince.style.display="";
-        fpFriendsSince.textContent = "Friends";
-        getDoc(doc(db,"friendships",fs.friendshipId)).then(snap=>{
-          if (!snap.exists()) return;
-          const fa = snap.data().createdAt;
-          if (fa) {
-            const fd = fa.toDate ? fa.toDate() : new Date(fa);
-            fpFriendsSince.textContent = "Friends since " + fd.toLocaleDateString(undefined,{year:"numeric",month:"long",day:"numeric"});
-          }
-        }).catch(()=>{});
+        // Use the createdAt cached during _refreshFriendships — no extra getDoc needed
+        const fa = fs.friendshipCreatedAt;
+        if (fa) {
+          const fd = fa.toDate ? fa.toDate() : new Date(fa);
+          fpFriendsSince.textContent = "Friends since " + fd.toLocaleDateString(undefined,{year:"numeric",month:"long",day:"numeric"});
+        } else {
+          fpFriendsSince.textContent = "Friends";
+        }
       } else fpFriendsSince.style.display="none";
     } else fpFriendsSince.style.display="none";
   }
@@ -7006,6 +7034,7 @@ $("#poll-builder-create-btn")?.addEventListener("click", async () => {
       lastMessage: `📊 Poll: ${question.slice(0, 100)}`,
       lastMessageAt: serverTimestamp(), lastSenderUid: state.user.uid
     });
+    _applyLastMessageLocally(chatId, `📊 Poll: ${question.slice(0, 100)}`, state.user.uid, false);
     closeModal("poll-builder-modal");
     showToast("✓ Poll posted");
   } catch(err) {
@@ -7679,6 +7708,7 @@ async function _launchGame(kind, opts) {
       lastMessageAt: serverTimestamp(),
       lastSenderUid: state.user.uid
     });
+    _applyLastMessageLocally(chatId, preview.slice(0,140), state.user.uid, false);
   } catch(err) { showToast("Couldn't start: " + err.message); }
 }
 
@@ -9585,6 +9615,7 @@ $("#group-info-modal")?.addEventListener("click", async e => {
       lastMessage: `📊 Proposal: change ${fieldLabel}`,
       lastMessageAt: serverTimestamp(), lastSenderUid: state.user.uid
     });
+    _applyLastMessageLocally(c.id, `📊 Proposal: change ${fieldLabel}`, state.user.uid, false);
     closeModal("group-info-modal");
     showToast("✓ Proposal posted as a poll");
   } catch(err) { showToast("Error: " + err.message); }
@@ -10478,6 +10509,7 @@ document.addEventListener("click", async e=>{
       await deleteDoc(doc(db,"users",state.user.uid,"favGifs",docId));
     } catch(_){}
     showToast("💔 Removed from saved GIFs");
+    _persistFavGifsCache();
     if (_gifActiveCat==="favorites") renderFavGifGrid();
   } else {
     // Add
@@ -10491,24 +10523,43 @@ document.addEventListener("click", async e=>{
       });
     } catch(_){}
     showToast("❤️ GIF saved!");
+    _persistFavGifsCache();
   }
 });
 
+// ── sessionStorage helpers — one Firestore read per session per user ────────
+function _persistFavGifsCache() {
+  if (!state.user?.uid) return;
+  try { sessionStorage.setItem(`sc_fav_gifs_${state.user.uid}`, JSON.stringify(state.favGifs)); } catch(_){}
+}
+function _persistFavEmojisCache() {
+  if (!state.user?.uid) return;
+  try { sessionStorage.setItem(`sc_fav_emojis_${state.user.uid}`, JSON.stringify(state.favEmojis)); } catch(_){}
+}
+
 async function loadFavGifs() {
-  if (!state.user) return;
+  if (!state.user?.uid) return;
   try {
+    // Restore from sessionStorage first — avoids the Firestore read on every boot
+    const cached = sessionStorage.getItem(`sc_fav_gifs_${state.user.uid}`);
+    if (cached) { state.favGifs = JSON.parse(cached); return; }
     const snap=await getDocs(collection(db,"users",state.user.uid,"favGifs"));
     state.favGifs={};
     snap.forEach(d=>{ const data=d.data(); if(data.url) state.favGifs[data.url]=data; });
+    _persistFavGifsCache();
   } catch(_){}
 }
 
 async function loadFavEmojis() {
-  if (!state.user) return;
+  if (!state.user?.uid) return;
   try {
+    // Restore from sessionStorage first — avoids the Firestore read on every boot
+    const cached = sessionStorage.getItem(`sc_fav_emojis_${state.user.uid}`);
+    if (cached) { state.favEmojis = JSON.parse(cached); return; }
     const snap=await getDocs(collection(db,"users",state.user.uid,"favEmojis"));
     state.favEmojis={};
     snap.forEach(d=>{ const data=d.data(); if(data.name) state.favEmojis[data.name]=data; });
+    _persistFavEmojisCache();
   } catch(_){}
 }
 
@@ -10751,6 +10802,7 @@ document.addEventListener("click", async e=>{
       await setDoc(doc(db,"users",state.user.uid,"favGifs",docId),{url,previewUrl,title,addedAt:serverTimestamp()});
       showToast("❤️ GIF saved!");
     }
+    _persistFavGifsCache();
   }
   else if (action==="ctx-fav-emoji") {
     const name=item.dataset.name, char=item.dataset.char||"";
@@ -10764,6 +10816,7 @@ document.addEventListener("click", async e=>{
       await setDoc(doc(db,"users",state.user.uid,"favEmojis",name),{name,char,addedAt:serverTimestamp()});
       showToast("⭐ Emoji saved!");
     }
+    _persistFavEmojisCache();
   }
   // Profile card 3-dots actions
   else if (action==="ctx-view-full-profile") {
