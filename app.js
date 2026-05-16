@@ -426,6 +426,8 @@ const state = {
   _refreshFriendRequestsInProgress: false,
   // Visibility-change cooldown — timestamp of last tab-focus refresh
   _visibilityLastRefresh: 0,
+  // Timestamp of last send (used to force-scroll after send without extra reads)
+  _justSentByMeAt: 0,
   // Shared chat-times map (moved out of bootSubscriptions closure so polling fns can access it)
   _prevChatTimes: {},
   filters: { sidebar: "" },
@@ -669,10 +671,17 @@ function _showQuotaBanner() {
       clearInterval(_poll);
       _quotaShown = false;
       window._quotaDetected = false;
+      window._offlineBrowseMode = false;
       if (loadingQuota) loadingQuota.style.display = "none";
       if (loadingSpinner) loadingSpinner.style.display = "";
       if (loadingTip) loadingTip.style.display = "";
       if (overlay) overlay.classList.add("hidden");
+      // Hide offline ribbon and resume polling
+      document.getElementById("offline-ribbon")?.classList.add("hidden");
+      if (state.user?.uid) {
+        _refreshChats();
+        state._chatsRefreshTimer = state._chatsRefreshTimer || setInterval(_refreshChats, 8 * 60 * 1000);
+      }
     } catch(e) {
       if (!_isQuotaError(e)) clearInterval(_poll); // stop on unrelated errors
     }
@@ -687,6 +696,55 @@ function _handleFirestoreError(err, label) {
     console.error(label || "Firestore error:", err);
   }
 }
+
+/* ── Offline Browse Mode ────────────────────────────────────────────────────
+   User chose "View cached data →" — dismiss the overlay, show whatever is
+   in memory, and block write operations with a gentle toast.
+   =========================================================================== */
+function _enterOfflineBrowseMode() {
+  window._offlineBrowseMode = true;
+
+  // Hide both quota surfaces
+  const overlay = document.getElementById("quota-overlay");
+  if (overlay) overlay.classList.add("hidden");
+  const loadingQuota = document.getElementById("loading-quota-msg");
+  if (loadingQuota) loadingQuota.style.display = "none";
+
+  // If loading screen is still up but auth already resolved → show the app
+  const loadingScreen = document.getElementById("loading-screen");
+  const onLoadingScreen = loadingScreen && !loadingScreen.classList.contains("hidden");
+  if (onLoadingScreen) {
+    if (state.user?.uid) {
+      // Auth resolved — show the app with whatever cached data we have
+      showAppUI();
+    } else {
+      // Auth not resolved — show login so user can at least see the page
+      _hideLoadingScreen();
+      document.getElementById("login-screen")?.classList.remove("hidden");
+    }
+  }
+
+  // Show the unobtrusive offline ribbon
+  const ribbon = document.getElementById("offline-ribbon");
+  if (ribbon) ribbon.classList.remove("hidden");
+
+  // Stop polling timers — they'd just fail silently and waste attempt cycles
+  for (const t of ["_chatsRefreshTimer","_profileRefreshTimer","_friendshipsTimer","_friendRequestsTimer"]) {
+    if (state[t]) { clearInterval(state[t]); state[t] = null; }
+  }
+
+  // When quota clears the auto-poll in _showQuotaBanner will fire — hide ribbon then
+}
+
+// Wire up "View cached data" / "Continue offline" buttons
+document.addEventListener("click", e => {
+  if (e.target.id === "quota-continue-btn" || e.target.id === "lqm-continue-btn") {
+    _enterOfflineBrowseMode();
+  }
+  if (e.target.id === "or-dismiss-btn") {
+    document.getElementById("offline-ribbon")?.classList.add("hidden");
+  }
+});
 
 
 /* ---------- Per-chat color picker ---------- */
@@ -1276,7 +1334,15 @@ onAuthStateChanged(auth, async firebaseUser => {
     try {
       const snap = await getDoc(doc(db,"users",firebaseUser.uid));
       if (snap.exists()) existing = snap.data();
-    } catch(e){ console.error("profile fetch:",e); }
+    } catch(e) {
+      console.error("profile fetch:", e);
+      // Firestore unavailable (quota / network) — fall back to localStorage snapshot
+      // so returning users aren't wrongly redirected to the profile-setup modal
+      try {
+        const cached = JSON.parse(localStorage.getItem("sc_last_profile") || "null");
+        if (cached?.username) existing = cached;
+      } catch(_) {}
+    }
 
     state.user = {
       uid: firebaseUser.uid,
@@ -1292,6 +1358,19 @@ onAuthStateChanged(auth, async firebaseUser => {
     };
     // Seed cache with full profile data from the signin read (avoids redundant getDoc calls)
     state.userCache[state.user.uid] = _augmentBadges({ ...state.user, ...(existing||{}) });
+
+    // Persist a lightweight profile snapshot so the app can recover if Firestore
+    // is down on the NEXT sign-in (avoids wrongly redirecting to profile-setup)
+    if (existing?.username) {
+      try {
+        localStorage.setItem("sc_last_profile", JSON.stringify({
+          username: existing.username,
+          discriminator: existing.discriminator||null,
+          photoURL: existing.photoURL||null,
+          bio: existing.bio||""
+        }));
+      } catch(_) {}
+    }
 
     if (!existing?.username) {
       showProfileSetupModal();
@@ -1780,6 +1859,8 @@ function cleanupAllSubscriptions() {
   state.activeChatId=null; state.activeChat=null;
   state.messageCache={}; state.unreadCounts={};
   state._prevChatTimes={};
+  state._visibilityLastRefresh = 0;
+  state._justSentByMeAt = 0;
   for (const fn of Object.values(state.sidebarTypingUnsubs)) { try { fn(); } catch(_){} }
   state.sidebarTypingUnsubs={}; state.sidebarTyping={};
   state.chatInitialized.clear(); state.incomingInitialized=false;
@@ -1887,17 +1968,19 @@ async function _refreshFriendships() {
   const uid = state.user.uid;
   try {
     const snap = await getDocs(query(collection(db,"friendships"),where("users","array-contains",uid)));
-    const list = [];
-    for (const d of snap.docs) {
-      const data=d.data();
-      const otherUid=data.users.find(u=>u!==uid);
-      if (!otherUid) continue;
-      const profile=await fetchUserProfile(otherUid);
-      list.push({ friendshipId:d.id, uid:otherUid,
+    // Fetch all friend profiles in parallel (fetchUserProfile uses the cache, so
+    // only truly uncached profiles hit Firestore, and they do so concurrently)
+    const entries = snap.docs
+      .map(d => { const data=d.data(); const otherUid=data.users.find(u=>u!==uid); return otherUid ? {id:d.id, data, otherUid} : null; })
+      .filter(Boolean);
+    const profiles = await Promise.all(entries.map(e => fetchUserProfile(e.otherUid)));
+    const list = entries.map((e, i) => {
+      const profile = profiles[i];
+      return { friendshipId:e.id, uid:e.otherUid,
         displayName:profile?.username||profile?.displayName||"Unknown",
         discriminator:profile?.discriminator||null, photoURL:profile?.photoURL||null,
-        friendshipCreatedAt: data.createdAt || null });
-    }
+        friendshipCreatedAt: e.data.createdAt || null };
+    });
     list.sort((a,b)=>a.displayName.localeCompare(b.displayName));
     state.friends=list;
     renderFriendsList(); renderModalFriendList();
@@ -3914,6 +3997,10 @@ const CMD_ALIASES = {
 };
 
 async function sendCurrentMessage() {
+  if (window._offlineBrowseMode) {
+    showToast("⚡ Read-only — Firebase is temporarily unavailable");
+    return;
+  }
   const raw=composer.value;
   let text=raw.trim();
   if (!text||!state.activeChatId) return;
@@ -10145,7 +10232,7 @@ function resolveStatus(profile) {
 }
 
 async function updatePresence(force=false) {
-  if (!state.user) return;
+  if (!state.user || window._offlineBrowseMode) return;
   // Throttle: skip if we wrote within the last 60 s (unless forced)
   const now = Date.now();
   if (!force && (now - _lastPresenceWrite) < _PRESENCE_MIN_INTERVAL) return;

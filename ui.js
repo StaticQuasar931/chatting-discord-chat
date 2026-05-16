@@ -36,6 +36,7 @@ export function buildUI() {
           Join the Discord for updates
         </a>
         <p class="lqm-note">This page will automatically retry every 30 seconds.</p>
+        <button class="quota-continue-btn" id="lqm-continue-btn">Continue with cached data →</button>
       </div>
     </div>
     <div class="loading-footer-bar">
@@ -1886,8 +1887,16 @@ export function buildUI() {
         </svg>
         Join the Discord for updates
       </a>
-      <p class="quota-note">This page will automatically reload once access is restored.</p>
+      <button class="quota-continue-btn" id="quota-continue-btn">View cached data →</button>
+      <p class="quota-note">This page will automatically recover once access is restored.</p>
     </div>
+  </div>
+
+  <!-- Offline browse mode ribbon — shown when user chooses to continue with cached data -->
+  <div id="offline-ribbon" class="offline-ribbon hidden" role="status" aria-live="polite">
+    <span class="or-icon" aria-hidden="true">⚡</span>
+    <span class="or-text">Cached data only · Firebase unavailable</span>
+    <button class="or-dismiss" id="or-dismiss-btn" title="Dismiss" aria-label="Dismiss offline notice">×</button>
   </div>
 
   <!-- Custom Confirm Dialog (dynamically injected by showConfirm(), placeholder here for CSS) -->
