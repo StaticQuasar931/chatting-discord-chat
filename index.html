@@ -39,11 +39,43 @@
 
   <!-- Assets -->
   <link rel="stylesheet" href="style.css" />
-  <!-- Logo loads from jsDelivr (CDN) for portability across embed hosts (Google Sites, etc.) -->
+  <!-- Logo / icons -->
   <link rel="icon" type="image/png" href="https://cdn.jsdelivr.net/gh/StaticQuasar931/chatting-discord-chat@main/staticcord.png" />
+  <link rel="apple-touch-icon" href="https://cdn.jsdelivr.net/gh/StaticQuasar931/Images@main/icon.png" />
+
+  <!-- PWA manifest -->
+  <link rel="manifest" href="manifest.json" />
+
+  <!-- Preconnect to Firebase for faster cold starts -->
+  <link rel="preconnect" href="https://firestore.googleapis.com" crossorigin />
+  <link rel="preconnect" href="https://identitytoolkit.googleapis.com" crossorigin />
+
+  <!-- Structured data (JSON-LD) for rich search results -->
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "WebApplication",
+    "name": "Static Chat",
+    "url": "https://staticquasar931.github.io/chatting-discord-chat/",
+    "description": "A school-safe, real-time messaging app with DMs, group chats, GIFs, reactions, and more.",
+    "applicationCategory": "CommunicationApplication",
+    "operatingSystem": "Web",
+    "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
+    "author": { "@type": "Person", "name": "StaticQuasar931" }
+  }
+  </script>
 </head>
 <body data-theme="dark">
   <!-- All UI is injected by app.js → buildUI() before any DOM queries run -->
   <script type="module" src="app.js"></script>
+  <!-- Service Worker registration -->
+  <script>
+    if ("serviceWorker" in navigator) {
+      window.addEventListener("load", () => {
+        navigator.serviceWorker.register("sw.js", { scope: "/chatting-discord-chat/" })
+          .catch(err => console.warn("SW registration failed:", err));
+      });
+    }
+  </script>
 </body>
 </html>

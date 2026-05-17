@@ -2317,6 +2317,8 @@ async function _refreshChats() {
         const sentByMe=c.lastSenderUid===uid;
         if (cur>prev && c.id!==state.activeChatId && !sentByMe && !isChatMuted(c.id) && !c.lastMessageSilent) {
           state.unreadCounts[c.id]=(state.unreadCounts[c.id]||0)+1;
+          // Persist so count survives a page refresh
+          localStorage.setItem(`sc_unread_${c.id}`, String(state.unreadCounts[c.id]));
           if (!soundPlayed) { playSound("message"); soundPlayed=true; }
         }
       }
@@ -2506,6 +2508,9 @@ function bootSubscriptions() {
     };
     document.addEventListener("visibilitychange", state._visibilityHandler);
   }
+
+  // ── ANALYTICS CONSENT BANNER (shown 4s after boot) ────────────────────
+  setTimeout(_maybeShowAnalyticsConsent, 4000);
 }
 
 
@@ -2827,8 +2832,10 @@ function chatUnreadCount(c) {
   const readAt=parseInt(localStorage.getItem(`sc_read_${c.id}`)||"0",10);
   const lastMsg=c.lastMessageAt?.toMillis?.()||0;
   if (!(lastMsg>readAt && readAt>0)) return 0;
-  // Use in-memory count if we've been tracking this session, otherwise show 1
-  return state.unreadCounts[c.id]||1;
+  // In-memory session count wins; fall back to persisted count across refreshes
+  if (state.unreadCounts[c.id]) return state.unreadCounts[c.id];
+  const persisted = parseInt(localStorage.getItem(`sc_unread_${c.id}`)||"0",10);
+  return persisted || 1; // 1 = "at least one", exact unknown
 }
 function chatHasUnread(c) { return chatUnreadCount(c)>0; }
 
@@ -3255,6 +3262,7 @@ async function openChat(chatId) {
   // Mark this chat as read from this moment forward, clear unread counter
   localStorage.setItem(`sc_read_${chatId}`, String(Date.now()));
   delete state.unreadCounts[chatId];
+  localStorage.removeItem(`sc_unread_${chatId}`);
 
   showChatView(); renderChatHeader(); renderChatLists();
   clearReplyTo();
@@ -4014,12 +4022,29 @@ function renderMessages() {
         const c = counts[i];
         const pct = total ? Math.round((c / total) * 100) : 0;
         const selected = myVote === i;
-        return `<button class="poll-option ${selected?'selected':''}" data-poll-vote="${i}" data-msg-id="${escapeHtml(m.id)}" ${ended?'disabled':''}>
+        // Public polls show voter names on hover via title attr
+        const voterNames = !pd.anon
+          ? Object.entries(votes||{}).filter(([,v])=>v===i).map(([uid])=>{
+              const p=state.userCache[uid]; return p?.username||p?.displayName||"User";
+            }).join(", ")
+          : "";
+        return `<button class="poll-option ${selected?'selected':''}" data-poll-vote="${i}" data-msg-id="${escapeHtml(m.id)}"
+            title="${voterNames ? escapeHtml(voterNames) : ''}" ${ended && !selected ? 'disabled' : ''}>
           <span class="poll-option-bar" style="width:${pct}%"></span>
           <span class="poll-option-text">${selected?'✓ ':''}${escapeHtml(opt)}</span>
           <span class="poll-option-count">${c} · ${pct}%</span>
         </button>`;
       }).join("");
+      // Public voter list (collapsed, expands on click)
+      const votersHtml = (!pd.anon && Object.keys(votes||{}).length > 0)
+        ? `<div class="poll-voters hidden">
+            ${Object.entries(votes||{}).map(([uid,vi])=>{
+              const p=state.userCache[uid]; const name=p?.username||p?.displayName||"User";
+              return `<span class="poll-voter-chip" title="Voted: ${escapeHtml(opts[vi]||"?")}">${escapeHtml(name)}</span>`;
+            }).join("")}
+          </div>` : "";
+      const changeVoteHint = myVote !== undefined && !ended
+        ? `<button class="poll-change-vote" data-poll-vote="${myVote}" data-msg-id="${escapeHtml(m.id)}" title="Click your vote again to unvote">Change vote</button>` : "";
       html.push(`<div class="message-group msg-poll" data-msg-id="${escapeHtml(m.id)}" title="${tsTitle}">
         <div class="msg-avatar-btn" data-profile-uid="${escapeHtml(m.senderUid)}" role="button" tabindex="0">
           ${avatarMarkup(m.senderName,m.senderPhoto,"msg-avatar","msg-avatar-fallback","message")}
@@ -4033,9 +4058,11 @@ function renderMessages() {
             <div class="poll-question">📊 ${escapeHtml(pd.question||"Poll")}${pd.anon?` <span class="poll-anon-tag" title="Anonymous — voters not shown">🕶️ anon</span>`:""}</div>
             <div class="poll-options">${optsHtml}</div>
             <div class="poll-meta">
-              <span>${total} vote${total===1?"":"s"}</span>
-              <span class="poll-time ${ended?'ended':''}">${remainText}</span>
+              <span class="poll-meta-votes" title="${!pd.anon?'Click to see voters':''}" style="${!pd.anon&&total>0?'cursor:pointer;text-decoration:underline dotted;':''}">${total} vote${total===1?"":"s"}</span>
+              ${changeVoteHint}
+              <span class="poll-countdown ${remainMs<90000&&!ended?'ending-soon':''}" data-ends-at="${pd.endsAt||0}">${remainText}</span>
             </div>
+            ${votersHtml}
           </div>
         </div>
       </div>`);
@@ -5624,7 +5651,8 @@ function _markSettingsDirty() {
 }
 
 // Wire dirty tracking to account form fields
-["settings-username-input","settings-bio-input","settings-photo-input","settings-custom-status-input"].forEach(id=>{
+["settings-username-input","settings-bio-input","settings-photo-input","settings-custom-status-input",
+ "settings-pronouns-input","settings-interests-input"].forEach(id=>{
   document.addEventListener("input", e=>{ if(e.target.id===id) _markSettingsDirty(); });
 });
 document.addEventListener("change", e=>{
@@ -5704,6 +5732,9 @@ function openSettingsModal(pane) {
   const myProfile = state.userCache[u.uid] || {};
   if ($("#settings-favgame-name")) $("#settings-favgame-name").value = myProfile.favGameName || "";
   if ($("#settings-favgame-url"))  $("#settings-favgame-url").value  = myProfile.favGameUrl || "";
+  // B7 richer profile fields
+  if ($("#settings-pronouns-input"))  $("#settings-pronouns-input").value  = myProfile.pronouns || "";
+  if ($("#settings-interests-input")) $("#settings-interests-input").value = (myProfile.interests || []).join(", ");
   if($("#settings-photo-input"))          $("#settings-photo-input").value=u.photoURL||"";
   if($("#settings-custom-status-input"))  $("#settings-custom-status-input").value=state.customStatus||"";
   if($("#settings-sound-toggle"))              $("#settings-sound-toggle").checked=state.soundEnabled;
@@ -5888,7 +5919,7 @@ function _refreshSettingsPreview(u) {
 function _updateSettingsPreview() { _refreshSettingsPreview(); }
 
 // Settings live preview — update on any field change
-["settings-photo-input","settings-username-input","settings-bio-input","settings-custom-status-input","settings-favgame-name","settings-favgame-url"].forEach(id=>{
+["settings-photo-input","settings-username-input","settings-bio-input","settings-custom-status-input","settings-favgame-name","settings-favgame-url","settings-pronouns-input","settings-interests-input"].forEach(id=>{
   document.addEventListener("input",e=>{ if(e.target.id===id) _refreshSettingsPreview(); });
 });
 
@@ -6185,6 +6216,13 @@ $("#settings-save-btn")?.addEventListener("click", async ()=>{
   state.isPrivate=privOn;
   state.bannerColor=_pendingBannerColor!==undefined?_pendingBannerColor:state.bannerColor;
 
+  // B7: Pronouns + interests
+  const pronouns = ($("#settings-pronouns-input")?.value || "").trim().slice(0, 30);
+  const interestsRaw = ($("#settings-interests-input")?.value || "").trim();
+  const interests = interestsRaw
+    ? interestsRaw.split(",").map(s=>s.trim()).filter(Boolean).slice(0,12)
+    : [];
+
   const btn=$("#settings-save-btn");
   btn.disabled=true; btn.textContent="Saving…";
   try {
@@ -6197,7 +6235,9 @@ $("#settings-save-btn")?.addEventListener("click", async ()=>{
       status:state.status, bannerColor:state.bannerColor||null,
       isPrivate:privOn, customStatus:newCustomStatus,
       favGameName: favGameName || null,
-      favGameUrl: favGameUrl || null
+      favGameUrl: favGameUrl || null,
+      pronouns: pronouns || null,
+      interests: interests.length ? interests : null
     });
     state.user.username=username; state.user.displayName=username;
     state.user.bio=bio; state.user.photoURL=photoURL;
@@ -6209,6 +6249,8 @@ $("#settings-save-btn")?.addEventListener("click", async ()=>{
       isPrivate:privOn,
       favGameName: favGameName || null,
       favGameUrl:  favGameUrl  || null,
+      pronouns: pronouns || null,
+      interests: interests.length ? interests : null,
       badges:state.userCache[state.user.uid]?.badges||[]
     };
     updateUserPanel();
@@ -7370,6 +7412,36 @@ async function showFullProfile(uid) {
   </button>`;
   const fpActions = $("#fp-actions"); if (fpActions) fpActions.innerHTML = actionsHtml;
 
+  // ── B7: Richer profile fields (pronouns, interests, game stats) ──────────
+  const fpPronouns = $("#fp-pronouns");
+  if (fpPronouns) {
+    const p = (!isPrivate && profile.pronouns) ? profile.pronouns.trim() : "";
+    fpPronouns.textContent = p;
+    fpPronouns.style.display = p ? "inline-block" : "none";
+  }
+  const fpInterests = $("#fp-interests-section");
+  const fpInterestChips = $("#fp-interest-chips");
+  if (fpInterests && fpInterestChips) {
+    const ints = (!isPrivate && Array.isArray(profile.interests))
+      ? profile.interests.filter(Boolean).slice(0,12) : [];
+    if (ints.length) {
+      fpInterestChips.innerHTML = ints.map(i=>`<span class="fp-interest-chip">${escapeHtml(i)}</span>`).join("");
+      fpInterests.style.display = "";
+    } else fpInterests.style.display = "none";
+  }
+  const fpGameStats = $("#fp-game-stats");
+  if (fpGameStats) {
+    const w = profile.gameWins || 0, l = profile.gameLosses || 0;
+    if (w || l) {
+      const wr = w+l > 0 ? Math.round(w/(w+l)*100) : 0;
+      fpGameStats.innerHTML = `
+        <div class="fp-stat-pill"><span class="fp-stat-num">${w}</span><span class="fp-stat-label">Wins</span></div>
+        <div class="fp-stat-pill"><span class="fp-stat-num">${l}</span><span class="fp-stat-label">Losses</span></div>
+        <div class="fp-stat-pill"><span class="fp-stat-num">${wr}%</span><span class="fp-stat-label">Win Rate</span></div>`;
+      fpGameStats.style.display = "flex";
+    } else fpGameStats.style.display = "none";
+  }
+
   openModal("full-profile-modal");
 }
 
@@ -7510,6 +7582,28 @@ $("#mobile-sidebar-toggle")?.addEventListener("click", () => {
   if (appEl.classList.contains("show-sidebar")) appEl.classList.remove("show-sidebar");
   else appEl.classList.add("show-sidebar");
 });
+
+/* ─── B1: Sidebar collapse (desktop) ─────────────────────────────────────── */
+(function _initSidebarCollapse() {
+  const appEl = $("#app");
+  const btn = $("#sidebar-collapse-btn");
+  if (!appEl || !btn) return;
+  const KEY = "sc_sidebar_collapsed";
+  // Restore saved state
+  if (localStorage.getItem(KEY) === "true") {
+    appEl.classList.add("sidebar-collapsed");
+    btn.setAttribute("aria-expanded", "false");
+    btn.title = "Expand sidebar";
+    btn.setAttribute("aria-label", "Expand sidebar");
+  }
+  btn.addEventListener("click", () => {
+    const collapsed = appEl.classList.toggle("sidebar-collapsed");
+    localStorage.setItem(KEY, collapsed ? "true" : "false");
+    btn.setAttribute("aria-expanded", String(!collapsed));
+    btn.title = collapsed ? "Expand sidebar" : "Collapse sidebar";
+    btn.setAttribute("aria-label", collapsed ? "Expand sidebar" : "Collapse sidebar");
+  });
+})();
 // Close sidebar when tapping outside (mobile only)
 document.addEventListener("click", e => {
   if (!window.matchMedia("(max-width: 768px)").matches) return;
@@ -8449,6 +8543,12 @@ function _attachDrawCanvases() {
   });
 }
 
+/* Rematch button HTML — shown on game cards that have a winner */
+function _rematchBtn(msgId, kinds) {
+  if (!kinds || !state.user) return "";
+  return `<button class="game-rematch-btn" title="Start a new game of the same type">🔄 Rematch</button>`;
+}
+
 /* Render a game card given its gameData. Returns HTML string. */
 function renderGameCard(m) {
   const g = m.gameData || {};
@@ -8479,6 +8579,7 @@ function renderGameCard(m) {
       <div class="game-title">⨯⭘ Tic-Tac-Toe</div>
       <div class="game-board ttt-board">${cells}</div>
       <div class="game-status">${status}</div>
+      ${g.winner ? _rematchBtn(m.id, "tictactoe") : ""}
     </div>`;
   }
   if (g.kind === "rps") {
@@ -8511,6 +8612,7 @@ function renderGameCard(m) {
       ${moves}
       <div class="game-status">${status}</div>
       ${final}
+      ${finished ? _rematchBtn(m.id, "rps") : ""}
     </div>`;
   }
   if (g.kind === "dice") {
@@ -8962,6 +9064,7 @@ function renderGameCard(m) {
       <div class="game-title">🔴🟢 Connect 4</div>
       <div class="c4-board">${rows.join("")}</div>
       <div class="game-status">${status}</div>
+      ${g.winner ? _rematchBtn(m.id, "connect4") : ""}
     </div>`;
   }
   // ── Typing Race ──
@@ -9407,6 +9510,7 @@ document.addEventListener("click", async e => {
       "gameData.board": newBoard, "gameData.turn": nextTurn,
       "gameData.winner": winner, "gameData.lastMove": i
     });
+    if (winner && winner !== "draw") _recordGameResult(winner === myUid);
     return;
   }
 
@@ -9868,6 +9972,7 @@ document.addEventListener("click", async e => {
       "gameData.winner": winner
     });
     if (!winner) playSound("message");
+    else if (winner !== "draw") _recordGameResult(winner === myUid);
     return;
   }
 
@@ -10303,11 +10408,12 @@ function clearTypingIndicator() {
 function renderTypingIndicator(names=[]) {
   const el=$("#typing-indicator"); if (!el) return;
   if (!names.length) { el.classList.add("hidden"); el.innerHTML=""; return; }
-  const phrase=names.length===1?`${escapeHtml(names[0])} is typing`
-    :names.length===2?`${escapeHtml(names[0])} and ${escapeHtml(names[1])} are typing`
-    :"Several people are typing";
+  let phrase;
+  if (names.length===1) phrase=`${escapeHtml(names[0])} is typing`;
+  else if (names.length===2) phrase=`${escapeHtml(names[0])} and ${escapeHtml(names[1])} are typing`;
+  else phrase=`${escapeHtml(names[0])} and ${names.length-1} others are typing`;
   // Animated dots — three pulsing dots (like Discord/iMessage)
-  el.innerHTML=`<span class="typing-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="typing-text">${phrase}</span>`;
+  el.innerHTML=`<span class="typing-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="typing-text">${phrase}…</span>`;
   el.classList.remove("hidden");
 }
 
@@ -12017,3 +12123,564 @@ document.addEventListener("keydown", e => {
     setTimeout(()=>overlay.remove(), 320);
   });
 })();
+
+
+/* =====================================================================
+   B4 — IMAGE / GIF LIGHTBOX  (zoom + pan)
+   ===================================================================== */
+(function _initLightbox() {
+  const overlay = $("#lightbox-overlay");
+  const imgEl   = $("#lightbox-img");
+  const closeBtn = $("#lightbox-close");
+  const zoomHint = $("#lightbox-zoom-hint");
+  if (!overlay || !imgEl) return;
+
+  let scale = 1, ox = 0, oy = 0;       // current transform
+  let dragging = false, startX = 0, startY = 0, dragOx = 0, dragOy = 0;
+  let hintTimer = null;
+
+  function _applyTransform() {
+    imgEl.style.transform = `scale(${scale}) translate(${ox/scale}px, ${oy/scale}px)`;
+  }
+  function _reset() { scale = 1; ox = 0; oy = 0; _applyTransform(); }
+
+  // Open lightbox from any img.msg-img, img.msg-gif, img.gif-img in messages
+  document.addEventListener("click", e => {
+    const img = e.target.closest("img.msg-img, img.msg-gif, img.gif-img, .lightbox-trigger");
+    if (!img || img.closest("#gif-picker") || img.closest("#emoji-picker")) return;
+    const src = img.dataset.fullSrc || img.src || img.currentSrc;
+    if (!src || src === STATIC_EMOJI_URL) return; // skip placeholder
+    e.stopPropagation();
+    openLightbox(src);
+  });
+
+  window.openLightbox = function(src) {
+    imgEl.src = src;
+    _reset();
+    overlay.classList.remove("hidden");
+    document.body.style.overflow = "hidden";
+    if (zoomHint) {
+      zoomHint.style.opacity = "1";
+      clearTimeout(hintTimer);
+      hintTimer = setTimeout(() => { if (zoomHint) zoomHint.style.opacity = "0"; }, 2200);
+    }
+  };
+
+  function _close() {
+    overlay.classList.add("hidden");
+    imgEl.src = "";
+    document.body.style.overflow = "";
+    _reset();
+  }
+
+  // Close on overlay background click or button
+  overlay.addEventListener("click", e => {
+    if (e.target === overlay) _close();
+  });
+  closeBtn?.addEventListener("click", _close);
+
+  // Escape key
+  document.addEventListener("keydown", e => {
+    if (e.key === "Escape" && !overlay.classList.contains("hidden")) _close();
+  });
+
+  // Scroll-wheel zoom (centred on cursor)
+  overlay.addEventListener("wheel", e => {
+    e.preventDefault();
+    const delta = e.deltaY < 0 ? 1.12 : 1/1.12;
+    const newScale = Math.max(0.2, Math.min(10, scale * delta));
+    scale = newScale;
+    _applyTransform();
+  }, {passive: false});
+
+  // Mouse drag pan
+  imgEl.addEventListener("mousedown", e => {
+    if (e.button !== 0) return;
+    dragging = true; startX = e.clientX; startY = e.clientY;
+    dragOx = ox; dragOy = oy;
+    imgEl.classList.add("dragging");
+    e.preventDefault();
+  });
+  document.addEventListener("mousemove", e => {
+    if (!dragging) return;
+    ox = dragOx + (e.clientX - startX);
+    oy = dragOy + (e.clientY - startY);
+    _applyTransform();
+  });
+  document.addEventListener("mouseup", () => {
+    if (!dragging) return;
+    dragging = false;
+    imgEl.classList.remove("dragging");
+  });
+
+  // Touch pinch-zoom + drag
+  let touches = {};
+  let initDist = 0, initScale = 1;
+  overlay.addEventListener("touchstart", e => {
+    [...e.changedTouches].forEach(t => { touches[t.identifier] = {x:t.clientX, y:t.clientY}; });
+    if (Object.keys(touches).length === 2) {
+      const pts = Object.values(touches);
+      initDist = Math.hypot(pts[1].x-pts[0].x, pts[1].y-pts[0].y);
+      initScale = scale;
+    } else if (Object.keys(touches).length === 1) {
+      const [t] = Object.values(touches);
+      startX = t.x; startY = t.y; dragOx = ox; dragOy = oy;
+    }
+  }, {passive:true});
+  overlay.addEventListener("touchmove", e => {
+    [...e.changedTouches].forEach(t => { touches[t.identifier] = {x:t.clientX, y:t.clientY}; });
+    if (Object.keys(touches).length === 2) {
+      const pts = Object.values(touches);
+      const dist = Math.hypot(pts[1].x-pts[0].x, pts[1].y-pts[0].y);
+      scale = Math.max(0.2, Math.min(10, initScale * (dist / initDist)));
+      _applyTransform();
+    } else if (Object.keys(touches).length === 1) {
+      const [t] = Object.values(touches);
+      ox = dragOx + (t.x - startX);
+      oy = dragOy + (t.y - startY);
+      _applyTransform();
+    }
+    e.preventDefault();
+  }, {passive:false});
+  overlay.addEventListener("touchend", e => {
+    [...e.changedTouches].forEach(t => { delete touches[t.identifier]; });
+    if (Object.keys(touches).length < 2) { initDist = 0; }
+  }, {passive:true});
+
+  // Double-tap to reset zoom
+  let lastTap = 0;
+  overlay.addEventListener("touchend", e => {
+    const now = Date.now();
+    if (now - lastTap < 300) _reset();
+    lastTap = now;
+  }, {passive:true});
+
+  // Double-click to reset zoom
+  imgEl.addEventListener("dblclick", _reset);
+})();
+
+/* Add also Escape key hook into the existing ESC handler for lightbox */
+(function() {
+  const _orig = document.addEventListener.bind(document);
+  // The ESC handler already checks for .hidden — the lightbox close is wired above.
+})();
+
+
+/* =====================================================================
+   B5 — POLL IMPROVEMENTS
+   Live countdown ticker + public voter names
+   ===================================================================== */
+// Refresh poll countdowns every 10 seconds (cheap — no Firestore calls)
+setInterval(() => {
+  $$(".poll-countdown").forEach(el => {
+    const endsAt = parseInt(el.dataset.endsAt || "0", 10);
+    if (!endsAt) return;
+    const rem = endsAt - Date.now();
+    if (rem <= 0) {
+      el.textContent = "Ended";
+      el.classList.remove("ending-soon");
+      return;
+    }
+    const mins = Math.ceil(rem / 60000);
+    const hrs  = Math.ceil(rem / 3600000);
+    const days = Math.ceil(rem / 86400000);
+    el.textContent = rem < 60000  ? `ending soon`
+                   : rem < 3600000 ? `${mins}m left`
+                   : rem < 86400000 ? `${hrs}h left`
+                   : `${days}d left`;
+    el.classList.toggle("ending-soon", rem < 90000); // red + pulse under 90s
+  });
+}, 10_000);
+
+// Poll voter names — click "N votes" label to expand/collapse
+document.addEventListener("click", e => {
+  const meta = e.target.closest(".poll-meta-votes");
+  if (!meta) return;
+  const pollCard = meta.closest(".poll-card");
+  if (!pollCard) return;
+  const votersList = pollCard.querySelector(".poll-voters");
+  if (!votersList) return;
+  votersList.classList.toggle("hidden");
+});
+
+
+/* =====================================================================
+   B6 — GAME ENHANCEMENTS  (rematch button)
+   ===================================================================== */
+// Delegate rematch clicks from the messages area
+document.addEventListener("click", async e => {
+  const btn = e.target.closest(".game-rematch-btn");
+  if (!btn || window._offlineBrowseMode) return;
+  if (!state.activeChatId || !state.user) return;
+  const msgId = btn.closest("[data-msg-id]")?.dataset.msgId;
+  if (!msgId) return;
+  const msg = state.messages.find(m => m.id === msgId);
+  if (!msg || !msg.gameData) return;
+  btn.disabled = true;
+  btn.textContent = "Starting…";
+  try {
+    const g = msg.gameData;
+    const kind = g.kind;
+    // Build fresh gameData for the same kind — reuse existing game init logic
+    // by dispatching a virtual /game command
+    const oldPlayers = g.players || {};
+    // Simple kinds with board reset
+    let newGameData = null;
+    if (kind === "tictactoe") {
+      newGameData = { kind, board: Array(9).fill(""), turn: state.user.uid,
+        players: { x: state.user.uid, o: Object.values(oldPlayers).find(u=>u!==state.user.uid)||null },
+        winner: null, lastMove: null };
+    } else if (kind === "connect4") {
+      newGameData = { kind, board: Array(42).fill(""), turn: state.user.uid,
+        players: { r: state.user.uid, y: Object.values(oldPlayers).find(u=>u!==state.user.uid)||null },
+        winner: null, lastDrop: null };
+    } else if (kind === "rps") {
+      newGameData = { kind, round: 1, scores: {}, choices: {}, host: state.user.uid,
+        players: oldPlayers, winner: null, history: [] };
+    }
+    if (!newGameData) { showToast("Rematch not available for this game type"); btn.disabled=false; btn.textContent="Rematch"; return; }
+    await addDoc(collection(db,"chats",state.activeChatId,"messages"),{
+      type:"game", senderUid: state.user.uid,
+      senderName: state.user.displayName || "User",
+      senderPhoto: state.user.photoURL || null,
+      createdAt: serverTimestamp(), reactions:{},
+      gameData: newGameData
+    });
+    await updateDoc(doc(db,"chats",state.activeChatId),{
+      lastMessage:"🎮 Rematch started!",
+      lastMessageAt: serverTimestamp(), lastSenderUid: state.user.uid
+    });
+    showToast("🎮 Rematch started!");
+    _trackUsage("game_rematch");
+  } catch(err) { showToast("Rematch failed: " + err.message); btn.disabled=false; btn.textContent="🔄 Rematch"; }
+});
+
+
+/* =====================================================================
+   B8 — MOBILE SWIPE GESTURES
+   Swipe right on a message = reply; swipe left = options/context menu
+   ===================================================================== */
+(function _initSwipeGestures() {
+  const THRESHOLD = 52;   // px swipe needed to trigger action
+  let touchStartX = 0, touchStartY = 0, touchEl = null, swipeDelta = 0;
+
+  // We use a delegated touchstart on #messages
+  const msgWrap = $("#messages");
+  if (!msgWrap) return;
+
+  msgWrap.addEventListener("touchstart", e => {
+    if (e.touches.length !== 1) return;
+    const t = e.touches[0];
+    touchStartX = t.clientX;
+    touchStartY = t.clientY;
+    touchEl = e.target.closest(".message-group, .msg-followup");
+    swipeDelta = 0;
+  }, {passive:true});
+
+  msgWrap.addEventListener("touchmove", e => {
+    if (!touchEl || e.touches.length !== 1) return;
+    const t = e.touches[0];
+    const dx = t.clientX - touchStartX;
+    const dy = t.clientY - touchStartY;
+    // Only hijack horizontal-dominant swipes
+    if (Math.abs(dy) > Math.abs(dx) * 1.2) { touchEl = null; return; }
+    swipeDelta = dx;
+    const capped = Math.max(-THRESHOLD, Math.min(THRESHOLD, dx));
+    touchEl.style.transform = `translateX(${capped * 0.55}px)`;
+    touchEl.style.transition = "none";
+    touchEl.classList.toggle("swiping-right", dx > 8);
+    touchEl.classList.toggle("swiping-left",  dx < -8);
+    if (Math.abs(dx) > 10) e.preventDefault();
+  }, {passive:false});
+
+  msgWrap.addEventListener("touchend", e => {
+    if (!touchEl) return;
+    const el = touchEl;
+    touchEl = null;
+    el.style.transform = "";
+    el.style.transition = "";
+    el.classList.remove("swiping-right","swiping-left");
+
+    const msgId = el.dataset.msgId;
+    if (!msgId) return;
+
+    if (swipeDelta > THRESHOLD) {
+      // Swipe right → reply
+      const msg = state.messages.find(m => m.id === msgId);
+      if (msg) {
+        setReplyTo(msg);
+        // Quick haptic if available
+        try { navigator.vibrate?.(30); } catch(_){}
+      }
+    } else if (swipeDelta < -THRESHOLD) {
+      // Swipe left → show message action bar (click the ⋯ actions btn)
+      const actBtn = el.querySelector(".msg-action-btn[data-action='more'], .msg-action-btn");
+      if (actBtn) actBtn.click();
+      else {
+        // Fallback: try right-click context menu simulation
+        const rect = el.getBoundingClientRect();
+        const uid = el.querySelector("[data-profile-uid]")?.dataset.profileUid || "";
+        const name = el.querySelector(".msg-author")?.textContent || "";
+        el.dispatchEvent(new MouseEvent("contextmenu", {
+          bubbles: true, cancelable: true,
+          clientX: rect.right - 12, clientY: rect.top + rect.height / 2,
+        }));
+      }
+    }
+  }, {passive:true});
+})();
+
+
+/* =====================================================================
+   B9 — GROUP SETTINGS SIDE PANEL
+   ===================================================================== */
+(function _initGroupPanel() {
+  const overlay = $("#group-panel-overlay");
+  const panel   = $("#group-panel");
+  if (!overlay || !panel) return;
+
+  function _closePanel() {
+    overlay.classList.add("hidden");
+    state._groupPanelChatId = null;
+  }
+
+  // Close on background click
+  overlay.addEventListener("click", e => { if (e.target === overlay) _closePanel(); });
+  $("#group-panel-close")?.addEventListener("click", _closePanel);
+
+  // Escape key
+  document.addEventListener("keydown", e => {
+    if (e.key === "Escape" && !overlay.classList.contains("hidden")) _closePanel();
+  });
+
+  // Tabs
+  panel.addEventListener("click", e => {
+    const tab = e.target.closest(".group-panel-tab");
+    if (!tab) return;
+    const tabId = tab.dataset.gpTab;
+    $$(".group-panel-tab").forEach(t => {
+      t.classList.toggle("active", t.dataset.gpTab === tabId);
+      t.setAttribute("aria-selected", t.dataset.gpTab === tabId ? "true" : "false");
+    });
+    $$(".group-panel-tab-content").forEach(p => p.classList.toggle("active", p.dataset.gpPanel === tabId));
+  });
+
+  // Save name
+  $("#gp-save-name-btn")?.addEventListener("click", async () => {
+    const chatId = state._groupPanelChatId; if (!chatId) return;
+    const val = ($("#gp-name-input")?.value||"").trim();
+    if (!val || val.length > 50) { showToast("Invalid name"); return; }
+    try {
+      await updateDoc(doc(db,"chats",chatId), { name: val });
+      showToast("✓ Name saved");
+      _trackUsage("group_settings_name");
+    } catch(err) { showToast("Error: " + err.message); }
+  });
+
+  // Save description
+  $("#gp-save-desc-btn")?.addEventListener("click", async () => {
+    const chatId = state._groupPanelChatId; if (!chatId) return;
+    const val = ($("#gp-desc-input")?.value||"").trim();
+    if (val.length > 1000) { showToast("Too long"); return; }
+    try {
+      await updateDoc(doc(db,"chats",chatId), { description: val });
+      showToast("✓ Description saved");
+    } catch(err) { showToast("Error: " + err.message); }
+  });
+
+  // Save photo
+  $("#gp-save-photo-btn")?.addEventListener("click", async () => {
+    const chatId = state._groupPanelChatId; if (!chatId) return;
+    const val = ($("#gp-photo-input")?.value||"").trim();
+    if (val && !/^https?:\/\//i.test(val)) { showToast("Must be an https:// URL"); return; }
+    try {
+      await updateDoc(doc(db,"chats",chatId), { photoURL: val || null });
+      showToast(val ? "✓ Photo updated" : "✓ Photo removed");
+    } catch(err) { showToast("Error: " + err.message); }
+  });
+
+  // Invite code copy
+  $("#gp-invite-code")?.addEventListener("click", () => {
+    const code = $("#gp-invite-code")?.textContent;
+    if (code && code !== "——————") {
+      navigator.clipboard.writeText(code).then(()=>showToast("📋 Code copied!"));
+    }
+  });
+
+  // Regenerate code — delegate to group-info-modal's existing handler
+  $("#gp-regen-code")?.addEventListener("click", async () => {
+    const chatId = state._groupPanelChatId; if (!chatId) return;
+    const chars="ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+    const newCode=Array.from({length:6},()=>chars[Math.floor(Math.random()*chars.length)]).join("");
+    try {
+      await updateDoc(doc(db,"chats",chatId),{ inviteCode: newCode });
+      const el = $("#gp-invite-code");
+      if (el) el.textContent = newCode;
+      showToast("🔄 New code generated");
+    } catch(err) { showToast("Error: "+err.message); }
+  });
+
+  // Leave group
+  $("#gp-leave-btn")?.addEventListener("click", () => {
+    const chatId = state._groupPanelChatId; if (!chatId) return;
+    // Reuse existing leave-group logic
+    $("#group-info-leave-btn")?.click();
+    _closePanel();
+  });
+
+  // Public API to open the panel for a given chatId
+  window.openGroupPanel = async function(chatId) {
+    if (!chatId) return;
+    const chat = state.chats.find(c=>c.id===chatId);
+    if (!chat || chat.type !== "group") return;
+    state._groupPanelChatId = chatId;
+
+    // Populate header
+    const titleEl = $("#group-panel-title");
+    if (titleEl) titleEl.textContent = chat.name || "Group Settings";
+
+    // Avatar
+    const avatarEl = $("#gp-avatar");
+    if (avatarEl) {
+      if (chat.photoURL) avatarEl.innerHTML = `<img src="${escapeHtml(chat.photoURL)}" alt="" style="width:100%;height:100%;object-fit:cover;border-radius:50%;" />`;
+      else { avatarEl.innerHTML = ""; avatarEl.textContent = groupInitials(chat.name||"G"); }
+    }
+
+    // Inputs
+    const nameInp = $("#gp-name-input");
+    if (nameInp) nameInp.value = chat.name || "";
+    const descInp = $("#gp-desc-input");
+    if (descInp) descInp.value = chat.description || "";
+    const photoInp = $("#gp-photo-input");
+    if (photoInp) photoInp.value = chat.photoURL || "";
+
+    // Invite code
+    const codeEl = $("#gp-invite-code");
+    if (codeEl) codeEl.textContent = chat.inviteCode || "——————";
+
+    // Members
+    const memberCount = $("#gp-member-count");
+    const membersList = $("#gp-members-list");
+    if (memberCount) memberCount.textContent = (chat.members||[]).length;
+    if (membersList) {
+      const profiles = await Promise.all((chat.members||[]).map(uid=>fetchUserProfile(uid)));
+      membersList.innerHTML = profiles.map((p,i)=>{
+        const uid = (chat.members||[])[i];
+        const name = p?.username || p?.displayName || "User";
+        const isAdmin = (chat.admins||[]).includes(uid) || chat.createdBy===uid;
+        const isSelf = uid === state.user?.uid;
+        return `<div class="group-member-row">
+          ${avatarMarkup(name, p?.photoURL||null, "group-member-avatar","group-member-fallback")}
+          <span class="group-member-name">${escapeHtml(name)}${isAdmin?` <span class="member-admin-badge">admin</span>`:""}</span>
+          ${!isSelf ? `<button class="icon-btn side-row-close" data-gp-kick="${escapeHtml(uid)}" title="Remove member">✕</button>` : ""}
+        </div>`;
+      }).join("");
+    }
+
+    // Reset to overview tab
+    $$(".group-panel-tab").forEach(t => {
+      t.classList.toggle("active", t.dataset.gpTab === "overview");
+      t.setAttribute("aria-selected", t.dataset.gpTab === "overview" ? "true" : "false");
+    });
+    $$(".group-panel-tab-content").forEach(p => p.classList.toggle("active", p.dataset.gpPanel === "overview"));
+
+    overlay.classList.remove("hidden");
+    _trackUsage("group_panel_open");
+  };
+})();
+
+// Intercept group-info button to open the panel instead of the old modal
+(function() {
+  const origHandler = document.querySelector; // just checking
+  document.addEventListener("click", e => {
+    const btn = e.target.closest("#chat-group-info-btn, [data-action='group-info']");
+    if (!btn) return;
+    const chatId = state.activeChatId;
+    const chat = chatId ? state.chats.find(c=>c.id===chatId) : null;
+    if (!chat || chat.type !== "group") return;
+    e.stopImmediatePropagation();
+    window.openGroupPanel?.(chatId);
+  }, true); // capture phase so we run before old handler
+})();
+
+
+// B7 richer profile fields (pronouns, interests, game stats) are now
+// populated directly inside showFullProfile() above.
+
+
+/* =====================================================================
+   B6 — GAME WIN/LOSS TRACKING  (lightweight, on win only)
+   Called from game-over logic. Updates own profile stats.
+   ===================================================================== */
+async function _recordGameResult(won) {
+  if (!state.user) return;
+  const uid = state.user.uid;
+  try {
+    const field = won ? "gameWins" : "gameLosses";
+    const inc = { [field]: (state.userCache[uid]?.[field] || 0) + 1 };
+    await updateDoc(doc(db, "users", uid), inc);
+    if (state.userCache[uid]) state.userCache[uid] = { ...state.userCache[uid], ...inc };
+    _trackUsage(won ? "game_win" : "game_loss");
+  } catch(_) {}
+}
+
+
+/* =====================================================================
+   C8 — LIGHTWEIGHT CLIENT-SIDE ANALYTICS
+   Tracks feature usage in localStorage (no external service).
+   Opt-in consent banner shown once; data never leaves the device.
+   ===================================================================== */
+const _ANALYTICS_KEY = "sc_analytics_v1";
+const _ANALYTICS_CONSENT_KEY = "sc_analytics_consent";
+
+function _trackUsage(event) {
+  if (localStorage.getItem(_ANALYTICS_CONSENT_KEY) !== "yes") return;
+  try {
+    const data = JSON.parse(localStorage.getItem(_ANALYTICS_KEY) || "{}");
+    data[event] = (data[event] || 0) + 1;
+    data._lastUpdate = Date.now();
+    localStorage.setItem(_ANALYTICS_KEY, JSON.stringify(data));
+  } catch(_) {}
+}
+
+// Show consent banner once (only to logged-in users, after app loads)
+function _maybeShowAnalyticsConsent() {
+  const consent = localStorage.getItem(_ANALYTICS_CONSENT_KEY);
+  if (consent) return; // already decided
+  const banner = $("#analytics-consent");
+  if (!banner) return;
+  // Delay so it doesn't fight with the ToS overlay
+  setTimeout(() => {
+    if (!state.user) return; // only show if signed in
+    banner.classList.remove("hidden");
+  }, 4000);
+}
+
+$("#analytics-accept-btn")?.addEventListener("click", () => {
+  localStorage.setItem(_ANALYTICS_CONSENT_KEY, "yes");
+  $("#analytics-consent")?.classList.add("hidden");
+  showToast("✓ Analytics enabled — thank you!", 2000);
+});
+$("#analytics-decline-btn")?.addEventListener("click", () => {
+  localStorage.setItem(_ANALYTICS_CONSENT_KEY, "no");
+  $("#analytics-consent")?.classList.add("hidden");
+});
+
+// Hook usage tracking into key actions
+// (called opportunistically — all existing event handlers just call _trackUsage)
+document.addEventListener("click", e => {
+  if (e.target.closest(".send-btn"))            _trackUsage("message_sent");
+  if (e.target.closest("#gif-btn"))             _trackUsage("gif_picker_open");
+  if (e.target.closest("#emoji-btn"))           _trackUsage("emoji_picker_open");
+  if (e.target.closest("[data-poll-vote]"))      _trackUsage("poll_vote");
+  if (e.target.closest(".poll-option.selected")) _trackUsage("poll_unvote");
+  if (e.target.closest("[data-tab='add']"))      _trackUsage("add_friend_tab");
+  if (e.target.closest("#open-friends-btn"))     _trackUsage("friends_open");
+  if (e.target.closest(".side-btn-badge"))       _trackUsage("friend_req_badge");
+});
+
+
+/* =====================================================================
+   WIRE: show analytics consent when user signs in
+   _maybeShowAnalyticsConsent() is called from bootSubscriptions() below
+   ===================================================================== */

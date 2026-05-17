@@ -2668,6 +2668,12 @@ body[data-theme="oled"] .badge-icon-wrap {
   margin: 14px 0 0; font-size: 12px; color: var(--t-muted);
   text-align: center; line-height: 1.5;
 }
+.tos-footer-links {
+  margin: 8px 0 0; font-size: 12px; text-align: center;
+  display: flex; justify-content: center; flex-wrap: wrap; gap: 2px 0;
+}
+.tos-footer-links a { color: var(--c-accent); text-decoration: none; }
+.tos-footer-links a:hover { text-decoration: underline; }
 .tos-foot {
   padding: 14px 28px 22px;
   background: rgba(0,0,0,.18);
@@ -4187,6 +4193,274 @@ body.has-chat-accent .chat-header { border-bottom-color: var(--c-chat-accent, va
 body.has-chat-accent .chat-header-name { color: var(--c-chat-accent, var(--t-primary)); }
 body.has-chat-accent #composer-input:focus { border-color: var(--c-chat-accent, var(--c-accent)); }
 body.has-chat-accent .send-btn { background: var(--c-chat-accent, var(--c-accent)); }
+
+/* =================================================
+   B1 — SIDEBAR COLLAPSE (desktop toggle)
+   ================================================= */
+.sidebar { transition: width .22s cubic-bezier(.4,0,.2,1), min-width .22s cubic-bezier(.4,0,.2,1), border-width .22s; }
+.app.sidebar-collapsed { grid-template-columns: var(--rail-w) 0 1fr; }
+.app.sidebar-collapsed .sidebar { width: 0; min-width: 0; overflow: hidden; border-right-width: 0; }
+
+.sidebar-collapse-btn {
+  display: none; /* shown via JS on desktop */
+  position: absolute; right: -12px; top: 50%; transform: translateY(-50%);
+  width: 24px; height: 24px; border-radius: 50%;
+  background: var(--c-sidebar); border: 1px solid var(--c-border);
+  color: var(--t-secondary); font-size: 11px; cursor: pointer;
+  z-index: 10; align-items: center; justify-content: center;
+  transition: background .12s, color .12s, transform .22s;
+  box-shadow: var(--shadow-1);
+}
+.sidebar-collapse-btn:hover { background: var(--c-accent); color: #fff; border-color: var(--c-accent); }
+.app.sidebar-collapsed .sidebar-collapse-btn { transform: translateY(-50%) rotate(180deg); }
+
+/* Sidebar header needs relative positioning for the collapse button */
+.sidebar-header { position: relative; }
+
+@media (min-width: 769px) {
+  .sidebar-collapse-btn { display: flex; }
+}
+
+/* =================================================
+   B4 — IMAGE LIGHTBOX
+   ================================================= */
+.lightbox-overlay {
+  position: fixed; inset: 0; z-index: 9000;
+  background: rgba(0,0,0,.9); backdrop-filter: blur(4px);
+  display: flex; align-items: center; justify-content: center;
+  cursor: zoom-out; animation: fadeIn .15s ease;
+}
+.lightbox-overlay.hidden { display: none; }
+.lightbox-inner {
+  position: relative; max-width: 95vw; max-height: 92vh;
+  display: flex; align-items: center; justify-content: center;
+  cursor: default; user-select: none;
+}
+.lightbox-img {
+  max-width: 95vw; max-height: 88vh;
+  border-radius: var(--radius-sm); box-shadow: 0 8px 40px rgba(0,0,0,.6);
+  object-fit: contain; transition: transform .1s ease;
+  transform-origin: center center;
+  cursor: grab;
+}
+.lightbox-img.dragging { cursor: grabbing; transition: none; }
+.lightbox-close {
+  position: fixed; top: 14px; right: 18px;
+  width: 36px; height: 36px; border-radius: 50%;
+  background: rgba(255,255,255,.12); color: #fff;
+  font-size: 20px; display: flex; align-items: center; justify-content: center;
+  cursor: pointer; transition: background .12s; z-index: 9001; border: none;
+}
+.lightbox-close:hover { background: rgba(255,255,255,.24); }
+.lightbox-zoom-hint {
+  position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%);
+  background: rgba(0,0,0,.55); color: rgba(255,255,255,.7);
+  font-size: 12px; padding: 4px 12px; border-radius: 20px;
+  pointer-events: none; transition: opacity .3s;
+}
+/* Make images in messages clickable */
+.msg-img, .msg-gif, .gif-img { cursor: zoom-in; }
+
+/* =================================================
+   B5 — POLL IMPROVEMENTS
+   ================================================= */
+.poll-voters {
+  font-size: 11px; color: var(--t-muted); margin-top: 4px;
+  display: flex; flex-wrap: wrap; gap: 4px; align-items: center;
+}
+.poll-voter-chip {
+  background: var(--c-input-2); border-radius: 10px;
+  padding: 1px 7px; font-size: 11px; color: var(--t-secondary);
+}
+.poll-countdown {
+  font-size: 11px; font-weight: 600; color: var(--c-accent);
+  font-variant-numeric: tabular-nums;
+}
+.poll-countdown.ending-soon { color: var(--c-danger); animation: pulse 1s ease infinite; }
+@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.5} }
+.poll-change-vote {
+  font-size: 11px; color: var(--t-muted); text-decoration: underline;
+  cursor: pointer; background: none; border: none; padding: 0;
+  margin-left: 6px;
+}
+.poll-change-vote:hover { color: var(--c-accent); }
+
+/* =================================================
+   B6 — GAME ENHANCEMENTS (rematch button)
+   ================================================= */
+.game-rematch-btn {
+  margin-top: 8px; padding: 6px 16px;
+  background: var(--c-accent); color: #fff;
+  border-radius: var(--radius-sm); font-size: 13px; font-weight: 600;
+  transition: background .12s, opacity .12s;
+}
+.game-rematch-btn:hover { opacity: .88; }
+.game-rematch-btn:disabled { opacity: .5; cursor: not-allowed; }
+
+/* Win/loss badge in profile */
+.fp-game-stats {
+  display: flex; gap: 12px; margin-top: 8px;
+}
+.fp-stat-pill {
+  display: flex; flex-direction: column; align-items: center;
+  background: var(--c-input-2); border-radius: var(--radius-sm);
+  padding: 6px 14px; min-width: 52px; gap: 2px;
+}
+.fp-stat-num { font-size: 18px; font-weight: 800; color: var(--t-primary); }
+.fp-stat-label { font-size: 10px; font-weight: 600; color: var(--t-muted); text-transform: uppercase; letter-spacing: .04em; }
+
+/* =================================================
+   B7 — RICHER PROFILE CARDS
+   ================================================= */
+.fp-section-label {
+  font-size: 11px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: .06em; color: var(--t-muted); margin: 14px 0 6px;
+}
+.fp-interest-chips {
+  display: flex; flex-wrap: wrap; gap: 5px; margin-top: 4px;
+}
+.fp-interest-chip {
+  background: var(--c-accent-soft); color: var(--c-accent);
+  border-radius: 12px; padding: 2px 10px; font-size: 12px; font-weight: 500;
+}
+.fp-social-links {
+  display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px;
+}
+.fp-social-link {
+  display: flex; align-items: center; gap: 5px;
+  background: var(--c-input-2); border-radius: var(--radius-sm);
+  padding: 4px 10px; font-size: 12px; color: var(--t-secondary);
+  text-decoration: none; transition: background .12s, color .12s;
+}
+.fp-social-link:hover { background: var(--c-accent-soft); color: var(--c-accent); }
+.fp-pronouns-tag {
+  display: inline-block; background: var(--c-input-2);
+  border-radius: 10px; padding: 1px 8px;
+  font-size: 12px; color: var(--t-secondary); margin-left: 6px;
+}
+
+/* =================================================
+   B8 — SWIPE GESTURES (visual indicators)
+   ================================================= */
+.msg-swipe-wrapper {
+  position: relative; overflow: hidden;
+  touch-action: pan-y; /* allow vertical scroll, intercept horizontal */
+}
+.msg-swipe-hint {
+  position: absolute; top: 50%; transform: translateY(-50%);
+  display: flex; align-items: center; justify-content: center;
+  width: 40px; height: 40px; border-radius: 50%;
+  background: var(--c-accent); color: #fff;
+  font-size: 16px; opacity: 0; pointer-events: none;
+  transition: opacity .15s;
+}
+.msg-swipe-hint.reply-hint { right: calc(100% - 30px); }
+.msg-swipe-hint.options-hint { left: calc(100% - 30px); }
+.msg-swipe-wrapper.swiping-right .msg-swipe-hint.reply-hint   { opacity: 1; }
+.msg-swipe-wrapper.swiping-left  .msg-swipe-hint.options-hint { opacity: 1; }
+.msg-swipe-wrapper { transition: transform .12s ease; }
+.msg-swipe-wrapper.swiping-right { transform: translateX(30px); }
+.msg-swipe-wrapper.swiping-left  { transform: translateX(-30px); }
+
+/* =================================================
+   B9 — GROUP SETTINGS SIDE PANEL
+   ================================================= */
+.group-panel-overlay {
+  position: fixed; inset: 0; z-index: 400;
+  background: rgba(0,0,0,.45);
+  display: flex; align-items: stretch; justify-content: flex-end;
+  animation: fadeIn .15s ease;
+}
+.group-panel-overlay.hidden { display: none; }
+.group-panel {
+  width: 340px; max-width: 100vw;
+  background: var(--c-sidebar); display: flex; flex-direction: column;
+  box-shadow: -4px 0 24px rgba(0,0,0,.3);
+  animation: slideInRight .2s cubic-bezier(.4,0,.2,1);
+  overflow: hidden;
+}
+@keyframes slideInRight {
+  from { transform: translateX(100%); }
+  to   { transform: translateX(0); }
+}
+.group-panel-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 14px 16px; border-bottom: 1px solid var(--c-border);
+  flex-shrink: 0;
+}
+.group-panel-head h2 { font-size: 16px; font-weight: 700; margin: 0; }
+.group-panel-body {
+  flex: 1; overflow-y: auto; padding: 16px;
+}
+.group-panel-tabs {
+  display: flex; gap: 2px;
+  background: var(--c-input-2); border-radius: var(--radius-sm);
+  padding: 3px; margin-bottom: 16px; flex-shrink: 0;
+}
+.group-panel-tab {
+  flex: 1; padding: 5px 0; text-align: center;
+  font-size: 12px; font-weight: 600; border-radius: 6px;
+  color: var(--t-muted); cursor: pointer; transition: background .12s, color .12s;
+}
+.group-panel-tab.active {
+  background: var(--c-bg2); color: var(--t-primary);
+  box-shadow: var(--shadow-1);
+}
+.group-panel-tab-content { display: none; }
+.group-panel-tab-content.active { display: block; }
+
+/* =================================================
+   B10 — COMPACT SIDEBAR MODE
+   ================================================= */
+body.compact-mode .side-row { padding: 3px 8px; min-height: 0; }
+body.compact-mode .side-row-avatar, body.compact-mode .side-row-fallback { width: 26px; height: 26px; font-size: 11px; }
+body.compact-mode .side-row-name { font-size: 13px; }
+body.compact-mode .side-btn { padding: 4px 8px; font-size: 13px; }
+body.compact-mode .side-section-label { padding: 10px 8px 3px; }
+body.compact-mode .sidebar-content { padding: 5px; }
+body.compact-mode .side-status-dot { width: 8px; height: 8px; }
+
+/* =================================================
+   C6 — ACCESSIBILITY IMPROVEMENTS
+   ================================================= */
+/* Focus-visible outlines for keyboard navigation */
+:focus-visible {
+  outline: 2px solid var(--c-accent);
+  outline-offset: 2px;
+}
+/* Skip-to-content link */
+.skip-link {
+  position: absolute; top: -9999px; left: -9999px;
+  background: var(--c-accent); color: #fff;
+  padding: 8px 16px; border-radius: var(--radius-sm);
+  font-weight: 600; z-index: 99999; text-decoration: none;
+}
+.skip-link:focus { top: 8px; left: 8px; }
+/* Ensure interactive elements have minimum tap target */
+button, [role="button"], a { min-width: 0; }
+/* Improve screen reader visibility of live regions */
+.sr-only {
+  position: absolute; width: 1px; height: 1px;
+  padding: 0; margin: -1px; overflow: hidden;
+  clip: rect(0,0,0,0); white-space: nowrap; border: 0;
+}
+
+/* =================================================
+   C8 — ANALYTICS CONSENT BANNER (lightweight)
+   ================================================= */
+.analytics-consent {
+  position: fixed; bottom: 0; left: 0; right: 0;
+  background: var(--c-sidebar); border-top: 1px solid var(--c-border);
+  padding: 10px 16px; display: flex; align-items: center; gap: 12px;
+  flex-wrap: wrap; z-index: 500; font-size: 13px;
+  transform: translateY(0); transition: transform .2s ease;
+}
+.analytics-consent.hidden { display: none; }
+.analytics-consent-text { flex: 1; min-width: 200px; color: var(--t-secondary); }
+.analytics-consent-link { color: var(--c-accent); text-decoration: underline; }
+.analytics-consent-btns { display: flex; gap: 8px; }
+.analytics-consent-accept { background: var(--c-accent); color: #fff; padding: 5px 14px; border-radius: var(--radius-sm); font-size: 13px; font-weight: 600; }
+.analytics-consent-decline { background: var(--c-input-2); color: var(--t-secondary); padding: 5px 14px; border-radius: var(--radius-sm); font-size: 13px; }
 .mute-menu-title {
   font-size: 11px; font-weight: 700; text-transform: uppercase;
   letter-spacing: .05em; color: var(--t-muted);

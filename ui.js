@@ -208,9 +208,12 @@ export function buildUI() {
     </nav>
 
     <!-- SIDEBAR -->
-    <aside class="sidebar">
+    <aside class="sidebar" aria-label="Conversations sidebar" role="navigation">
       <div class="sidebar-header">
-        <input type="text" id="sidebar-search" placeholder="Find or start a conversation" />
+        <input type="text" id="sidebar-search" placeholder="Find or start a conversation"
+               aria-label="Search conversations" autocomplete="off" />
+        <button class="sidebar-collapse-btn" id="sidebar-collapse-btn"
+                title="Collapse sidebar" aria-label="Collapse sidebar" aria-expanded="true">‹</button>
       </div>
       <div class="sidebar-content">
         <button class="side-btn" id="open-friends-btn" style="position:relative;">
@@ -645,10 +648,18 @@ export function buildUI() {
         <p class="tos-footer-note">
           By clicking "I Agree", you confirm you have read these terms, are old enough to use this service, and agree to use Static Chat responsibly. If you do not agree, close this page.
         </p>
+        <p class="tos-footer-links">
+          <a href="https://sites.google.com/view/staticquasar931/privacy" target="_blank" rel="noopener noreferrer">Privacy Policy</a>
+          &nbsp;·&nbsp;
+          <a href="https://sites.google.com/view/staticquasar931/" target="_blank" rel="noopener noreferrer">About</a>
+          &nbsp;·&nbsp;
+          <a href="https://discord.gg/DP2hM7RRhR" target="_blank" rel="noopener noreferrer">Support Discord</a>
+        </p>
       </div>
 
       <div class="tos-foot">
         <button class="btn-primary" id="tos-agree-btn">I Agree — Let Me In</button>
+        <p style="font-size:11px;color:var(--t-muted);margin-top:8px;text-align:center;">Terms last updated May 2025 · v2</p>
       </div>
     </div>
 
@@ -753,6 +764,17 @@ export function buildUI() {
               <div class="settings-field-group">
                 <label class="modal-label">Bio <span class="label-optional">up to 400 chars</span></label>
                 <textarea id="settings-bio-input" maxlength="400" rows="3" placeholder="Tell people a bit about yourself…"></textarea>
+              </div>
+              <div class="settings-field-group">
+                <label class="modal-label">Pronouns <span class="label-optional">optional · up to 30 chars</span></label>
+                <input type="text" id="settings-pronouns-input" maxlength="30"
+                  placeholder="they/them, she/her, he/him…" spellcheck="false" autocomplete="off" />
+              </div>
+              <div class="settings-field-group">
+                <label class="modal-label">Interests <span class="label-optional">optional · comma-separated, up to 12</span></label>
+                <input type="text" id="settings-interests-input" maxlength="200"
+                  placeholder="gaming, coding, music, art…" spellcheck="false" autocomplete="off" />
+                <p class="hint" style="margin:4px 0 0;font-size:11px;">Separate with commas. Shown as chips on your profile.</p>
               </div>
               <div class="settings-field-group">
                 <label class="modal-label">Status Phrase <span class="label-optional">up to 60 chars</span></label>
@@ -1823,8 +1845,17 @@ export function buildUI() {
             <div class="full-profile-divider"></div>
             <div class="full-profile-section-label">About Me</div>
             <div class="full-profile-bio" id="fp-bio"></div>
+            <!-- Pronouns (inline, optional) -->
+            <span class="fp-pronouns-tag" id="fp-pronouns" style="display:none"></span>
             <!-- Fav game near top of about section -->
             <div class="fp-favgame" id="fp-favgame" style="display:none"></div>
+            <!-- Interests chips -->
+            <div id="fp-interests-section" style="display:none;margin-top:8px;">
+              <div class="fp-section-label">Interests</div>
+              <div class="fp-interest-chips" id="fp-interest-chips"></div>
+            </div>
+            <!-- Game stats -->
+            <div class="fp-game-stats" id="fp-game-stats" style="display:none"></div>
             <div class="full-profile-divider" style="margin:10px 0 8px;"></div>
             <!-- Meta info in a compact 2-column grid -->
             <div class="fp-meta-grid">
@@ -1918,5 +1949,99 @@ export function buildUI() {
   </div>
 
   <!-- Custom Confirm Dialog (dynamically injected by showConfirm(), placeholder here for CSS) -->
+
+  <!-- B4: Image / GIF Lightbox -->
+  <div id="lightbox-overlay" class="lightbox-overlay hidden" role="dialog" aria-modal="true" aria-label="Image viewer">
+    <button class="lightbox-close" id="lightbox-close" aria-label="Close image viewer">×</button>
+    <div class="lightbox-inner" id="lightbox-inner">
+      <img id="lightbox-img" class="lightbox-img" src="" alt="Full-size image" draggable="false" />
+    </div>
+    <div class="lightbox-zoom-hint" id="lightbox-zoom-hint">Scroll to zoom · Drag to pan</div>
+  </div>
+
+  <!-- B9: Group Settings Side Panel (replaces modal for richer UX) -->
+  <div id="group-panel-overlay" class="group-panel-overlay hidden" role="dialog" aria-modal="true" aria-label="Group settings">
+    <div class="group-panel" id="group-panel">
+      <div class="group-panel-head">
+        <h2 id="group-panel-title">Group Settings</h2>
+        <button class="icon-btn" id="group-panel-close" aria-label="Close group settings">
+          <svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </div>
+      <div style="padding:0 16px;flex-shrink:0;">
+        <div class="group-panel-tabs" role="tablist">
+          <button class="group-panel-tab active" data-gp-tab="overview" role="tab" aria-selected="true">Overview</button>
+          <button class="group-panel-tab" data-gp-tab="members" role="tab" aria-selected="false">Members</button>
+          <button class="group-panel-tab" data-gp-tab="settings" role="tab" aria-selected="false">Settings</button>
+        </div>
+      </div>
+      <div class="group-panel-body">
+        <!-- Overview tab -->
+        <div class="group-panel-tab-content active" data-gp-panel="overview">
+          <div class="group-info-head" style="margin-bottom:14px;">
+            <div class="group-info-avatar" id="gp-avatar"></div>
+            <div style="flex:1;min-width:0;">
+              <label class="modal-label">Group Name</label>
+              <div style="display:flex;gap:6px;">
+                <input type="text" id="gp-name-input" class="modal-input" maxlength="50" placeholder="Group name" />
+                <button class="btn-primary" id="gp-save-name-btn" style="padding:0 12px;">Save</button>
+              </div>
+            </div>
+          </div>
+          <label class="modal-label">Description / Rules <span class="label-optional">max 1000 chars</span></label>
+          <textarea id="gp-desc-input" class="modal-textarea" rows="3" maxlength="1000" placeholder="What's this group about? Any rules?"></textarea>
+          <div style="text-align:right;margin-top:4px;">
+            <button class="btn-secondary" id="gp-save-desc-btn">Save Description</button>
+          </div>
+          <label class="modal-label" style="margin-top:14px;">Group Picture URL <span class="label-optional">optional</span></label>
+          <div style="display:flex;gap:6px;">
+            <input type="text" id="gp-photo-input" class="modal-input" placeholder="https://example.com/image.png" />
+            <button class="btn-secondary" id="gp-save-photo-btn" style="padding:0 12px;">Set</button>
+          </div>
+        </div>
+        <!-- Members tab -->
+        <div class="group-panel-tab-content" data-gp-panel="members">
+          <div class="group-info-section" style="padding:0;">
+            <label class="modal-label" style="margin-bottom:8px;">Members (<span id="gp-member-count">0</span>)</label>
+            <div id="gp-members-list" class="group-info-members-list"></div>
+          </div>
+          <div class="group-info-section" style="margin-top:14px;">
+            <label class="modal-label">Invite Code</label>
+            <div style="display:flex;gap:8px;align-items:center;">
+              <code id="gp-invite-code" class="join-code-display" style="flex:1;font-size:18px;text-align:center;cursor:pointer;" title="Click to copy">——————</code>
+              <button class="icon-btn" id="gp-regen-code" title="Regenerate code" aria-label="Regenerate invite code">
+                <svg viewBox="0 0 24 24" width="16" height="16"><path fill="currentColor" d="M17.65 6.35A7.958 7.958 0 0 0 12 4c-4.42 0-8 3.58-8 8s3.58 8 8 8c3.73 0 6.84-2.55 7.73-6h-2.08A5.99 5.99 0 0 1 12 18c-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/></svg>
+              </button>
+            </div>
+          </div>
+        </div>
+        <!-- Settings tab -->
+        <div class="group-panel-tab-content" data-gp-panel="settings">
+          <div class="group-info-danger" style="margin-top:0;padding-top:0;border:none;">
+            <label class="modal-label" style="margin-bottom:8px;">Danger Zone</label>
+            <button class="btn-secondary" id="gp-leave-btn" style="color:var(--c-danger);width:100%;">
+              <svg viewBox="0 0 24 24" width="14" height="14" style="vertical-align:-2px;margin-right:4px;"><path fill="currentColor" d="M17 7l-1.41 1.41L18.17 11H8v2h10.17l-2.58 2.58L17 17l5-5-5-5zM4 5h8V3H4c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h8v-2H4V5z"/></svg>
+              Leave Group
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- C6: Skip-to-content link for keyboard/screen-reader users -->
+  <a href="#messages" class="skip-link">Skip to messages</a>
+
+  <!-- C8: Analytics consent banner -->
+  <div id="analytics-consent" class="analytics-consent hidden" role="dialog" aria-label="Analytics consent">
+    <span class="analytics-consent-text">
+      We collect anonymous usage data to improve the app.
+      <a href="https://sites.google.com/view/staticquasar931/privacy" target="_blank" rel="noopener" class="analytics-consent-link">Privacy Policy</a>
+    </span>
+    <div class="analytics-consent-btns">
+      <button class="analytics-consent-accept" id="analytics-accept-btn">Accept</button>
+      <button class="analytics-consent-decline" id="analytics-decline-btn">Decline</button>
+    </div>
+  </div>
   `);
 }
