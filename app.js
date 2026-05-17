@@ -413,8 +413,15 @@ const state = {
   activeChatId: null, activeChat: null,
   userCache: {},
   unsubscribers: {
-    messages: null, typing: null, updateBanner: null, dmPartnerProfile: null
+    messages: null, typing: null, updateBanner: null, dmPartnerProfile: null,
+    emergencyConfig: null,
   },
+  // Account standing (loaded from Firestore on boot)
+  standing: null,
+  // Emergency config from appConfig/emergency
+  _emergencyConfig: {},
+  // Timestamp of last successful message send (for slowmode enforcement)
+  _lastSentAt: 0,
   // Polling timer IDs (cleared on sign-out)
   _chatsRefreshTimer: null,
   _profileRefreshTimer: null,
@@ -991,47 +998,443 @@ function escapeHtml(text) {
 
 /* =====================================================================
    AUTOFLAG SYSTEM
-   Silently logs messages containing concerning phrases to Firestore.
+   Logs flagged messages to Firestore with severity, category, and resolution state.
    ===================================================================== */
 const _AUTOFLAG_PATTERNS = [
-  // Threats / violence
-  { pattern: /\b(i(?:'?ll|m going to|'m gonna))\s+(kill|hurt|stab|shoot|beat up|fight)\s+(you|u|him|her|them)\b/i, category: "threat" },
-  { pattern: /\bkill\s+your(self|selves)\b/i, category: "threat" },
-  { pattern: /\bi\s+(want|will|gonna|going to)\s+(hurt|kill|end)\s+(my|myself|me|him|her|them)\b/i, category: "threat_self" },
-  // Self-harm / crisis
-  { pattern: /\b(kms|kys)\b/i, category: "self_harm" },
-  { pattern: /\b(want to die|wanna die|going to (kill|end) myself|suicide|suicidal)\b/i, category: "self_harm" },
-  { pattern: /\b(cutting myself|self.?harm|self.?hurt)\b/i, category: "self_harm" },
-  // Doxxing / contact exchange
-  { pattern: /\b(my (phone|cell|number|address|snapchat|instagram) is|text me at|dm me (on|at)|add me on)\b/i, category: "contact_share" },
-  { pattern: /\b\d{3}[-.\s]?\d{3}[-.\s]?\d{4}\b/, category: "phone_number" },
-  // Bullying / harassment
-  { pattern: /\b(nobody likes you|you should (die|leave|quit)|go (kill|hurt) yourself|worthless|you're (nothing|pathetic|disgusting))\b/i, category: "bullying" },
-  // Slurs — placeholder pattern (extend as needed)
-  { pattern: /\b(n[i1]gg[ae3]r|f[a4]gg[o0]t)\b/i, category: "slur" },
-  // Links to inappropriate sites
-  { pattern: /\b(pornhub|xvideos|xnxx|chaturbate|onlyfans)\b/i, category: "nsfw_link" },
+  // ── Critical (5) ─────────────────────────────────────────────────────
+  { pattern: /\b(going to|gonna|will|i('?ll)?)\s+(shoot|stab|kill|bomb|hurt|beat)\s+(you|u|him|her|them|everyone|people)\b/i, category:"threat",      severity:5 },
+  { pattern: /\b(kms|kys)\b/i,                                                                                                  category:"self_harm",   severity:5 },
+  { pattern: /\b(going to|gonna|will|want to)\s+(kill|end|hurt)\s+(my|myself|me)\b/i,                                          category:"self_harm",   severity:5 },
+  { pattern: /\b(want to die|wanna die|kill myself|end it all|suicide|suicidal|no reason to live)\b/i,                          category:"self_harm",   severity:5 },
+  { pattern: /\b(school shooting|bomb threat|bomb the|shoot up)\b/i,                                                            category:"threat",      severity:5 },
+
+  // ── High (4) ─────────────────────────────────────────────────────────
+  { pattern: /\b(cutting myself|self.?harm|self.?hurt|hurt myself)\b/i,                                                         category:"self_harm",   severity:4 },
+  { pattern: /\b(i hate (you|u)|you should die|nobody likes you|go kill yourself|worthless)\b/i,                                category:"bullying",    severity:4 },
+  { pattern: /\b(n[i1]gg[ae3]r|f[a4]gg[o0]t|tr[a4]nn[yi]|r[e3]t[a4]rd)\b/i,                                                  category:"slur",        severity:4 },
+  { pattern: /\b(pornhub|xvideos|xnxx|chaturbate|onlyfans|redtube|youporn)\b/i,                                                 category:"nsfw_link",   severity:4 },
+  { pattern: /\b(send (me|nudes?|pics?)|nudes|d[i1]ck pic|show me (your|u[rh]))\b/i,                                           category:"nsfw_request",severity:4 },
+
+  // ── Medium (3) ───────────────────────────────────────────────────────
+  { pattern: /\b\d{3}[-.\s]\d{3}[-.\s]\d{4}\b/,                                                                                category:"phone_number",severity:3 },
+  { pattern: /\b(my (phone|cell|number) is|call me at|text me at|reach me at)\b/i,                                              category:"contact_share",severity:3 },
+  { pattern: /\b(where do you live|what school do you go to|what's your address|send me your location)\b/i,                     category:"grooming",    severity:3 },
+  { pattern: /\b(add me on (snap|snapchat|insta|instagram|discord)|dm me on|my (snap|insta|ig) is)\b/i,                         category:"contact_share",severity:3 },
+  { pattern: /\b(you('?re| are) (so )?(ugly|fat|disgusting|pathetic|nothing|a loser))\b/i,                                      category:"bullying",    severity:3 },
+  { pattern: /(?:https?:\/\/)?(?:bit\.ly|tinyurl\.com|t\.co|cutt\.ly)\/\S+/i,                                                  category:"suspicious_link",severity:3 },
+
+  // ── Low (2) ──────────────────────────────────────────────────────────
+  { pattern: /\b(leaked|dox(x)?|dox(x)?ing|personal info|ip address)\b/i,                                                      category:"doxxing",     severity:2 },
+  { pattern: /\b(meet (me|up)|come to my (house|place)|pick you up|i know where you)\b/i,                                      category:"grooming",    severity:2 },
+  { pattern: /\b(admin|mod|staff)\s+(abuse|sucks?|is (trash|bad|terrible|unfair))\b/i,                                         category:"admin_abuse", severity:2 },
 ];
 
 async function _autoFlagCheck(text, msgId, chatId, senderUid, senderName) {
-  if (!text || !state.user) return;
+  if (!text || !state.user || window._offlineBrowseMode) return;
   const lc = text.toLowerCase();
-  for (const { pattern, category } of _AUTOFLAG_PATTERNS) {
+  let best = null;
+  for (const { pattern, category, severity } of _AUTOFLAG_PATTERNS) {
     if (pattern.test(lc)) {
+      if (!best || severity > best.severity) best = { pattern, category, severity };
+    }
+  }
+  if (!best) return;
+  try {
+    await addDoc(collection(db, "Autoflag"), {
+      messageId:    msgId   || null,
+      chatId:       chatId  || null,
+      senderUid:    senderUid  || state.user.uid,
+      senderName:   senderName || state.user.displayName || null,
+      flaggedBy:    state.user.uid,
+      text,
+      matchedCategory: best.category,
+      severity:     best.severity,
+      flaggedAt:    serverTimestamp(),
+      reviewed:     false,
+      resolution:   null,   // "dismissed" | "actioned" | "escalated"
+      adminNote:    null,
+    });
+  } catch (_) { /* fail silently */ }
+}
+
+
+/* =====================================================================
+   ACCOUNT STANDING & RESTRICTION SYSTEM
+   ===================================================================== */
+
+function _defaultStanding() {
+  return {
+    score: 100, strikes: 0, spamFlags: 0, trustLevel: 0,
+    activeRestrictions: [], warnings: [], muteHistory: [],
+    lastAction: null,
+  };
+}
+
+/** Load this user's standing from Firestore. Called on boot. */
+async function _loadUserStanding() {
+  if (!state.user?.uid) return;
+  try {
+    const snap = await getDoc(doc(db, "accountStanding", state.user.uid));
+    if (snap.exists()) {
+      const data = snap.data();
+      // Purge expired restrictions locally (still stored server-side for history)
+      const now = Date.now();
+      data.activeRestrictions = (data.activeRestrictions || []).filter(r =>
+        !r.expiresAt || r.expiresAt > now
+      );
+      state.standing = data;
+      // Resume mute countdown if there's an active mute with time remaining
+      const activeMute = data.activeRestrictions.find(r => r.type === R.MUTE);
+      if (activeMute?.expiresAt) {
+        const remaining = activeMute.expiresAt - now;
+        if (remaining > 0) {
+          state._muteExpiry = activeMute.expiresAt;
+          _applyMuteUI(activeMute.expiresAt);
+          _startMuteCountdown(activeMute.expiresAt);
+        }
+      }
+    } else {
+      state.standing = _defaultStanding();
+    }
+    _applyStandingRestrictions();
+  } catch(e) { _handleFirestoreError(e, "_loadUserStanding"); }
+}
+
+/** Returns the active restriction of `type`, or null if none / expired. */
+function _checkRestriction(type) {
+  if (!state.standing?.activeRestrictions) return null;
+  const now = Date.now();
+  return state.standing.activeRestrictions.find(r =>
+    r.type === type && (!r.expiresAt || r.expiresAt > now)
+  ) || null;
+}
+
+/** Returns true if the user cannot currently send messages for any reason. */
+function _isEffectivelyMuted() {
+  if (state._muteExpiry > Date.now()) return true;
+  if (_checkRestriction(R.MUTE))      return true;
+  if (_checkRestriction(R.READ_ONLY)) return true;
+  return false;
+}
+
+/** Returns slowmode state: { allowed, remaining } */
+function _checkSlowmode() {
+  const globalSecs  = _spam.globalSlowmodeActive ? _spam.globalSlowmodeSecs : 0;
+  const personalR   = _checkRestriction(R.SLOWMODE);
+  const personalSecs = personalR?.meta?.seconds || 0;
+  const slowSecs    = Math.max(globalSecs, personalSecs);
+  if (slowSecs <= 0) return { allowed: true, remaining: 0 };
+  const elapsed = (Date.now() - state._lastSentAt) / 1000;
+  if (elapsed >= slowSecs) return { allowed: true, remaining: 0 };
+  return { allowed: false, remaining: Math.ceil(slowSecs - elapsed) };
+}
+
+/** Returns the user's effective trust level (0=new, 1=regular, 2=trusted, 3=veteran). */
+function _calculateTrustLevel() {
+  const standing = state.standing || _defaultStanding();
+  const score = standing.score ?? 100;
+  const strikes = standing.strikes ?? 0;
+  const createdAt = state.user?.createdAt?.toDate
+    ? state.user.createdAt.toDate()
+    : state.user?.createdAt ? new Date(state.user.createdAt) : null;
+  const ageDays = createdAt ? (Date.now() - createdAt.getTime()) / 86400000 : 0;
+  if (score < 40 || strikes >= 5) return 0;
+  if (ageDays < 1 || score < 50)  return 0;
+  if (ageDays < 3 || score < 60)  return 1;
+  if (ageDays < 7 || score < 75 || strikes > 1) return 2;
+  return 3;
+}
+
+/** Update UI elements to reflect current restrictions. */
+function _applyStandingRestrictions() {
+  const gifBtn = document.getElementById("gif-btn");
+  const createGroupBtn = document.getElementById("rail-create-group");
+  if (gifBtn)        gifBtn.disabled = !!_checkRestriction(R.NO_GIF) || !!state._emergencyConfig?.disableGifs;
+  if (createGroupBtn) createGroupBtn.disabled = !!_checkRestriction(R.NO_GROUP) || !!state._emergencyConfig?.disableGroupCreation;
+  _applyEmergencyConfig();   // re-apply global overrides too
+}
+
+/** Apply the global emergency config loaded from appConfig/emergency. */
+function _applyEmergencyConfig() {
+  const cfg = state._emergencyConfig || {};
+  const gifBtn = document.getElementById("gif-btn");
+  const createGroupBtn = document.getElementById("rail-create-group");
+  if (gifBtn) {
+    gifBtn.disabled = !!cfg.disableGifs || !!_checkRestriction(R.NO_GIF);
+    if (cfg.disableGifs) gifBtn.title = "GIFs temporarily disabled by admin";
+  }
+  if (createGroupBtn) {
+    createGroupBtn.disabled = !!cfg.disableGroupCreation || !!_checkRestriction(R.NO_GROUP);
+  }
+  _spam.globalSlowmodeActive = (cfg.globalSlowmodeSecs || 0) > 0;
+  _spam.globalSlowmodeSecs   = cfg.globalSlowmodeSecs || 0;
+  const raidBanner = document.getElementById("raid-mode-banner");
+  if (raidBanner) raidBanner.classList.toggle("hidden", !cfg.raidMode);
+  // Education lockdown banner
+  const lockdownBanner = document.getElementById("lockdown-banner");
+  if (lockdownBanner) lockdownBanner.classList.toggle("hidden", !cfg.educationLockdown);
+}
+
+/** Show a clear, informative muted toast. */
+function _showMutedFeedback() {
+  const expiry = state._muteExpiry;
+  const restriction = _checkRestriction(R.MUTE) || _checkRestriction(R.READ_ONLY);
+  if (expiry > Date.now()) {
+    const secs = Math.ceil((expiry - Date.now()) / 1000);
+    const m = Math.floor(secs / 60), s = secs % 60;
+    showToast(`🔇 You are muted — ${m > 0 ? `${m}m ${s}s` : `${s}s`} remaining`);
+  } else if (restriction) {
+    showToast(`🔇 You are restricted. Reason: ${restriction.reason || "Spam"}`);
+  } else {
+    showToast("🔇 You are currently muted.");
+  }
+}
+
+/* ── Mute UI ─────────────────────────────────────────────────────────── */
+
+function _applyMuteUI(expiry) {
+  const ci = document.getElementById("composer-input");
+  const sb = document.getElementById("send-btn");
+  const mb = document.getElementById("mute-banner");
+  if (ci) { ci.disabled = true; ci.placeholder = "You are muted…"; }
+  if (sb) sb.disabled = true;
+  if (mb) mb.classList.remove("hidden");
+  _updateMuteCountdown(expiry);
+}
+
+function _clearMuteUI() {
+  const ci = document.getElementById("composer-input");
+  const sb = document.getElementById("send-btn");
+  const mb = document.getElementById("mute-banner");
+  if (ci) { ci.disabled = false; ci.placeholder = "Message… or /help for commands"; }
+  if (sb) sb.disabled = false;
+  if (mb) mb.classList.add("hidden");
+}
+
+function _startMuteCountdown(expiry) {
+  if (_muteCountdownInterval) clearInterval(_muteCountdownInterval);
+  _updateMuteCountdown(expiry);
+  _muteCountdownInterval = setInterval(() => {
+    if (Date.now() >= expiry) {
+      clearInterval(_muteCountdownInterval);
+      _muteCountdownInterval = null;
+      state._muteExpiry = 0;
+      _clearMuteUI();
+      showToast("🔊 You can send messages again.");
+    } else {
+      _updateMuteCountdown(expiry);
+    }
+  }, 1000);
+}
+
+function _updateMuteCountdown(expiry) {
+  const el = document.getElementById("mute-countdown");
+  if (!el) return;
+  const remaining = Math.max(0, Math.ceil((expiry - Date.now()) / 1000));
+  const m = Math.floor(remaining / 60), s = remaining % 60;
+  el.textContent = m > 0 ? `${m}:${s.toString().padStart(2, "0")}` : `${s}s`;
+}
+
+/* ── Local mute (ephemeral, no Firestore write) ───────────────────────── */
+function _applyLocalMute(durationMs, reason = "") {
+  const expiry = Date.now() + durationMs;
+  state._muteExpiry = expiry;
+  const secs = Math.round(durationMs / 1000);
+  const m = Math.floor(secs / 60), s = secs % 60;
+  const durStr = m > 0 ? `${m}m ${s}s` : `${secs}s`;
+  showToast(`🔇 Muted for ${durStr}.${reason ? ` Slow down!` : ""}`);
+  _applyMuteUI(expiry);
+  _startMuteCountdown(expiry);
+}
+
+/* ── Firestore-backed mute / restriction ─────────────────────────────── */
+async function _writeModerationLog(entry) {
+  if (window._offlineBrowseMode) return;
+  try {
+    await addDoc(collection(db, "moderationLog"), {
+      ...entry, appliedAt: serverTimestamp(),
+    });
+  } catch(_) {}
+}
+
+async function _applyFirestoreMute(durationMs, reason, isRepetitive = false) {
+  if (!state.user?.uid || window._offlineBrowseMode) return;
+  const uid = state.user.uid;
+  const expiresAt = Date.now() + durationMs;
+  const standing = state.standing || _defaultStanding();
+  // Remove any previous mute before adding new one
+  standing.activeRestrictions = (standing.activeRestrictions || [])
+    .filter(r => r.type !== R.MUTE);
+  const restriction = {
+    id: `mute_${Date.now()}`,
+    type: R.MUTE,
+    reason, isRepetitive,
+    expiresAt,
+    appliedAt: Date.now(),
+    appliedBy: "system",
+    severity: Math.min(5, _spam.warningLevel),
+  };
+  standing.activeRestrictions.push(restriction);
+  standing.strikes    = (standing.strikes || 0)    + 1;
+  standing.spamFlags  = (standing.spamFlags || 0)  + 1;
+  standing.score      = Math.max(0, (standing.score || 100) - 5);
+  standing.lastAction = Date.now();
+  if (!standing.muteHistory) standing.muteHistory = [];
+  standing.muteHistory.push({
+    duration: durationMs, reason, isRepetitive,
+    appliedAt: Date.now(), expiresAt,
+    appliedBy: "system",
+  });
+  state.standing = standing;
+  try {
+    await setDoc(doc(db, "accountStanding", uid), {
+      ...standing, updatedAt: serverTimestamp(),
+    }, { merge: true });
+    await _writeModerationLog({
+      targetUid: uid, targetName: state.user.displayName || null,
+      action: "auto_mute",
+      details: `Auto-muted ${Math.round(durationMs/1000)}s — level ${_spam.warningLevel}`,
+      reason, severity: Math.min(5, _spam.warningLevel),
+      expiresAt,
+    });
+  } catch(_) {}
+}
+
+/* ── Message similarity detection ────────────────────────────────────── */
+function _normalizeContent(text) {
+  if (!text) return "";
+  return text.toLowerCase()
+    .replace(/\s+/g, " ")
+    .replace(/[^\w\s]/g, "")
+    .trim()
+    .slice(0, 80);
+}
+
+function _isKeyboardSmash(normalized) {
+  if (!normalized || normalized.length < 5) return false;
+  const t = normalized.replace(/\s/g, "");
+  if (t.length < 4) return false;
+  // Very low unique-char ratio → smash (e.g. "aaaaaaaa", "asdfasdf")
+  const unique = new Set(t).size;
+  if (unique / t.length < 0.25 && t.length > 8) return true;
+  // Repeating 1-3 char run longer than 5 chars
+  if (/(.{1,3})\1{4,}/.test(t)) return true;
+  return false;
+}
+
+function _isSimilarSpam(normalized) {
+  if (!normalized || normalized.length < 3) return false;
+  const recent = _spam.recentContents.slice(-6);
+  if (recent.includes(normalized)) { _spam.sameContentStreak++; return true; }
+  // Contained-within check (prefix/suffix match)
+  if (normalized.length > 4 && recent.some(r => r.length > 3 && (
+    r.startsWith(normalized.slice(0, 6)) || normalized.startsWith(r.slice(0, 6))
+  ))) { _spam.sameContentStreak++; return true; }
+  if (_isKeyboardSmash(normalized)) return true;
+  _spam.sameContentStreak = 0;
+  return false;
+}
+
+/* ── Local spam tracker + escalation ladder ──────────────────────────── */
+function _trackSpam(type = "message", content = "") {
+  if (!state.user || window._offlineBrowseMode) return true; // allow if not logged in
+
+  const now = Date.now();
+  const cut5m = now - 5*60_000;
+
+  // Prune old timestamps
+  _spam.msgTimes = _spam.msgTimes.filter(t => t > cut5m);
+  _spam.msgTimes.push(now);
+
+  // Content similarity
+  const norm = _normalizeContent(content);
+  const isRepetitive = _isSimilarSpam(norm);
+  _spam.recentContents.push(norm);
+  if (_spam.recentContents.length > 8) _spam.recentContents.shift();
+  _spam.lastNorm = norm;
+
+  // Count in windows
+  const c1s  = _spam.msgTimes.filter(t => t > now - 1_000).length;
+  const c5s  = _spam.msgTimes.filter(t => t > now - 5_000).length;
+  const c30s = _spam.msgTimes.filter(t => t > now - 30_000).length;
+  const c5m  = _spam.msgTimes.length;
+
+  // Stricter limits for new/low-trust accounts
+  const isStrict = !!_checkRestriction(R.STRICT) || !!state._emergencyConfig?.stricterLimits;
+  const trustLevel = _calculateTrustLevel();
+  const multiplier = trustLevel < 1 ? 0.6 : trustLevel < 2 ? 0.75 : 1;
+  const lims = isRepetitive ? RATE_LIMITS.repetitive : RATE_LIMITS.unique;
+  const cap = (v) => Math.floor(v * multiplier);
+
+  const exceeded =
+    c1s  > cap(lims.s1)  ||
+    c5s  > cap(lims.s5)  ||
+    c30s > cap(lims.s30) ||
+    c5m  > cap(lims.m5);
+
+  if (!exceeded) return true; // ✓ allowed
+
+  // Determine reason string
+  let reason = "";
+  if (c1s  > cap(lims.s1))  reason = isRepetitive ? "Repeated message spam" : "Sending too fast";
+  else if (c5s  > cap(lims.s5))  reason = isRepetitive ? "Repeated message spam" : "Too many messages";
+  else if (c30s > cap(lims.s30)) reason = "Excessive messaging";
+  else if (c5m  > cap(lims.m5))  reason = "Too many messages in 5 minutes";
+
+  _escalateSpam(reason, isRepetitive);
+  return false; // ✗ blocked
+}
+
+async function _escalateSpam(reason, isRepetitive = false) {
+  const now = Date.now();
+
+  // Natural decay: if >10 min since last escalation, lower one level
+  if (_spam.warningLevel > 0 && _spam.lastEscalation > 0 &&
+      (now - _spam.lastEscalation) > 10 * 60_000) {
+    _spam.warningLevel = Math.max(0, _spam.warningLevel - 1);
+  }
+
+  const rung = SPAM_LADDER[Math.min(_spam.warningLevel, SPAM_LADDER.length - 1)];
+  _spam.warningLevel = Math.min(_spam.warningLevel + 1, SPAM_LADDER.length - 1);
+  _spam.lastEscalation = now;
+  _spam.escalationCount++;
+
+  if (rung.label === "warning") {
+    showToast(`⚠️ ${isRepetitive ? "Don't repeat the same message." : "You're sending too fast. Slow down."}`);
+
+  } else if (rung.label === "mute") {
+    _applyLocalMute(rung.durationMs, reason);
+    if (rung.firestore) await _applyFirestoreMute(rung.durationMs, reason, isRepetitive);
+
+  } else if (rung.label === "restrict") {
+    // 12-hour heavy mute — write full restriction to Firestore
+    _applyLocalMute(rung.durationMs, reason);
+    await _applyFirestoreMute(rung.durationMs, reason, isRepetitive);
+
+  } else if (rung.label === "admin_review") {
+    // Maximum level — set read-only until admin clears it
+    state._muteExpiry = Date.now() + 48 * 60 * 60 * 1000; // local 48h lock
+    _applyMuteUI(state._muteExpiry);
+    showToast("⚠️ Your account has been flagged for admin review. Sending is paused.", 8000);
+    if (!window._offlineBrowseMode && state.user?.uid) {
+      const uid = state.user.uid;
+      const standing = state.standing || _defaultStanding();
+      const restriction = {
+        id: `review_${Date.now()}`, type: R.READ_ONLY,
+        reason, expiresAt: null, appliedAt: Date.now(),
+        appliedBy: "system", severity: 5,
+      };
+      standing.activeRestrictions = (standing.activeRestrictions || []).filter(r => r.type !== R.READ_ONLY);
+      standing.activeRestrictions.push(restriction);
+      standing.strikes   = (standing.strikes || 0) + rung.strikeDelta;
+      standing.score     = Math.max(0, (standing.score || 100) - 15);
+      standing.lastAction = Date.now();
+      state.standing = standing;
       try {
-        await addDoc(collection(db, "Autoflag"), {
-          messageId: msgId || null,
-          chatId: chatId || null,
-          senderUid: senderUid || state.user.uid,
-          senderName: senderName || state.user.displayName || null,
-          flaggedBy: state.user.uid,   // always the observer creating the document
-          text,
-          matchedCategory: category,
-          flaggedAt: serverTimestamp(),
-          reviewed: false,
-        });
-      } catch (_) { /* fail silently */ }
-      return; // one flag per message
+        await setDoc(doc(db, "accountStanding", uid), { ...standing, updatedAt: serverTimestamp() }, { merge: true });
+        await _writeModerationLog({ targetUid: uid, targetName: state.user.displayName || null,
+          action: "admin_review_flagged", details: `Escalated to admin review`, reason, severity: 5 });
+      } catch(_) {}
     }
   }
 }
@@ -1861,6 +2264,12 @@ function cleanupAllSubscriptions() {
   state._prevChatTimes={};
   state._visibilityLastRefresh = 0;
   state._justSentByMeAt = 0;
+  state.standing = null;
+  state._emergencyConfig = {};
+  state._lastSentAt = 0;
+  state._muteExpiry = 0;
+  if (_muteCountdownInterval) { clearInterval(_muteCountdownInterval); _muteCountdownInterval = null; }
+  _clearMuteUI();
   for (const fn of Object.values(state.sidebarTypingUnsubs)) { try { fn(); } catch(_){} }
   state.sidebarTypingUnsubs={}; state.sidebarTyping={};
   state.chatInitialized.clear(); state.incomingInitialized=false;
@@ -2037,6 +2446,19 @@ function bootSubscriptions() {
   // ── FRIEND REQUESTS (polling, slightly faster for UX) ─────────────────
   _refreshFriendRequests();
   state._friendRequestsTimer = setInterval(_refreshFriendRequests, 5 * 60 * 1000);
+
+  // ── ACCOUNT STANDING (one read on boot) ──────────────────────────────
+  _loadUserStanding();
+
+  // ── EMERGENCY CONFIG (real-time — fires only when admin changes it) ──
+  state.unsubscribers.emergencyConfig = onSnapshot(
+    doc(db, "appConfig", "emergency"),
+    snap => {
+      state._emergencyConfig = snap.exists() ? snap.data() : {};
+      _applyEmergencyConfig();
+    },
+    err => console.warn("emergencyConfig:", err)
+  );
 
   // ── PRESENCE HEARTBEAT ────────────────────────────────────────────────
   startPresenceHeartbeat();
@@ -3153,6 +3575,69 @@ const OG_CUTOFF_MS = new Date("2026-05-04T00:00:00Z").getTime();
 // Module-level cache for appConfig/favGameAllowlist — fetched once per session
 let _favGameAllowlistCache = null;
 
+/* =====================================================================
+   MODERATION — CONSTANTS
+   ===================================================================== */
+
+// Admin UIDs (populated at boot from appConfig/admins, hardcoded fallback creator)
+let _adminUids = new Set(["staticquasar931"]);
+
+// Restriction type tokens
+const R = Object.freeze({
+  MUTE:         "mute",
+  NO_GIF:       "no_gif",
+  NO_GAME:      "no_game",
+  NO_GROUP:     "no_group",
+  NO_EMBEDS:    "no_embeds",
+  NO_REACTIONS: "no_reactions",
+  NO_MENTIONS:  "no_mentions",
+  READ_ONLY:    "read_only",
+  SLOWMODE:     "slowmode",
+  STRICT:       "strict",
+});
+
+// Escalation ladder — level = index, firestore=true means write to Firestore
+const SPAM_LADDER = [
+  { level:0, label:"warning",      durationMs:0,              firestore:false, strikeDelta:0 },
+  { level:1, label:"mute",         durationMs:15_000,         firestore:false, strikeDelta:0 },
+  { level:2, label:"mute",         durationMs:60_000,         firestore:false, strikeDelta:0 },
+  { level:3, label:"mute",         durationMs:5*60_000,       firestore:true,  strikeDelta:1 },
+  { level:4, label:"mute",         durationMs:30*60_000,      firestore:true,  strikeDelta:1 },
+  { level:5, label:"restrict",     durationMs:12*60*60_000,   firestore:true,  strikeDelta:2 },
+  { level:6, label:"admin_review", durationMs:null,           firestore:true,  strikeDelta:2 },
+];
+
+// Rate limit thresholds — unique vs repetitive content
+const RATE_LIMITS = {
+  unique:     { s1:5,  s5:10, s30:25, m5:70 },
+  repetitive: { s1:2,  s5:4,  s30:8,  m5:20 },
+};
+
+// Local spam tracking state (module-level; persists for the session, not reset on sign-out)
+const _spam = {
+  msgTimes:      [],   // timestamps of all sent messages (kept within last 5 min)
+  reactionTimes: [],   // reaction send timestamps
+  gifTimes:      [],   // GIF send timestamps
+  editTimes:     [],   // edit timestamps
+  mentionTimes:  [],   // @mention timestamps
+  cmdTimes:      [],   // /command timestamps
+
+  recentContents:     [],  // last 8 normalized message contents
+  sameContentStreak:  0,
+  lastNorm:           "",
+
+  warningLevel:    0,   // current rung on SPAM_LADDER
+  lastEscalation:  0,   // ms timestamp
+  escalationCount: 0,   // lifetime total this session
+  decayDeadline:   0,   // ms timestamp when warningLevel decreases by 1
+
+  globalSlowmodeActive: false,
+  globalSlowmodeSecs:   0,
+};
+
+// Mute countdown interval handle
+let _muteCountdownInterval = null;
+
 /* Badge tiers: 1=Official/Rare, 2=Notable, 3=Achievement, 4=Activity
    how: shown as subtitle in tooltip; grant: how to give it (for admin reference) */
 const BADGE_DEFS = {
@@ -4001,6 +4486,16 @@ async function sendCurrentMessage() {
     showToast("⚡ Read-only — Firebase is temporarily unavailable");
     return;
   }
+  // Mute / read-only restriction check
+  if (_isEffectivelyMuted()) { _showMutedFeedback(); return; }
+
+  // Slowmode check (global or personal)
+  const slowCheck = _checkSlowmode();
+  if (!slowCheck.allowed) {
+    showToast(`⏱ Slowmode — wait ${slowCheck.remaining}s before sending`);
+    return;
+  }
+
   const raw=composer.value;
   let text=raw.trim();
   if (!text||!state.activeChatId) return;
@@ -4022,6 +4517,12 @@ async function sendCurrentMessage() {
   }
 
   if (text.length>2000) { showToast("Message too long (2000 char max)"); return; }
+
+  // Spam detection — checks rate limits + content similarity; blocks + escalates if needed
+  if (!_trackSpam("message", text)) return;
+
+  // Update slowmode clock
+  state._lastSentAt = Date.now();
 
   // Anonymous mode for school chats: replace name/photo per-message with a
   // fresh random ID. The real senderUid is still stored for moderation/admin.

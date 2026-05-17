@@ -171,6 +171,16 @@ export function buildUI() {
   <!-- ====== MAIN APP ====== -->
   <div id="app" class="app hidden">
 
+    <!-- Emergency banners — shown via appConfig/emergency -->
+    <div id="raid-mode-banner" class="emergency-banner emergency-banner--raid hidden" role="alert">
+      <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true" style="flex-shrink:0"><path fill="currentColor" d="M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-4h-2v-4h2v4z"/></svg>
+      <span>Raid protection is active — some features are temporarily restricted.</span>
+    </div>
+    <div id="lockdown-banner" class="emergency-banner emergency-banner--lockdown hidden" role="alert">
+      <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true" style="flex-shrink:0"><path fill="currentColor" d="M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2zm-6 9c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2zm3.1-9H8.9V6c0-1.71 1.39-3.1 3.1-3.1 1.71 0 3.1 1.39 3.1 3.1v2z"/></svg>
+      <span>Education mode is active — messaging is restricted to approved content only.</span>
+    </div>
+
     <!-- LEFT NAV RAIL -->
     <nav class="rail">
       <button class="rail-btn rail-home active" id="rail-home" title="Direct Messages">
@@ -418,6 +428,14 @@ export function buildUI() {
           <div id="composer-silent-ribbon" class="composer-silent-ribbon hidden" aria-live="polite">
             <span>🔕 Next message will be sent silently — no notification will play for recipients.</span>
             <button type="button" class="silent-ribbon-cancel" id="silent-ribbon-cancel" title="Cancel silent">✕</button>
+          </div>
+
+          <!-- Mute banner — shown when user is muted -->
+          <div id="mute-banner" class="mute-banner hidden" role="status" aria-live="assertive">
+            <span class="mute-banner-icon">🔇</span>
+            <span class="mute-banner-text">You are muted —</span>
+            <span id="mute-countdown" class="mute-countdown">…</span>
+            <span class="mute-banner-text">remaining</span>
           </div>
 
           <div class="composer-inner">

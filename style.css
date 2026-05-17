@@ -1957,6 +1957,61 @@ body.compact-mode .msg-head { gap: 4px; }
 .offline-ribbon .or-dismiss:hover { color: rgba(255,255,255,.7); }
 
 /* =================================================
+   MUTE BANNER (shown in composer when user is muted)
+   ================================================= */
+.mute-banner {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 12px;
+  background: rgba(239,68,68,.12);
+  border-top: 1px solid rgba(239,68,68,.2);
+  font-size: 12px;
+  color: #f87171;
+  font-weight: 500;
+  animation: fadeSlideDown .18s ease;
+}
+.mute-banner.hidden { display: none; }
+.mute-banner-icon { font-size: 13px; flex-shrink: 0; }
+.mute-banner-text { color: #f87171; opacity: .85; }
+.mute-countdown {
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  color: #fca5a5;
+  min-width: 28px;
+}
+@keyframes fadeSlideDown {
+  from { opacity: 0; transform: translateY(-4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* =================================================
+   EMERGENCY BANNERS (raid mode, lockdown)
+   ================================================= */
+.emergency-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 16px;
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: .01em;
+  animation: fadeSlideDown .2s ease;
+  flex-shrink: 0;
+}
+.emergency-banner.hidden { display: none; }
+.emergency-banner--raid {
+  background: rgba(245,158,11,.12);
+  border-bottom: 1px solid rgba(245,158,11,.25);
+  color: #fbbf24;
+}
+.emergency-banner--lockdown {
+  background: rgba(59,130,246,.1);
+  border-bottom: 1px solid rgba(59,130,246,.2);
+  color: #93c5fd;
+}
+
+/* =================================================
    UPDATE NOTIFICATION BANNER
    ================================================= */
 .update-banner {
