@@ -328,7 +328,10 @@ export function buildUI() {
           <div class="chat-header-info">
             <div class="chat-header-avatar-wrap" id="chat-header-avatar-wrap"></div>
             <div>
-              <div class="chat-header-name" id="chat-header-name">—</div>
+              <div class="chat-header-name-row">
+                <div class="chat-header-name" id="chat-header-name">—</div>
+                <button class="chat-vibe-badge hidden" id="chat-vibe-badge" title="Chat vibe — click to change"></button>
+              </div>
               <div class="chat-header-sub" id="chat-header-sub"></div>
             </div>
           </div>
@@ -649,7 +652,7 @@ export function buildUI() {
           By clicking "I Agree", you confirm you have read these terms, are old enough to use this service, and agree to use Static Chat responsibly. If you do not agree, close this page.
         </p>
         <p class="tos-footer-links">
-          <a href="https://sites.google.com/view/staticquasar931/privacy" target="_blank" rel="noopener noreferrer">Privacy Policy</a>
+          <a href="#" onclick="event.preventDefault();showPrivacyPopup()">Privacy Policy</a>
           &nbsp;·&nbsp;
           <a href="https://sites.google.com/view/staticquasar931/" target="_blank" rel="noopener noreferrer">About</a>
           &nbsp;·&nbsp;
@@ -690,7 +693,13 @@ export function buildUI() {
           </div>
         </div>
         <label class="modal-label" style="margin-top:18px;">Username <span class="label-optional">letters, numbers, underscores · 3–32 chars</span></label>
-        <input type="text" id="setup-username-input" placeholder="cooluser" maxlength="32" autocomplete="off" spellcheck="false" />
+        <div style="display:flex;gap:8px;align-items:center;">
+          <input type="text" id="setup-username-input" placeholder="FrostyOwl42" maxlength="32" autocomplete="off" spellcheck="false" style="flex:1;" />
+          <button type="button" id="setup-name-reroll" class="btn-secondary" title="Get a new suggestion" style="flex-shrink:0;height:36px;padding:0 10px;font-size:12px;">
+            🔀 New
+          </button>
+        </div>
+        <p class="hint" style="margin:4px 0 0;font-size:11px;">Letters, numbers, and underscores only. Click 🔀 to get a new suggestion.</p>
         <label class="modal-label" style="margin-top:14px;">Bio <span class="label-optional">optional · up to 400 chars</span></label>
         <textarea id="setup-bio-input" class="modal-textarea" placeholder="Tell people a little about yourself…" maxlength="400" rows="3"></textarea>
         <p class="field-error" id="setup-error"></p>
@@ -718,6 +727,10 @@ export function buildUI() {
         <button class="settings-discord-nav-item" data-pane="appearance">
           <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M12 3c-4.97 0-9 4.03-9 9s4.03 9 9 9c.83 0 1.5-.67 1.5-1.5 0-.39-.15-.74-.39-1.01-.23-.26-.38-.61-.38-.99 0-.83.67-1.5 1.5-1.5H16c2.76 0 5-2.24 5-5 0-4.42-4.03-8-9-8zm-5.5 9c-.83 0-1.5-.67-1.5-1.5S5.67 9 6.5 9 8 9.67 8 10.5 7.33 12 6.5 12zm3-4C8.67 8 8 7.33 8 6.5S8.67 5 9.5 5s1.5.67 1.5 1.5S10.33 8 9.5 8zm5 0c-.83 0-1.5-.67-1.5-1.5S13.67 5 14.5 5s1.5.67 1.5 1.5S15.33 8 14.5 8zm3 4c-.83 0-1.5-.67-1.5-1.5S16.67 9 17.5 9s1.5.67 1.5 1.5-.67 1.5-1.5 1.5z"/></svg>
           Appearance
+        </button>
+        <button class="settings-discord-nav-item" data-pane="standing">
+          <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4zm0 10.99h7c-.53 4.12-3.28 7.79-7 8.94V12H5V6.3l7-3.11v8.8z"/></svg>
+          My Standing
         </button>
         <!-- Spacer pushes sign-out to bottom -->
         <div class="settings-nav-spacer"></div>
@@ -1218,6 +1231,68 @@ export function buildUI() {
           </label>
 
           <p class="hint" style="margin-top:20px;text-align:center;">All appearance &amp; preference changes apply instantly.</p>
+
+          <!-- WORD FILTER SECTION -->
+          <div class="settings-section-title" style="margin-top:28px;margin-bottom:10px;">Word Filter &amp; Blur</div>
+          <label class="settings-toggle-row">
+            <div class="settings-toggle-info">
+              <div class="settings-toggle-label">Auto-Blur Slurs</div>
+              <div class="settings-toggle-sub">Blur offensive words and slurs in all chats. Click any blurred word to reveal it.</div>
+            </div>
+            <span class="toggle-switch">
+              <input type="checkbox" id="settings-blur-slurs-toggle" />
+              <span class="toggle-track"></span>
+            </span>
+          </label>
+          <div class="settings-field-group" style="margin-top:10px;" id="blur-custom-wrap">
+            <label class="modal-label">Extra words to blur <span class="label-optional">space or comma separated</span></label>
+            <div style="display:flex;gap:8px;align-items:flex-start;">
+              <textarea id="settings-blur-custom-input" rows="2" maxlength="500"
+                placeholder="bad, words, here…" spellcheck="false"
+                style="flex:1;min-height:54px;resize:vertical;"></textarea>
+              <button class="btn-secondary" id="settings-blur-custom-save"
+                style="flex-shrink:0;height:36px;align-self:flex-start;margin-top:2px;">Save</button>
+            </div>
+            <p class="hint" style="margin:4px 0 0;font-size:11px;">These will be blurred everywhere, regardless of chat vibe.</p>
+          </div>
+          <p class="hint" style="margin-top:20px;text-align:center;">All appearance &amp; preference changes apply instantly.</p>
+        </div>
+
+        <!-- MY STANDING PANE -->
+        <div class="settings-pane hidden" data-pane="standing">
+          <div class="settings-pane-title">My Standing</div>
+          <p class="settings-pane-desc">Your personal moderation history — only visible to you.</p>
+
+          <div id="standing-status-card" class="standing-status-card">
+            <div class="standing-score-row">
+              <div class="standing-score-label">Account Status</div>
+              <div class="standing-score-badge" id="standing-status-badge">Loading…</div>
+            </div>
+            <div class="standing-meter-wrap">
+              <div class="standing-meter-bar" id="standing-meter-bar"></div>
+            </div>
+            <div class="standing-score-sub" id="standing-score-sub"></div>
+          </div>
+
+          <div class="settings-section-title" style="margin-top:20px;margin-bottom:8px;">Active Restrictions</div>
+          <div id="standing-restrictions-list" class="standing-list">
+            <p class="standing-empty">No active restrictions 🎉</p>
+          </div>
+
+          <div class="settings-section-title" style="margin-top:18px;margin-bottom:8px;">Recent Warnings</div>
+          <div id="standing-warnings-list" class="standing-list">
+            <p class="standing-empty">No warnings on record.</p>
+          </div>
+
+          <div class="settings-section-title" style="margin-top:18px;margin-bottom:8px;">Mute History</div>
+          <div id="standing-mutes-list" class="standing-list">
+            <p class="standing-empty">No mutes on record.</p>
+          </div>
+
+          <div class="standing-appeal-note">
+            <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true" style="flex-shrink:0;margin-top:2px;"><path fill="currentColor" d="M20.317 4.37a19.791 19.791 0 0 0-4.885-1.515.074.074 0 0 0-.079.037c-.21.375-.444.864-.608 1.25a18.27 18.27 0 0 0-5.487 0 12.64 12.64 0 0 0-.617-1.25.077.077 0 0 0-.079-.037A19.736 19.736 0 0 0 3.677 4.37a.07.07 0 0 0-.032.027C.533 9.046-.32 13.58.099 18.057c.002.022.015.043.033.056a19.9 19.9 0 0 0 5.993 3.03.078.078 0 0 0 .084-.028c.462-.63.874-1.295 1.226-1.994a.076.076 0 0 0-.041-.106 13.107 13.107 0 0 1-1.872-.892.077.077 0 0 1-.008-.128 10.2 10.2 0 0 0 .372-.292.074.074 0 0 1 .077-.01c3.928 1.793 8.18 1.793 12.062 0a.074.074 0 0 1 .078.01c.12.098.246.198.373.292a.077.077 0 0 1-.006.127 12.299 12.299 0 0 1-1.873.892.077.077 0 0 0-.041.107c.36.698.772 1.362 1.225 1.993a.076.076 0 0 0 .084.028 19.839 19.839 0 0 0 6.002-3.03.077.077 0 0 0 .032-.054c.5-5.177-.838-9.674-3.549-13.66a.061.061 0 0 0-.031-.03zM8.02 15.33c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.956-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.956 2.418-2.157 2.418zm7.975 0c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.955-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.946 2.418-2.157 2.418z"/></svg>
+            <span>To appeal a moderation action, join our <a href="https://discord.gg/DP2hM7RRhR" target="_blank" rel="noopener">support Discord</a> and open a ticket.</span>
+          </div>
         </div>
 
       </div><!-- /.settings-discord-body -->

@@ -2,8 +2,9 @@
 // -----------------------------------------------------------------------
 // BLOCKED_TERMS: any username containing one of these strings
 //   (case-insensitive, non-alphanumeric stripped) will be rejected.
+// SLUR_TERMS: words auto-blurred in SFW/Edgy-OK chats (per-user blur setting).
 // APPROVED_ADJECTIVES / APPROVED_NOUNS: used to auto-generate safe
-//   replacement usernames like "BrightArc" when a blocked name is found.
+//   replacement usernames like "BrightArc52" when a blocked name is found.
 // -----------------------------------------------------------------------
 
 export const BLOCKED_TERMS = [
@@ -11,19 +12,35 @@ export const BLOCKED_TERMS = [
   "admin", "administrator", "mod", "moderator", "staff", "official",
   "support", "helpdesk", "staticteam", "staticstaff", "staticmod",
   "staticadmin", "staticofficial", "owner", "developer", "dev",
+  "system", "bot", "autobot", "announcement", "verify", "verification",
+  "discord", "static", "staticchat",
 
-  // Slurs — add more as needed (keep lowercase, no spaces)
+  // Slurs — usernames only (keep lowercase, no spaces)
   "nigger", "nigga", "faggot", "retard", "tranny", "spic", "chink",
-  "kike", "wetback",
+  "kike", "wetback", "gook", "beaner", "cracker", "honky", "coon",
+  "jigaboo", "sandnigger", "towelhead", "raghead", "slant",
 
   // Explicit content
-  "sex", "porn", "nude", "nsfw", "xxx", "hentai",
+  "sex", "porn", "nude", "nsfw", "xxx", "hentai", "onlyfans",
+  "cumslut", "cumshot", "blowjob", "handjob", "dildo", "penis",
+  "vagina", "boobs", "tits", "ass", "pussy", "cunt", "cock",
 
   // Violence / threats
   "kill", "murder", "shoot", "bomb", "terrorist", "suicide",
+  "massacre", "genocide",
 
-  // Abuse / spam
+  // Abuse / spam / scam
   "hacker", "hack", "phishing", "phish", "scammer", "scam",
+  "giveaway", "nitro", "freevbucks", "freerobux", "clickhere",
+
+  // Real people / historical figures
+  "hitler", "hitlerr", "adolf", "hitleer", "hltler",
+  "trump", "biden", "obama", "epstein", "putin",
+  "mussolini", "stalin", "mao",
+
+  // Misc inappropriate
+  "kkk", "nazi", "naz1", "nsdap", "swastika",
+  "pedo", "pedophile", "nonce", "groomer",
 ];
 
 export const APPROVED_ADJECTIVES = [
@@ -76,16 +93,48 @@ export function isNameBlocked(username) {
 }
 
 /**
- * Returns a safe auto-generated username: "AdjNoun" (e.g. "BrightArc").
+ * SLUR_TERMS: words auto-blurred in SFW chats when a user has "Auto Blur Slurs" on.
+ * Separate from BLOCKED_TERMS — these are allowed in Edgy/Anything Goes chats
+ * but blurred visually in SFW chats per user's filter setting.
+ */
+export const SLUR_TERMS = [
+  // Racial slurs
+  "nigger", "nigga", "n-word", "nword", "faggot", "fag",
+  "retard", "tard", "tranny", "spic", "chink", "gook",
+  "kike", "wetback", "beaner", "coon", "jigaboo",
+  "sandnigger", "towelhead", "raghead", "slant",
+  "honky", "cracker", "whitey",
+  // Sexual slurs
+  "cunt", "whore", "slut", "skank",
+  // Ableist
+  "autist", "autistic", // only when used as insult
+];
+
+/**
+ * Returns a safe auto-generated username like "BrightArc52" or "FrostyOwlDawn".
+ * Randomly uses 2 or 3 word parts and sometimes appends 2–4 random digits.
  * Guaranteed to not contain any blocked term.
  */
 export function generateSafeName() {
-  for (let i = 0; i < 20; i++) {
+  for (let i = 0; i < 30; i++) {
+    const useThreeWords = Math.random() < 0.35;
+    const addNumbers    = Math.random() < 0.6;
+
     const adj  = APPROVED_ADJECTIVES[Math.floor(Math.random() * APPROVED_ADJECTIVES.length)];
     const noun = APPROVED_NOUNS[Math.floor(Math.random() * APPROVED_NOUNS.length)];
-    const name = adj.charAt(0).toUpperCase() + adj.slice(1) +
-                 noun.charAt(0).toUpperCase() + noun.slice(1);
-    if (!isNameBlocked(name)) return name;
+    const cap  = s => s.charAt(0).toUpperCase() + s.slice(1);
+
+    let name = cap(adj) + cap(noun);
+    if (useThreeWords) {
+      const extra = APPROVED_ADJECTIVES[Math.floor(Math.random() * APPROVED_ADJECTIVES.length)];
+      name = cap(adj) + cap(extra) + cap(noun);
+    }
+    if (addNumbers) {
+      const digits = Math.floor(Math.random() * 9000) + 10; // 10–9999
+      name += digits;
+    }
+
+    if (name.length <= 32 && !isNameBlocked(name)) return name;
   }
-  return "CozyCloud"; // ultimate fallback
+  return "CozyCloud42"; // ultimate fallback
 }

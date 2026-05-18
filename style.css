@@ -4624,3 +4624,218 @@ button, [role="button"], a { min-width: 0; }
    GAME OPTIONS MODAL
    ===================================================================== */
 .game-option-btn:hover { border-color:var(--c-accent); color:var(--c-accent); transform:translateX(3px); }
+
+/* =====================================================================
+   WORD BLUR — per-user slur/word filter
+   ===================================================================== */
+.word-blur {
+  background: var(--c-input-2);
+  color: transparent;
+  border-radius: 3px;
+  cursor: pointer;
+  filter: blur(5px);
+  user-select: none;
+  transition: filter .18s, color .18s;
+  padding: 0 2px;
+}
+.word-blur:hover { filter: blur(3px); }
+.word-blur.revealed { filter: none; color: inherit; background: transparent; }
+
+/* =====================================================================
+   CHAT VIBE BADGE
+   ===================================================================== */
+.chat-header-name-row {
+  display: flex; align-items: center; gap: 7px; flex-wrap: wrap;
+}
+.chat-vibe-badge {
+  display: inline-flex; align-items: center; gap: 3px;
+  padding: 2px 8px; border-radius: 20px;
+  font-size: 11px; font-weight: 600;
+  border: 1px solid transparent; cursor: pointer;
+  background: var(--c-input-2); color: var(--t-secondary);
+  transition: background .15s, color .15s; white-space: nowrap;
+}
+.chat-vibe-badge[data-vibe="sfw"]      { background:#23a55a22; color:#23a55a; border-color:#23a55a44; }
+.chat-vibe-badge[data-vibe="edgy"]     { background:#f0b23222; color:#f0b232; border-color:#f0b23244; }
+.chat-vibe-badge[data-vibe="anything"] { background:#7c3aed22; color:#9966ff; border-color:#7c3aed44; }
+.chat-vibe-badge:hover { opacity:.85; }
+.vibe-picker-popup {
+  position: fixed; z-index: 9999; background: var(--c-surface);
+  border: 1px solid var(--c-border-2); border-radius: 10px; padding: 8px;
+  min-width: 280px; max-width: 320px; box-shadow: 0 8px 32px rgba(0,0,0,.35);
+}
+.vibe-picker-title {
+  font-size: 11px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: .06em; color: var(--t-muted); padding: 4px 8px 6px;
+}
+.vibe-picker-sub {
+  font-size: 11px; color: var(--t-muted); padding: 0 8px 8px;
+  border-bottom: 1px solid var(--c-border-2); margin-bottom: 6px;
+}
+.vibe-option {
+  display: flex; align-items: center; gap: 10px; width: 100%;
+  padding: 8px 10px; border-radius: 7px; border: none;
+  background: transparent; cursor: pointer; text-align: left;
+  transition: background .12s; color: var(--t-normal);
+}
+.vibe-option:hover { background: var(--c-input-2); }
+.vibe-option.active { background: color-mix(in srgb, var(--c-accent) 12%, transparent); }
+.vibe-option-emoji { font-size: 20px; flex-shrink: 0; }
+.vibe-option-body { display: flex; flex-direction: column; gap: 2px; flex: 1; }
+.vibe-option-label { font-size: 13px; font-weight: 600; }
+.vibe-option-desc  { font-size: 11px; color: var(--t-muted); }
+.vibe-option-check { font-size: 14px; color: var(--c-accent); font-weight: 700; flex-shrink: 0; }
+.vibe-picker-footer { padding: 6px 8px 2px; border-top: 1px solid var(--c-border-2); margin-top: 6px; }
+
+/* =====================================================================
+   NAME-CHANGE REQUIRED MODAL
+   ===================================================================== */
+.name-change-overlay {
+  position: fixed; inset: 0; z-index: 99999; display: flex;
+  align-items: center; justify-content: center;
+  background: rgba(0,0,0,.7); backdrop-filter: blur(4px); padding: 16px;
+}
+.name-change-card {
+  background: var(--c-surface); border: 1px solid var(--c-border-2);
+  border-radius: 14px; padding: 28px 24px 22px; max-width: 420px; width: 100%;
+  display: flex; flex-direction: column; gap: 12px;
+  box-shadow: 0 16px 48px rgba(0,0,0,.5);
+}
+.name-change-icon  { font-size: 40px; text-align: center; }
+.name-change-title { font-size: 20px; font-weight: 700; text-align: center; color: var(--t-normal); }
+.name-change-desc  { font-size: 14px; color: var(--t-secondary); text-align: center; line-height: 1.5; }
+.name-change-suggestion {
+  display: flex; align-items: center; gap: 8px; font-size: 12px;
+  color: var(--t-muted); justify-content: center; flex-wrap: wrap;
+}
+.ncm-suggest-btn {
+  background: color-mix(in srgb, var(--c-accent) 15%, transparent);
+  border: 1px solid color-mix(in srgb, var(--c-accent) 35%, transparent);
+  color: var(--c-accent); border-radius: 6px; padding: 3px 10px;
+  font-size: 12px; cursor: pointer; font-weight: 600; transition: background .12s;
+}
+.ncm-suggest-btn:hover { background: color-mix(in srgb, var(--c-accent) 25%, transparent); }
+.ncm-reroll-btn {
+  background: var(--c-input-2); border: 1px solid var(--c-border-2);
+  border-radius: 6px; padding: 3px 8px; font-size: 13px;
+  cursor: pointer; transition: background .12s; color: var(--t-normal);
+}
+.ncm-reroll-btn:hover { background: var(--c-surface-3); }
+.ncm-input {
+  width: 100%; padding: 10px 12px; border-radius: 8px;
+  border: 1.5px solid var(--c-border-2); background: var(--c-input);
+  color: var(--t-normal); font-size: 14px; box-sizing: border-box; transition: border-color .15s;
+}
+.ncm-input:focus { border-color: var(--c-accent); outline: none; }
+.ncm-error { color: var(--c-danger); font-size: 12px; min-height: 16px; }
+.ncm-save-btn { width: 100%; margin-top: 2px; }
+.ncm-note { font-size: 11px; color: var(--t-muted); text-align: center; line-height: 1.5; }
+.ncm-note a { color: var(--c-accent); }
+
+/* =====================================================================
+   RULES UPDATE POPUP
+   ===================================================================== */
+.rules-update-overlay {
+  position: fixed; inset: 0; z-index: 9998; display: flex;
+  align-items: center; justify-content: center;
+  background: rgba(0,0,0,.65); backdrop-filter: blur(4px); padding: 16px;
+}
+.rules-update-card {
+  background: var(--c-surface); border: 1px solid var(--c-border-2);
+  border-radius: 14px; max-width: 520px; width: 100%; max-height: 90vh;
+  overflow-y: auto; box-shadow: 0 16px 48px rgba(0,0,0,.5);
+  display: flex; flex-direction: column;
+}
+.rup-header {
+  display: flex; align-items: flex-start; gap: 14px;
+  padding: 22px 22px 16px; border-bottom: 1px solid var(--c-border-2);
+}
+.rup-icon { font-size: 30px; flex-shrink: 0; margin-top: 2px; }
+.rup-title { font-size: 17px; font-weight: 700; color: var(--t-normal); }
+.rup-sub   { font-size: 12px; color: var(--t-muted); margin-top: 3px; }
+.rup-body  { padding: 16px 22px; display: flex; flex-direction: column; gap: 14px; }
+.rup-section { display: flex; flex-direction: column; gap: 6px; }
+.rup-section-title {
+  font-size: 12px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: .05em; color: var(--c-accent);
+}
+.rup-list { margin: 0; padding: 0 0 0 18px; display: flex; flex-direction: column; gap: 4px; }
+.rup-list li { font-size: 13px; color: var(--t-secondary); line-height: 1.5; }
+.rup-footer-note {
+  font-size: 12px; color: var(--t-muted); text-align: center;
+  border-top: 1px solid var(--c-border-2); padding: 12px 22px 0;
+}
+.rup-footer-note a { color: var(--c-accent); }
+.rup-foot { padding: 14px 22px 20px; }
+.rup-foot .btn-primary { width: 100%; }
+
+/* =====================================================================
+   PRIVACY POPUP
+   ===================================================================== */
+.privacy-popup-overlay {
+  position: fixed; inset: 0; z-index: 9997; display: flex;
+  align-items: center; justify-content: center;
+  background: rgba(0,0,0,.65); backdrop-filter: blur(4px); padding: 16px;
+}
+.privacy-popup-card {
+  background: var(--c-surface); border: 1px solid var(--c-border-2);
+  border-radius: 14px; max-width: 540px; width: 100%; max-height: 85vh;
+  overflow-y: auto; box-shadow: 0 16px 48px rgba(0,0,0,.5);
+}
+.privacy-popup-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 18px 20px 14px; border-bottom: 1px solid var(--c-border-2);
+  position: sticky; top: 0; background: var(--c-surface); z-index: 1;
+}
+.privacy-popup-header h2 { font-size: 17px; font-weight: 700; margin: 0; }
+.privacy-popup-body {
+  padding: 16px 20px 20px; font-size: 13px; line-height: 1.65;
+  color: var(--t-secondary);
+}
+.privacy-popup-body h3 { font-size: 13px; font-weight: 700; color: var(--t-normal); margin: 16px 0 5px; }
+.privacy-popup-body a { color: var(--c-accent); }
+
+/* =====================================================================
+   MY STANDING PANE
+   ===================================================================== */
+.settings-pane-desc { font-size: 12px; color: var(--t-muted); margin: -8px 0 16px; }
+.standing-status-card {
+  background: var(--c-input-2); border-radius: 10px; padding: 14px 16px;
+  display: flex; flex-direction: column; gap: 8px;
+}
+.standing-score-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+}
+.standing-score-label {
+  font-size: 12px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: .05em; color: var(--t-muted);
+}
+.standing-score-badge {
+  font-size: 12px; font-weight: 700; padding: 3px 10px;
+  border-radius: 20px; border: 1px solid transparent;
+}
+.standing-meter-wrap {
+  background: var(--c-border-2); border-radius: 20px; height: 6px; overflow: hidden;
+}
+.standing-meter-bar {
+  height: 100%; border-radius: 20px; background: #23a55a; transition: width .5s ease;
+}
+.standing-score-sub { font-size: 11px; color: var(--t-muted); }
+.standing-list { display: flex; flex-direction: column; gap: 6px; }
+.standing-empty { font-size: 12px; color: var(--t-muted); text-align: center; padding: 10px; }
+.standing-item {
+  background: var(--c-input-2); border-radius: 8px; padding: 8px 12px;
+  display: grid; grid-template-columns: 1fr 2fr 1fr; gap: 6px;
+  font-size: 12px; align-items: center;
+}
+.standing-item-bad  { border-left: 3px solid var(--c-danger); }
+.standing-item-mute { border-left: 3px solid #f0b232; }
+.si-type   { font-weight: 700; color: var(--t-normal); }
+.si-detail { color: var(--t-secondary); }
+.si-exp    { color: var(--t-muted); text-align: right; font-size: 11px; }
+.standing-appeal-note {
+  display: flex; align-items: flex-start; gap: 8px;
+  font-size: 12px; color: var(--t-muted); margin-top: 20px;
+  background: var(--c-input-2); border-radius: 8px; padding: 10px 12px; line-height: 1.5;
+}
+.standing-appeal-note a { color: var(--c-accent); }
