@@ -1458,9 +1458,19 @@ async function _escalateSpam(reason, isRepetitive = false) {
    ===================================================================== */
 
 const VIBE_LABELS = {
-  sfw:     { emoji: "🌈", label: "SFW",          color: "#23a55a", desc: "Inclusive — slurs and vulgarity are filtered" },
-  edgy:    { emoji: "🔥", label: "Edgy",          color: "#f0b232", desc: "Casual — swearing and edgy language allowed" },
-  anything:{ emoji: "🖤", label: "Anything Goes", color: "#7c3aed", desc: "Uncensored — anything legal; hard stops still apply" },
+  sfw:     { label: "SFW",          color: "#23a55a", desc: "Inclusive — slurs and vulgarity are filtered" },
+  edgy:    { label: "Edgy",         color: "#f0b232", desc: "Casual — swearing and edgy language allowed" },
+  anything:{ label: "Anything Goes",color: "#9d6fff", desc: "Uncensored — anything legal; hard stops still apply" },
+};
+
+// SVG icons for each vibe tier — used in badge + picker
+const VIBE_SVGS = {
+  // Shield-check: safe/protected
+  sfw: `<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4zm-2 16l-4-4 1.41-1.41L10 14.17l6.59-6.59L18 9l-8 8z"/></svg>`,
+  // Flame: intensity/edge
+  edgy: `<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M13.5.67s.74 2.65.74 4.8c0 2.06-1.35 3.73-3.41 3.73-2.07 0-3.63-1.67-3.63-3.73l.03-.36C5.21 7.51 4 10.62 4 14c0 4.42 3.58 8 8 8s8-3.58 8-8C20 8.61 17.41 3.8 13.5.67zM11.71 19c-1.78 0-3.22-1.4-3.22-3.14 0-1.62 1.05-2.76 2.81-3.12 1.77-.36 3.6-1.21 4.62-2.58.39 1.29.59 2.65.59 4.04 0 2.65-2.15 4.8-4.8 4.8z"/></svg>`,
+  // Lightning bolt: unrestricted/electric
+  anything: `<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M7 2v11h3v9l7-12h-4l4-8z"/></svg>`,
 };
 
 /** Returns the vibe for the current active chat (defaults to "sfw"). */
@@ -1505,16 +1515,16 @@ function _trackVibeViolation(chatId) {
 async function _handleVibeViolation(chatId) {
   const strikes = _trackVibeViolation(chatId);
   if (strikes === 1) {
-    showToast("🌈 SFW chat — that word isn't allowed here. Please keep it clean.", 4000);
+    showToast("SFW chat — that word isn't allowed here. Please keep it clean.", 4000);
   } else if (strikes === 2) {
-    showToast("⚠️ Second warning — continuing will get you muted in this chat.", 5000);
+    showToast("Second warning — continuing will result in a temporary mute in this chat.", 5000);
   } else if (strikes >= 3) {
     // Temp-mute from this specific chat for escalating durations
     const muteMins = strikes === 3 ? 10 : strikes === 4 ? 60 : 1440; // 10m → 1h → 24h
     const muteMs = muteMins * 60 * 1000;
     const muteKey = `sc_vibe_mute_${chatId}`;
     localStorage.setItem(muteKey, String(Date.now() + muteMs));
-    showToast(`🔇 You've been muted in this chat for ${muteMins < 60 ? muteMins+"m" : (muteMins/60)+"h"} for repeated SFW violations.`, 6000);
+    showToast(`Muted in this chat for ${muteMins < 60 ? muteMins+"m" : (muteMins/60)+"h"} for repeated SFW violations.`, 6000);
     // Log to moderation for admin visibility
     if (strikes >= 5) {
       // Escalate to cross-chat SFW mute
@@ -3824,10 +3834,10 @@ function _updateVibeBadge() {
   if (!c) { badge.classList.add("hidden"); return; }
   const vibe = c.vibe || "sfw";
   const v = VIBE_LABELS[vibe] || VIBE_LABELS.sfw;
-  badge.textContent = `${v.emoji} ${v.label}`;
+  badge.innerHTML = `<span class="vibe-badge-icon">${VIBE_SVGS[vibe] || ""}</span><span class="vibe-badge-label">${v.label}</span>`;
   badge.dataset.vibe = vibe;
   badge.classList.remove("hidden");
-  badge.title = `${v.label} — ${v.desc}. Click to change.`;
+  badge.title = `${v.label} — ${v.desc}\nClick to change`;
 }
 
 // Vibe badge click — show vibe picker
@@ -3842,7 +3852,7 @@ function _showVibePicker(anchor) {
   document.getElementById("vibe-picker-popup")?.remove();
   const c = state.activeChat;
   if (!c) return;
-  // In DMs either participant can change vibe; in groups only leaders
+  // DMs: either participant can change; groups: leaders only
   const isLeader = c.type === "dm"
     ? true
     : (Array.isArray(c.leaders) && c.leaders.includes(state.user?.uid));
@@ -3856,40 +3866,54 @@ function _showVibePicker(anchor) {
   const options = vibeOrder.map(key => {
     const v = VIBE_LABELS[key];
     const isCurrent = key === currentVibe;
-    return `<button class="vibe-option ${isCurrent ? "active" : ""}" data-vibe="${key}">
-      <span class="vibe-option-emoji">${v.emoji}</span>
+    const lockAttr = (!isLeader && !isCurrent) ? " disabled" : "";
+    return `<button class="vibe-option${isCurrent ? " active" : ""}${!isLeader ? " vibe-option-locked" : ""}" data-vibe="${key}"${lockAttr}>
+      <span class="vibe-option-icon" style="color:${v.color}">${VIBE_SVGS[key] || ""}</span>
       <span class="vibe-option-body">
-        <span class="vibe-option-label">${v.label}</span>
+        <span class="vibe-option-label" style="color:${isCurrent ? v.color : ""}">${v.label}</span>
         <span class="vibe-option-desc">${v.desc}</span>
       </span>
-      ${isCurrent ? '<span class="vibe-option-check">✓</span>' : ""}
+      ${isCurrent
+        ? `<span class="vibe-option-check"><svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path fill="currentColor" d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41L9 16.17z"/></svg></span>`
+        : ""}
     </button>`;
   }).join("");
 
+  const subText = c.type === "dm"
+    ? "Either person in this DM can change the vibe."
+    : isLeader
+      ? "As a leader, you can propose a vibe change."
+      : "Only group leaders can propose a vibe change.";
+
   popup.innerHTML = `
-    <div class="vibe-picker-title">Chat Vibe</div>
-    <div class="vibe-picker-sub">Changing vibe requires all members to agree (or 60% vote in school chats).</div>
-    ${options}
+    <div class="vibe-picker-head">
+      <svg class="vibe-picker-head-icon" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+        <path fill="currentColor" d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-7 14c-3.31 0-6-2.69-6-6s2.69-6 6-6 6 2.69 6 6-2.69 6-6 6zm0-10c-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4-1.79-4-4-4z"/>
+      </svg>
+      <span class="vibe-picker-title">Chat Vibe</span>
+    </div>
+    <div class="vibe-picker-sub">${subText}</div>
+    <div class="vibe-picker-options">${options}</div>
     <div class="vibe-picker-footer">
-      <a href="https://discord.gg/DP2hM7RRhR" target="_blank" rel="noopener" style="color:var(--t-muted);font-size:11px;">
-        Questions? Discord →
+      <a href="https://discord.gg/DP2hM7RRhR" target="_blank" rel="noopener" class="vibe-picker-discord-link">
+        <svg viewBox="0 0 24 24" width="11" height="11" aria-hidden="true"><path fill="currentColor" d="M20.317 4.37a19.791 19.791 0 00-4.885-1.515.074.074 0 00-.079.037c-.21.375-.444.864-.608 1.25a18.27 18.27 0 00-5.487 0 12.64 12.64 0 00-.617-1.25.077.077 0 00-.079-.037A19.736 19.736 0 003.677 4.37a.07.07 0 00-.032.027C.533 9.046-.32 13.58.099 18.057a.082.082 0 00.031.057 19.9 19.9 0 005.993 3.03.078.078 0 00.084-.028c.462-.63.874-1.295 1.226-1.994a.076.076 0 00-.041-.106 13.107 13.107 0 01-1.872-.892.077.077 0 01-.008-.128 10.2 10.2 0 00.372-.292.074.074 0 01.077-.01c3.928 1.793 8.18 1.793 12.062 0a.074.074 0 01.078.01c.12.098.246.198.373.292a.077.077 0 01-.006.127 12.299 12.299 0 01-1.873.892.077.077 0 00-.041.107c.36.698.772 1.362 1.225 1.993a.076.076 0 00.084.028 19.839 19.839 0 006.002-3.03.077.077 0 00.032-.054c.5-5.177-.838-9.674-3.549-13.66a.061.061 0 00-.031-.03z"/></svg>
+        Questions? Discord
       </a>
     </div>`;
 
+  // Position below anchor, clamped to viewport
   const rect = anchor.getBoundingClientRect();
   popup.style.top = (rect.bottom + 6) + "px";
-  popup.style.left = rect.left + "px";
+  const popupW = 300;
+  const left = Math.min(rect.left, window.innerWidth - popupW - 8);
+  popup.style.left = Math.max(8, left) + "px";
   document.body.appendChild(popup);
 
-  popup.addEventListener("click", async e2 => {
-    const opt = e2.target.closest(".vibe-option");
+  popup.addEventListener("click", e2 => {
+    const opt = e2.target.closest(".vibe-option:not([disabled])");
     if (!opt) return;
     const newVibe = opt.dataset.vibe;
     if (newVibe === currentVibe) { popup.remove(); return; }
-    if (!isLeader) {
-      showToast("Only group leaders can change the vibe.");
-      popup.remove(); return;
-    }
     popup.remove();
     _requestVibeChange(c.id, newVibe);
   });
@@ -3914,7 +3938,7 @@ async function _requestVibeChange(chatId, newVibe) {
   // DMs and solo chats: apply directly
   if (c.type === "dm" || c.members.length <= 2) {
     showConfirm(
-      `Set this chat to ${v.emoji} ${v.label}?\n\n${v.desc}`,
+      `Set this chat to ${v.label}?\n\n${v.desc}`,
       async () => { await _applyVibeChange(chatId, newVibe); },
       { title: "Change Chat Vibe", yesLabel: "Change", noLabel: "Cancel" }
     );
@@ -3926,7 +3950,7 @@ async function _requestVibeChange(chatId, newVibe) {
   const thresholdLabel = isSchool ? "60% of members" : "everyone";
 
   showConfirm(
-    `Change this chat to ${v.emoji} ${v.label}?\n\nThis requires ${thresholdLabel} to agree. A vote will be posted in chat.`,
+    `Change this chat to ${v.label}?\n\nThis requires ${thresholdLabel} to agree. A vote will be posted in chat.`,
     async () => { await _startVibeVote(chatId, newVibe, voteThreshold); },
     { title: "Change Chat Vibe", yesLabel: "Post Vote", noLabel: "Cancel" }
   );
@@ -3943,7 +3967,7 @@ async function _startVibeVote(chatId, newVibe, threshold) {
       senderUid:  state.user.uid,
       senderName: state.user.displayName || "Unknown",
       type: "vibe_vote",
-      text: `📊 ${state.user.displayName} wants to change the chat vibe to ${v.emoji} ${v.label}.\n"${v.desc}"\nVote below — ${requiredVotes} yes vote${requiredVotes === 1 ? "" : "s"} needed.`,
+      text: `${state.user.displayName} proposed changing the chat vibe to ${v.label}.`,
       vibeVote: {
         targetVibe: newVibe,
         threshold,
@@ -3956,7 +3980,7 @@ async function _startVibeVote(chatId, newVibe, threshold) {
       reactions: {}, replyToMessageId: null, replyToSenderName: null,
       replyToTextPreview: null, edited: false,
     });
-    showToast(`🗳️ Vibe vote started — ${requiredVotes} yes vote${requiredVotes === 1 ? "" : "s"} needed`, 4000);
+    showToast(`Vibe vote posted — ${requiredVotes} yes vote${requiredVotes === 1 ? "" : "s"} needed to pass`, 4000);
   } catch(err) {
     showToast("Couldn't start vote: " + err.message);
   }
@@ -3967,21 +3991,23 @@ async function _applyVibeChange(chatId, newVibe) {
   const v = VIBE_LABELS[newVibe];
   try {
     await updateDoc(doc(db, "chats", chatId), { vibe: newVibe });
-    // Log the change in messages for transparency
+    // Post a system-type message for transparency
+    // senderUid must match request.auth.uid to satisfy Firestore rules;
+    // type:"system" is what the renderer uses to show it as a system row.
     await addDoc(collection(db, "chats", chatId, "messages"), {
-      senderUid: "system",
-      senderName: "Static Chat",
+      senderUid: state.user?.uid,
+      senderName: state.user?.displayName || "Someone",
       type: "system",
-      text: `Chat vibe changed to ${v.emoji} ${v.label} — ${v.desc}`,
+      text: `Chat vibe changed to ${v.label}`,
       createdAt: serverTimestamp(),
       reactions: {}, replyToMessageId: null, replyToSenderName: null,
       replyToTextPreview: null, edited: false,
     });
     if (state.activeChat) state.activeChat.vibe = newVibe;
     _updateVibeBadge();
-    showToast(`✅ Chat vibe set to ${v.emoji} ${v.label}`, 3000);
+    showToast(`Chat vibe set to ${v.label}`, 3000);
   } catch(err) {
-    showToast("Failed to update vibe: " + err.message);
+    showToast("Couldn't update vibe: " + err.message);
   }
 }
 
@@ -4442,6 +4468,23 @@ function renderMessages() {
       }
     </div>`;
 
+    // System notification row (vibe change, etc.)
+    if (m.type === "system") {
+      // Pick an icon based on message content
+      let sysIcon = `<svg viewBox="0 0 24 24" width="13" height="13" aria-hidden="true"><path fill="currentColor" d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg>`;
+      const txt = m.text || "";
+      if (txt.includes("vibe")) {
+        const vKey = Object.keys(VIBE_LABELS).find(k => txt.toLowerCase().includes(VIBE_LABELS[k].label.toLowerCase()));
+        if (vKey) sysIcon = `<span style="display:inline-flex;color:${VIBE_LABELS[vKey].color}">${VIBE_SVGS[vKey] || sysIcon}</span>`;
+      }
+      html.push(`<div class="msg-system-row" data-msg-id="${escapeHtml(m.id)}" title="${tsTitle}">
+        <div class="msg-system-divline"></div>
+        <span class="msg-system-inner">${sysIcon}<span class="msg-system-text">${escapeHtml(txt)}</span></span>
+        <div class="msg-system-divline"></div>
+      </div>`);
+      continue;
+    }
+
     // Pin system message
     if (m.type==="pin") {
       const pinnerName=escapeHtml(m.senderName||"Someone");
@@ -4546,7 +4589,8 @@ function renderMessages() {
     // Vibe vote card
     if (m.type === "vibe_vote" && m.vibeVote) {
       const vv = m.vibeVote;
-      const v = VIBE_LABELS[vv.targetVibe] || { emoji: "?", label: vv.targetVibe, color: "#888", desc: "" };
+      const v = VIBE_LABELS[vv.targetVibe] || { label: vv.targetVibe, color: "#888", desc: "" };
+      const vibeIcon = VIBE_SVGS[vv.targetVibe] || `<svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2z"/></svg>`;
       const expired = vv.expiresAt && Date.now() > vv.expiresAt;
       const applied = !!vv.applied;
       const votes = vv.votes || {};
@@ -4560,7 +4604,7 @@ function renderMessages() {
       html.push(`<div class="msg-vibe-vote" data-msg-id="${escapeHtml(m.id)}">
         <div class="vvcard">
           <div class="vvcard-head">
-            <span class="vvcard-icon" style="color:${v.color}">${v.emoji}</span>
+            <span class="vvcard-icon" style="color:${v.color}">${vibeIcon}</span>
             <div class="vvcard-title">
               <strong>${proposer}</strong> proposed changing the chat vibe to
               <span class="vvcard-vibe-name" style="color:${v.color}">${escapeHtml(v.label)}</span>
@@ -5063,7 +5107,7 @@ async function sendCurrentMessage() {
 
   // Vibe enforcement — check SFW compliance before sending
   if (_isVibeMuted(state.activeChatId)) {
-    showToast("🔇 You are temporarily muted in this chat for SFW violations.");
+    showToast("You are temporarily muted in this chat for SFW violations.");
     return;
   }
   const vibeResult = _vibeCheck(text);

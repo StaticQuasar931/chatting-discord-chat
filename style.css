@@ -4642,50 +4642,115 @@ button, [role="button"], a { min-width: 0; }
 .word-blur.revealed { filter: none; color: inherit; background: transparent; }
 
 /* =====================================================================
-   CHAT VIBE BADGE
+   CHAT VIBE BADGE + PICKER
    ===================================================================== */
 .chat-header-name-row {
-  display: flex; align-items: center; gap: 7px; flex-wrap: wrap;
+  display: flex; align-items: center; gap: 6px;
 }
+
+/* ── Badge in header ──────────────────────────── */
 .chat-vibe-badge {
-  display: inline-flex; align-items: center; gap: 3px;
-  padding: 2px 8px; border-radius: 20px;
-  font-size: 11px; font-weight: 600;
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 2px 7px 2px 5px; border-radius: 99px;
+  font-size: 11px; font-weight: 600; letter-spacing: .01em;
   border: 1px solid transparent; cursor: pointer;
-  background: var(--c-input-2); color: var(--t-secondary);
-  transition: background .15s, color .15s; white-space: nowrap;
+  background: rgba(255,255,255,.06);
+  color: var(--t-secondary);
+  transition: opacity .15s, background .15s;
+  white-space: nowrap; line-height: 18px;
+  user-select: none;
 }
-.chat-vibe-badge[data-vibe="sfw"]      { background:#23a55a22; color:#23a55a; border-color:#23a55a44; }
-.chat-vibe-badge[data-vibe="edgy"]     { background:#f0b23222; color:#f0b232; border-color:#f0b23244; }
-.chat-vibe-badge[data-vibe="anything"] { background:#7c3aed22; color:#9966ff; border-color:#7c3aed44; }
-.chat-vibe-badge:hover { opacity:.85; }
+.chat-vibe-badge[data-vibe="sfw"]      { background: rgba(35,165,90,.14);  color: #2dc96c; border-color: rgba(35,165,90,.3);  }
+.chat-vibe-badge[data-vibe="edgy"]     { background: rgba(240,178,50,.14); color: #f5c43a; border-color: rgba(240,178,50,.3); }
+.chat-vibe-badge[data-vibe="anything"] { background: rgba(157,111,255,.14);color: #b58fff; border-color: rgba(157,111,255,.3);}
+.chat-vibe-badge:hover { opacity: .78; }
+.vibe-badge-icon {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 13px; height: 13px; flex-shrink: 0;
+}
+.vibe-badge-icon svg { width: 13px; height: 13px; }
+.vibe-badge-label { line-height: 1; }
+
+/* ── Picker popup ─────────────────────────────── */
 .vibe-picker-popup {
-  position: fixed; z-index: 9999; background: var(--c-surface);
-  border: 1px solid var(--c-border-2); border-radius: 10px; padding: 8px;
-  min-width: 280px; max-width: 320px; box-shadow: 0 8px 32px rgba(0,0,0,.35);
+  position: fixed; z-index: 9999;
+  background: var(--c-surface-2, #2b2d31);
+  border: 1px solid var(--c-border-2, rgba(255,255,255,.08));
+  border-radius: 10px; padding: 6px;
+  width: 300px; box-shadow: 0 8px 32px rgba(0,0,0,.5);
 }
+.vibe-picker-head {
+  display: flex; align-items: center; gap: 6px;
+  padding: 6px 8px 4px;
+}
+.vibe-picker-head-icon { color: var(--t-muted); flex-shrink: 0; }
 .vibe-picker-title {
   font-size: 11px; font-weight: 700; text-transform: uppercase;
-  letter-spacing: .06em; color: var(--t-muted); padding: 4px 8px 6px;
+  letter-spacing: .07em; color: var(--t-muted);
 }
 .vibe-picker-sub {
   font-size: 11px; color: var(--t-muted); padding: 0 8px 8px;
-  border-bottom: 1px solid var(--c-border-2); margin-bottom: 6px;
+  border-bottom: 1px solid var(--c-border-2, rgba(255,255,255,.06));
+  margin-bottom: 4px; line-height: 1.4;
 }
+.vibe-picker-options { display: flex; flex-direction: column; gap: 2px; }
+
+/* ── Option buttons ───────────────────────────── */
 .vibe-option {
   display: flex; align-items: center; gap: 10px; width: 100%;
-  padding: 8px 10px; border-radius: 7px; border: none;
+  padding: 9px 10px; border-radius: 7px; border: none;
   background: transparent; cursor: pointer; text-align: left;
   transition: background .12s; color: var(--t-normal);
 }
-.vibe-option:hover { background: var(--c-input-2); }
-.vibe-option.active { background: color-mix(in srgb, var(--c-accent) 12%, transparent); }
-.vibe-option-emoji { font-size: 20px; flex-shrink: 0; }
-.vibe-option-body { display: flex; flex-direction: column; gap: 2px; flex: 1; }
-.vibe-option-label { font-size: 13px; font-weight: 600; }
-.vibe-option-desc  { font-size: 11px; color: var(--t-muted); }
-.vibe-option-check { font-size: 14px; color: var(--c-accent); font-weight: 700; flex-shrink: 0; }
-.vibe-picker-footer { padding: 6px 8px 2px; border-top: 1px solid var(--c-border-2); margin-top: 6px; }
+.vibe-option:hover:not(:disabled)  { background: rgba(255,255,255,.07); }
+.vibe-option:disabled,
+.vibe-option.vibe-option-locked    { cursor: default; opacity: .5; }
+.vibe-option.active {
+  background: rgba(255,255,255,.06);
+  outline: 1px solid rgba(255,255,255,.1);
+}
+.vibe-option-icon {
+  display: flex; align-items: center; justify-content: center;
+  width: 22px; height: 22px; flex-shrink: 0;
+}
+.vibe-option-icon svg { width: 20px; height: 20px; }
+.vibe-option-body { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0; }
+.vibe-option-label { font-size: 13px; font-weight: 600; color: var(--t-normal); }
+.vibe-option-desc  { font-size: 11px; color: var(--t-muted); line-height: 1.3; }
+.vibe-option-check { display: flex; align-items: center; color: var(--c-accent); flex-shrink: 0; }
+
+/* ── Picker footer ────────────────────────────── */
+.vibe-picker-footer {
+  padding: 6px 8px 2px;
+  border-top: 1px solid var(--c-border-2, rgba(255,255,255,.06));
+  margin-top: 4px;
+}
+.vibe-picker-discord-link {
+  display: inline-flex; align-items: center; gap: 4px;
+  font-size: 11px; color: var(--t-muted);
+  text-decoration: none; transition: color .12s;
+}
+.vibe-picker-discord-link:hover { color: var(--t-normal); }
+
+/* ── System message row (vibe change, etc.) ────── */
+.msg-system-row {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 16px; margin: 2px 0;
+  pointer-events: none;
+}
+.msg-system-divline {
+  flex: 1; height: 1px;
+  background: var(--c-border, rgba(255,255,255,.08));
+  border-radius: 99px;
+}
+.msg-system-inner {
+  display: inline-flex; align-items: center; gap: 5px;
+  flex-shrink: 0; pointer-events: auto;
+}
+.msg-system-inner svg { width: 13px; height: 13px; }
+.msg-system-text {
+  font-size: 0.72rem; color: var(--t-muted); white-space: nowrap;
+}
 
 /* ── Vibe Vote Card ─────────────────────────────── */
 .msg-vibe-vote { padding: 2px 16px 2px 72px; }
