@@ -81,12 +81,30 @@ export const APPROVED_NOUNS = [
 ];
 
 /**
- * Returns true if `username` contains any blocked term.
- * Strips non-alphanumeric chars and compares lowercased.
+ * Owner accounts — these UIDs bypass the name blocklist entirely.
+ * username match is case-insensitive.
  */
-export function isNameBlocked(username) {
+export const OWNER_EXEMPTIONS = [
+  { uid: "fDbLxmBCl4dfubyupCOLGvsTUlO2", usernames: ["staticquasar931", "staticquasar"] },
+];
+
+/**
+ * Returns true if `username` contains any blocked term.
+ * Pass `uid` to apply owner-account exemptions.
+ */
+export function isNameBlocked(username, uid = null) {
   if (!username) return false;
-  const clean = username.toLowerCase().replace(/[^a-z0-9]/g, "");
+  const lower = username.toLowerCase();
+
+  // Always allow the app owner's username(s)
+  if (uid) {
+    const ex = OWNER_EXEMPTIONS.find(e => e.uid === uid);
+    if (ex && ex.usernames.includes(lower)) return false;
+  }
+  // Hardcoded fallback so the name is safe even without a UID
+  if (lower === "staticquasar931" || lower === "staticquasar") return false;
+
+  const clean = lower.replace(/[^a-z0-9]/g, "");
   return BLOCKED_TERMS.some(term =>
     clean.includes(term.replace(/[^a-z0-9]/g, ""))
   );

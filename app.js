@@ -2,7 +2,10 @@
    Static Chat — app.js
    ===================================================================== */
 
-import { isNameBlocked, generateSafeName, SLUR_TERMS } from "./name-blocklist.js";
+import { isNameBlocked, generateSafeName, SLUR_TERMS, OWNER_EXEMPTIONS } from "./name-blocklist.js";
+
+// Owner UID — bypasses name blocklist and some moderation checks
+const OWNER_UID = "fDbLxmBCl4dfubyupCOLGvsTUlO2";
 import { buildUI } from "./ui.js";
 import { getRandomTip } from "./tips.js";
 import { auth, db, provider } from "./firebase.js";
@@ -1455,9 +1458,9 @@ async function _escalateSpam(reason, isRepetitive = false) {
    ===================================================================== */
 
 const VIBE_LABELS = {
-  sfw:     { emoji: "🌈", label: "SFW",          color: "#23a55a", desc: "Family-friendly — slurs and vulgarity blocked" },
-  edgy:    { emoji: "🔥", label: "Edgy OK",       color: "#f0b232", desc: "Swearing OK, slurs OK if members agree" },
-  anything:{ emoji: "🖤", label: "Anything Goes", color: "#7c3aed", desc: "Adults: anything legal; hard stops still apply" },
+  sfw:     { emoji: "🌈", label: "SFW",          color: "#23a55a", desc: "Inclusive — slurs and vulgarity are filtered" },
+  edgy:    { emoji: "🔥", label: "Edgy",          color: "#f0b232", desc: "Casual — swearing and edgy language allowed" },
+  anything:{ emoji: "🖤", label: "Anything Goes", color: "#7c3aed", desc: "Uncensored — anything legal; hard stops still apply" },
 };
 
 /** Returns the vibe for the current active chat (defaults to "sfw"). */
@@ -2061,7 +2064,8 @@ async function loadCloudPrefs(existingData=null) {
 async function bootBlocklistCheck() {
   const u = state.user;
   if (!u?.username) return;
-  if (!isNameBlocked(u.username)) return;
+  if (u.uid === OWNER_UID) return; // owner account is always exempt
+  if (!isNameBlocked(u.username, u.uid)) return;
 
   // Log the flagged name (silent, for admin visibility)
   try {
@@ -2082,13 +2086,11 @@ async function bootBlocklistCheck() {
 /** Blocking modal that prevents all usage until the user picks a new name. */
 function _showNameChangeRequired(badName) {
   const suggestion = generateSafeName();
-  // Disable composer so they can't send anything
   const ci = document.getElementById("composer-input");
   const sb = document.getElementById("send-btn");
-  if (ci) { ci.disabled = true; ci.placeholder = "Change your username to continue…"; }
+  if (ci) { ci.disabled = true; ci.placeholder = "Update your username to continue…"; }
   if (sb) sb.disabled = true;
 
-  // Build or reuse modal
   let modal = document.getElementById("name-change-modal");
   if (!modal) {
     modal = document.createElement("div");
@@ -2096,24 +2098,52 @@ function _showNameChangeRequired(badName) {
     modal.className = "name-change-overlay";
     modal.innerHTML = `
       <div class="name-change-card">
-        <div class="name-change-icon">🚫</div>
-        <h2 class="name-change-title">Username Not Allowed</h2>
-        <p class="name-change-desc">
-          Your current username <strong id="ncm-bad-name"></strong> violates Static Chat's community guidelines.
-          Please choose a new one to continue.
-        </p>
-        <div class="name-change-suggestion" id="ncm-suggestion-wrap">
-          Suggested: <button class="ncm-suggest-btn" id="ncm-use-suggestion"></button>
-          <button class="ncm-reroll-btn" id="ncm-reroll" title="Get another suggestion">🔀</button>
+        <div class="ncm-header">
+          <div class="ncm-header-icon">
+            <svg viewBox="0 0 24 24" width="28" height="28" fill="none" aria-hidden="true">
+              <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"
+                    fill="currentColor"/>
+            </svg>
+          </div>
+          <div class="ncm-header-text">
+            <div class="ncm-header-title">Username Not Allowed</div>
+            <div class="ncm-header-sub">Choose a new username to continue using Static Chat</div>
+          </div>
         </div>
-        <input class="ncm-input" type="text" id="ncm-input" maxlength="32"
-          placeholder="Choose a new username…" spellcheck="false" autocomplete="off" />
-        <p class="ncm-error" id="ncm-error"></p>
-        <button class="btn-primary ncm-save-btn" id="ncm-save">Save Username</button>
-        <p class="ncm-note">
-          Need help? <a href="https://discord.gg/DP2hM7RRhR" target="_blank" rel="noopener">Ask in our Discord</a>.
-          If you keep trying to use a blocked name your account may be auto-renamed.
-        </p>
+
+        <div class="ncm-body">
+          <p class="ncm-desc">
+            The username <strong id="ncm-bad-name"></strong> isn't allowed under our community guidelines.
+            Pick something new — you only need to do this once.
+          </p>
+
+          <div class="ncm-suggestion-row">
+            <span class="ncm-suggestion-label">Suggestion</span>
+            <div class="ncm-suggestion-chips">
+              <button class="ncm-chip-btn" id="ncm-use-suggestion"></button>
+              <button class="ncm-reroll-btn" id="ncm-reroll" title="New suggestion" aria-label="New suggestion">
+                <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true">
+                  <path fill="currentColor" d="M17.65 6.35A7.96 7.96 0 0012 4c-4.42 0-8 3.58-8 8s3.58 8 8 8c3.73 0 6.84-2.55 7.73-6h-2.08A5.99 5.99 0 0112 18c-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/>
+                </svg>
+              </button>
+            </div>
+          </div>
+
+          <div class="ncm-field">
+            <label class="ncm-field-label" for="ncm-input">New username</label>
+            <input class="ncm-input" type="text" id="ncm-input" maxlength="32"
+              placeholder="Letters, numbers, underscores only…"
+              spellcheck="false" autocomplete="off" />
+            <p class="ncm-error" id="ncm-error"></p>
+          </div>
+        </div>
+
+        <div class="ncm-footer">
+          <span class="ncm-footer-note">
+            Questions? <a href="https://discord.gg/DP2hM7RRhR" target="_blank" rel="noopener">Discord →</a>
+          </span>
+          <button class="btn-primary" id="ncm-save">Save Username</button>
+        </div>
       </div>`;
     document.body.appendChild(modal);
 
@@ -2153,7 +2183,7 @@ async function _submitNameChange() {
   if (!newName || newName.length < 3) { errEl.textContent = "At least 3 characters required."; return; }
   if (newName.length > 32)            { errEl.textContent = "32 characters max."; return; }
   if (!/^[a-zA-Z0-9_]+$/.test(newName)) { errEl.textContent = "Letters, numbers, and underscores only."; return; }
-  if (isNameBlocked(newName)) {
+  if (isNameBlocked(newName, state.user?.uid)) {
     const sug = generateSafeName();
     errEl.textContent = `That name isn't allowed. Try "${sug}".`;
     const sugBtn = document.getElementById("ncm-use-suggestion");
@@ -2263,7 +2293,7 @@ $("#setup-confirm-btn").addEventListener("click", async ()=>{
   if (username.length>32)              { errEl.textContent="Username must be 32 characters or fewer."; return; }
   if (!/^[a-zA-Z0-9_]+$/.test(username)){ errEl.textContent="Username: letters, numbers, underscores only."; return; }
 
-  if (isNameBlocked(username)) {
+  if (isNameBlocked(username, state.user?.uid)) {
     const safe = generateSafeName();
     errEl.textContent = `That username isn't allowed. Try "${safe}" instead.`;
     return;
@@ -3786,18 +3816,18 @@ async function renderChatHeader() {
   updateChatMuteBtn();
 }
 
-/** Update the vibe badge in the chat header. */
+/** Update the vibe badge in the chat header. Shows for all chat types. */
 function _updateVibeBadge() {
   const badge = document.getElementById("chat-vibe-badge");
   if (!badge) return;
   const c = state.activeChat;
-  if (!c || c.type === "dm") { badge.classList.add("hidden"); return; }
+  if (!c) { badge.classList.add("hidden"); return; }
   const vibe = c.vibe || "sfw";
   const v = VIBE_LABELS[vibe] || VIBE_LABELS.sfw;
   badge.textContent = `${v.emoji} ${v.label}`;
   badge.dataset.vibe = vibe;
   badge.classList.remove("hidden");
-  badge.title = `Chat vibe: ${v.label} — ${v.desc}. Click to change.`;
+  badge.title = `${v.label} — ${v.desc}. Click to change.`;
 }
 
 // Vibe badge click — show vibe picker
@@ -3807,12 +3837,15 @@ document.addEventListener("click", e => {
   _showVibePicker(badge);
 });
 
-/** Show the chat vibe picker popup. */
+/** Show the chat vibe picker popup. Works for all chat types. */
 function _showVibePicker(anchor) {
   document.getElementById("vibe-picker-popup")?.remove();
   const c = state.activeChat;
-  if (!c || c.type === "dm") return;
-  const isLeader = Array.isArray(c.leaders) && c.leaders.includes(state.user?.uid);
+  if (!c) return;
+  // In DMs either participant can change vibe; in groups only leaders
+  const isLeader = c.type === "dm"
+    ? true
+    : (Array.isArray(c.leaders) && c.leaders.includes(state.user?.uid));
   const currentVibe = c.vibe || "sfw";
 
   const popup = document.createElement("div");
@@ -3872,28 +3905,30 @@ function _showVibePicker(anchor) {
   }, 0);
 }
 
-/** Propose a vibe change — requires consent from all (or 60% for school). */
+/** Propose a vibe change — DMs apply directly; groups require a vote. */
 async function _requestVibeChange(chatId, newVibe) {
   const c = state.activeChat;
   if (!c) return;
   const v = VIBE_LABELS[newVibe];
 
-  if (c.members.length <= 2) {
-    // Just the two of you — apply directly (but only leaders/owners can do this)
-    await _applyVibeChange(chatId, newVibe);
+  // DMs and solo chats: apply directly
+  if (c.type === "dm" || c.members.length <= 2) {
+    showConfirm(
+      `Set this chat to ${v.emoji} ${v.label}?\n\n${v.desc}`,
+      async () => { await _applyVibeChange(chatId, newVibe); },
+      { title: "Change Chat Vibe", yesLabel: "Change", noLabel: "Cancel" }
+    );
     return;
   }
 
   const isSchool = !!c.schoolDomain;
-  const voteThreshold = isSchool ? 0.6 : 1.0; // 60% or unanimous
-  const thresholdLabel = isSchool ? "60% of members" : "all members";
+  const voteThreshold = isSchool ? 0.6 : 1.0;
+  const thresholdLabel = isSchool ? "60% of members" : "everyone";
 
   showConfirm(
-    `Change this chat to ${v.emoji} ${v.label}?\n\nThis requires ${thresholdLabel} to vote yes. A poll will be posted in chat.`,
-    async () => {
-      await _startVibeVote(chatId, newVibe, voteThreshold);
-    },
-    { title: "Change Chat Vibe", yesLabel: `Post Vote`, noLabel: "Cancel" }
+    `Change this chat to ${v.emoji} ${v.label}?\n\nThis requires ${thresholdLabel} to agree. A vote will be posted in chat.`,
+    async () => { await _startVibeVote(chatId, newVibe, voteThreshold); },
+    { title: "Change Chat Vibe", yesLabel: "Post Vote", noLabel: "Cancel" }
   );
 }
 
@@ -4505,6 +4540,50 @@ function renderMessages() {
       </div>`);
       lastSenderUid = m.senderUid; lastTime = tms;
       lastWasAnon = !!m.anonymous; lastAnonId = m.anonymous ? (m.anonMsgId || null) : null;
+      continue;
+    }
+
+    // Vibe vote card
+    if (m.type === "vibe_vote" && m.vibeVote) {
+      const vv = m.vibeVote;
+      const v = VIBE_LABELS[vv.targetVibe] || { emoji: "?", label: vv.targetVibe, color: "#888", desc: "" };
+      const expired = vv.expiresAt && Date.now() > vv.expiresAt;
+      const applied = !!vv.applied;
+      const votes = vv.votes || {};
+      const yesCount = Object.values(votes).filter(x => x === "yes").length;
+      const noCount  = Object.values(votes).filter(x => x === "no").length;
+      const required = vv.requiredVotes || 1;
+      const pct = Math.min(100, Math.round((yesCount / required) * 100));
+      const myVote = votes[state.user?.uid];
+      const proposer = escapeHtml(m.senderName || "Someone");
+      const canVote = !applied && !expired;
+      html.push(`<div class="msg-vibe-vote" data-msg-id="${escapeHtml(m.id)}">
+        <div class="vvcard">
+          <div class="vvcard-head">
+            <span class="vvcard-icon" style="color:${v.color}">${v.emoji}</span>
+            <div class="vvcard-title">
+              <strong>${proposer}</strong> proposed changing the chat vibe to
+              <span class="vvcard-vibe-name" style="color:${v.color}">${escapeHtml(v.label)}</span>
+            </div>
+            ${applied ? `<span class="vvcard-status passed">Passed</span>` : expired ? `<span class="vvcard-status expired">Expired</span>` : ""}
+          </div>
+          <div class="vvcard-desc">${escapeHtml(v.desc)}</div>
+          <div class="vvcard-bar-wrap"><div class="vvcard-bar" style="width:${pct}%;background:${v.color}"></div></div>
+          <div class="vvcard-tally">${yesCount} of ${required} yes vote${required === 1 ? "" : "s"} needed${noCount > 0 ? ` · ${noCount} no` : ""}</div>
+          ${canVote ? `<div class="vvcard-actions">
+            <button class="vvcard-btn yes${myVote === 'yes' ? ' active' : ''}" data-vibe-vote="yes" data-msg-id="${escapeHtml(m.id)}">
+              <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path fill="currentColor" d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41L9 16.17z"/></svg>
+              ${myVote === 'yes' ? 'Voted Yes' : 'Vote Yes'}
+            </button>
+            <button class="vvcard-btn no${myVote === 'no' ? ' active' : ''}" data-vibe-vote="no" data-msg-id="${escapeHtml(m.id)}">
+              <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path fill="currentColor" d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12 19 6.41z"/></svg>
+              ${myVote === 'no' ? 'Voted No' : 'Vote No'}
+            </button>
+          </div>` : ""}
+          <div class="vvcard-time">${tsTitle}</div>
+        </div>
+      </div>`);
+      // vibe_vote cards don't break sender grouping
       continue;
     }
 
@@ -6358,10 +6437,10 @@ function _loadStandingPane() {
       warnList.innerHTML = `<p class="standing-empty">No warnings on record.</p>`;
     } else {
       warnList.innerHTML = warns.map(w => {
-        const when = w.at ? new Date(w.at).toLocaleDateString() : "—";
+        const when = w.at ? _fmtStandingDate(w.at) : "—";
         return `<div class="standing-item">
-          <span class="si-type">⚠️ Warning</span>
-          <span class="si-detail">${escapeHtml(w.reason || "")}</span>
+          <span class="si-type">Warning</span>
+          <span class="si-detail">${escapeHtml(w.reason || "Guideline violation")}</span>
           <span class="si-exp">${escapeHtml(when)}</span>
         </div>`;
       }).join("");
@@ -6371,23 +6450,41 @@ function _loadStandingPane() {
   // Mute history
   const muteList = document.getElementById("standing-mutes-list");
   if (muteList) {
-    const mutes = (s.muteHistory || []).slice(-5).reverse();
+    const mutes = (s.muteHistory || []).slice(-8).reverse();
     if (mutes.length === 0) {
       muteList.innerHTML = `<p class="standing-empty">No mutes on record.</p>`;
     } else {
       muteList.innerHTML = mutes.map(m => {
-        const when = m.at ? new Date(m.at).toLocaleDateString() : "—";
+        const when = m.at ? _fmtStandingDate(m.at) : "—";
         const dur = m.durationMs ? (m.durationMs < 3600000
           ? Math.round(m.durationMs / 60000) + "m"
-          : Math.round(m.durationMs / 3600000) + "h") : "—";
+          : m.durationMs < 86400000
+            ? Math.round(m.durationMs / 3600000) + "h"
+            : Math.round(m.durationMs / 86400000) + "d") : "—";
+        const note = m.adminNote ? `<span class="si-admin-note">Admin note: ${escapeHtml(m.adminNote)}</span>` : "";
         return `<div class="standing-item standing-item-mute">
-          <span class="si-type">🔇 Muted ${dur}</span>
-          <span class="si-detail">${escapeHtml(m.reason || "")}</span>
+          <span class="si-type">Muted · ${dur}</span>
+          <span class="si-detail">${escapeHtml(m.reason || "Guideline violation")}${note}</span>
           <span class="si-exp">${escapeHtml(when)}</span>
         </div>`;
       }).join("");
     }
   }
+}
+
+/** Format a timestamp for the standing pane — local date + time. */
+function _fmtStandingDate(ts) {
+  try {
+    const d = typeof ts === "number" ? new Date(ts)
+      : ts?.toDate ? ts.toDate()
+      : new Date(ts);
+    const today = new Date();
+    const diff = (today - d) / 86400000;
+    if (diff < 1)   return "Today at " + d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+    if (diff < 2)   return "Yesterday";
+    if (diff < 7)   return d.toLocaleDateString([], { weekday: "long" });
+    return d.toLocaleDateString([], { month: "short", day: "numeric", year: diff > 365 ? "numeric" : undefined });
+  } catch(_) { return "—"; }
 }
 
 // Settings search
@@ -10842,6 +10939,39 @@ $("#messages")?.addEventListener("click", e => {
   castPollVote(btn.dataset.msgId, parseInt(btn.dataset.pollVote, 10));
 });
 
+/** Cast or retract a yes/no vote on a vibe-change vote card. */
+async function castVibeVote(msgId, vote) {
+  const chatId = state.activeChatId;
+  if (!chatId || !state.user) return;
+  const msg = state.messages.find(m => m.id === msgId);
+  if (!msg || msg.type !== "vibe_vote" || !msg.vibeVote) return;
+  if (msg.vibeVote.applied)  { showToast("This vote has already passed"); return; }
+  if (msg.vibeVote.expiresAt && Date.now() > msg.vibeVote.expiresAt) { showToast("This vote has expired"); return; }
+
+  const newVotes = { ...(msg.vibeVote.votes || {}) };
+  // Toggle: clicking the same choice again removes the vote
+  if (newVotes[state.user.uid] === vote) delete newVotes[state.user.uid];
+  else newVotes[state.user.uid] = vote;
+
+  const yesCount = Object.values(newVotes).filter(x => x === "yes").length;
+  const passed   = yesCount >= (msg.vibeVote.requiredVotes || 1);
+  try {
+    await updateDoc(doc(db, "chats", chatId, "messages", msgId), {
+      "vibeVote.votes": newVotes,
+      ...(passed ? { "vibeVote.applied": true } : {}),
+    });
+    if (passed) await _applyVibeChange(chatId, msg.vibeVote.targetVibe);
+  } catch(err) { showToast("Vote failed: " + err.message); }
+}
+
+// Click delegation for vibe vote buttons
+$("#messages")?.addEventListener("click", e => {
+  const btn = e.target.closest("[data-vibe-vote]");
+  if (!btn) return;
+  e.stopPropagation();
+  castVibeVote(btn.dataset.msgId, btn.dataset.vibeVote);
+});
+
 /* ---------- School governance: propose a change as a poll ---------- */
 $("#group-info-modal")?.addEventListener("click", async e => {
   const btn = e.target.closest("[data-school-propose]");
@@ -12729,62 +12859,99 @@ function _showRulesUpdatePopup() {
   popup.className = "rules-update-overlay";
   popup.innerHTML = `
     <div class="rules-update-card">
+
       <div class="rup-header">
-        <span class="rup-icon">📋</span>
-        <div>
-          <div class="rup-title">Community Rules Update</div>
-          <div class="rup-sub">We've updated our guidelines — please take a moment to read them.</div>
+        <div class="rup-logo-wrap">
+          <img class="rup-logo" src="https://cdn.jsdelivr.net/gh/StaticQuasar931/chatting-discord-chat@main/staticcord.png"
+               alt="Static Chat" onerror="this.style.display='none'" />
+        </div>
+        <div class="rup-header-text">
+          <div class="rup-title">Community Guidelines Update</div>
+          <div class="rup-sub">A few things have changed — here's what's new.</div>
         </div>
       </div>
+
       <div class="rup-body">
+
         <div class="rup-section">
-          <div class="rup-section-title">🛑 Hard Stops (always banned)</div>
+          <div class="rup-section-header">
+            <svg class="rup-section-icon" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+              <path fill="currentColor" d="M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-4h-2v-4h2v4z"/>
+            </svg>
+            <span>Always Off-Limits</span>
+          </div>
           <ul class="rup-list">
-            <li>Threats, violence, or self-harm language</li>
-            <li>Spam or chat flooding</li>
-            <li>Inappropriate/impersonating usernames — you'll be prompted to change</li>
-            <li>NSFW content in any chat</li>
-            <li>Anything illegal or targeting/grooming minors</li>
+            <li>Unwanted threats or violence directed at a person or group</li>
+            <li>Spam, flooding, or message abuse</li>
+            <li>Usernames that impersonate others or contain prohibited content</li>
+            <li>Anything illegal, or content that involves or targets minors</li>
           </ul>
         </div>
+
         <div class="rup-section">
-          <div class="rup-section-title">🌈 Chat Vibes — new feature</div>
+          <div class="rup-section-header">
+            <svg class="rup-section-icon" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+              <path fill="currentColor" d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 14H9V8l5.25 4L9 16zm2-5.08V8h2v7l-2-1.08z" opacity=".3"/>
+              <path fill="currentColor" d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 14.5v-9l7 4.5-7 4.5z"/>
+            </svg>
+            <span>Chat Vibes — new</span>
+          </div>
           <ul class="rup-list">
-            <li>Every chat has a <strong>vibe setting</strong> — SFW (default), Edgy OK, or Anything Goes</li>
-            <li>In 🌈 SFW chats, slurs are automatically blocked</li>
-            <li>Changing vibe requires <strong>all members</strong> to agree (groups) or a 60% vote (school chats)</li>
+            <li>Every chat has a <strong>vibe</strong>: SFW (default), Edgy, or Anything Goes</li>
+            <li>SFW chats automatically filter slurs and offensive language</li>
+            <li>Changing a chat's vibe requires agreement from the other members</li>
+            <li>Works in group chats, DMs, and school chats</li>
           </ul>
         </div>
+
         <div class="rup-section">
-          <div class="rup-section-title">⚠️ Meanness &amp; Reports</div>
+          <div class="rup-section-header">
+            <svg class="rup-section-icon" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+              <path fill="currentColor" d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm-1-5h2v2h-2zm0-8h2v6h-2z"/>
+            </svg>
+            <span>Reports &amp; Consequences</span>
+          </div>
           <ul class="rup-list">
-            <li>If someone <strong>reports</strong> what you said to them, you will likely be muted</li>
-            <li>If nobody reports it, we assume they're OK with it — unless the messages clearly show otherwise</li>
-            <li>Escalation: warning → temp-mute (this chat) → temp-mute (all SFW chats) → admin review</li>
+            <li>If someone reports something you sent them, action will likely follow</li>
+            <li>Violations lead to temporary restrictions, starting with warnings</li>
+            <li>Repeated or severe violations escalate to longer restrictions</li>
           </ul>
         </div>
+
         <div class="rup-section">
-          <div class="rup-section-title">🔤 Word Filter &amp; Blur</div>
+          <div class="rup-section-header">
+            <svg class="rup-section-icon" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+              <path fill="currentColor" d="M9.4 16.6L4.8 12l4.6-4.6L8 6l-6 6 6 6 1.4-1.4zm5.2 0l4.6-4.6-4.6-4.6L16 6l6 6-6 6-1.4-1.4z"/>
+            </svg>
+            <span>Word Filter</span>
+          </div>
           <ul class="rup-list">
-            <li>You can enable <strong>Auto Blur Slurs</strong> in Settings → Appearance to blur offensive words</li>
-            <li>Click any blurred word to reveal it</li>
-            <li>You can also add custom words to your personal blur list</li>
+            <li>Turn on <strong>Auto Blur Slurs</strong> in Settings → Appearance to blur offensive words for yourself</li>
+            <li>Click any blurred word to reveal it — it only affects your view</li>
           </ul>
         </div>
+
         <div class="rup-section">
-          <div class="rup-section-title">📊 Your Standing</div>
+          <div class="rup-section-header">
+            <svg class="rup-section-icon" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+              <path fill="currentColor" d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4zm0 10.99h7c-.53 4.12-3.28 7.79-7 8.94V12H5V6.3l7-3.11v8.8z"/>
+            </svg>
+            <span>Your Standing</span>
+          </div>
           <ul class="rup-list">
-            <li>You can view your own moderation history in Settings → My Standing</li>
-            <li>Only you can see your standing — it's private</li>
+            <li>View your account health in <strong>Settings → My Standing</strong></li>
+            <li>Only you can see your own standing — it's completely private</li>
+            <li>To appeal anything, contact us through our Discord</li>
           </ul>
         </div>
-        <div class="rup-footer-note">
-          Have questions or want to appeal something? Join our
-          <a href="https://discord.gg/DP2hM7RRhR" target="_blank" rel="noopener">support Discord</a>.
-        </div>
+
       </div>
+
       <div class="rup-foot">
-        <button class="btn-primary" id="rup-agree-btn">Got it — I understand</button>
+        <span class="rup-discord-link">
+          Questions? <a href="https://discord.gg/DP2hM7RRhR" target="_blank" rel="noopener">Join our Discord</a>
+        </span>
+        <button class="btn-primary" id="rup-agree-btn">I understand</button>
       </div>
     </div>`;
   document.body.appendChild(popup);
