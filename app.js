@@ -6378,7 +6378,8 @@ function openSettingsModal(pane) {
 
   // Word blur settings
   const blurToggle = $("#settings-blur-slurs-toggle");
-  if (blurToggle) blurToggle.checked = localStorage.getItem("sc_blur_slurs") === "true";
+  const blurOn = localStorage.getItem("sc_blur_slurs") === "true";
+  if (blurToggle) blurToggle.checked = blurOn;
   const blurCustom = $("#settings-blur-custom-input");
   if (blurCustom) {
     try {
@@ -6386,6 +6387,9 @@ function openSettingsModal(pane) {
       blurCustom.value = words.join(", ");
     } catch(_) { blurCustom.value = ""; }
   }
+  // Show custom-words field only when blur is on
+  const blurCustomWrap = document.getElementById("blur-custom-wrap");
+  if (blurCustomWrap) blurCustomWrap.style.display = blurOn ? "" : "none";
 
   // Standing pane — load lazily when opened
   if (pane === "standing") _loadStandingPane();
@@ -6409,8 +6413,12 @@ document.addEventListener("click", e=>{
 // Word blur toggle handler
 document.addEventListener("change", e => {
   if (e.target.id !== "settings-blur-slurs-toggle") return;
-  localStorage.setItem("sc_blur_slurs", e.target.checked ? "true" : "false");
-  showToast(e.target.checked ? "🔵 Slur blur enabled" : "⭕ Slur blur disabled", 2000);
+  const on = e.target.checked;
+  localStorage.setItem("sc_blur_slurs", on ? "true" : "false");
+  // Show/hide the custom words field
+  const wrap = document.getElementById("blur-custom-wrap");
+  if (wrap) wrap.style.display = on ? "" : "none";
+  showToast(on ? "Word blur enabled" : "Word blur disabled", 2000);
 });
 
 // Word blur custom words save handler
@@ -6423,7 +6431,7 @@ document.addEventListener("click", e => {
     .map(w => w.toLowerCase().trim())
     .filter(w => w.length > 1 && w.length <= 60);
   localStorage.setItem("sc_blur_custom", JSON.stringify([...new Set(words)]));
-  showToast(`✅ Custom blur list saved (${words.length} word${words.length === 1 ? "" : "s"})`, 2500);
+  showToast(`Blur list saved — ${words.length} word${words.length === 1 ? "" : "s"}`, 2500);
 });
 
 /** Render the My Standing settings pane. */
@@ -8278,10 +8286,10 @@ $("#update-banner-x")?.addEventListener("click", _dismissUpdateBanner);
    MOBILE
    ===================================================================== */
 function maybeToggleSidebar(open) {
-  const appEl=$("#app");
-  if (window.matchMedia("(max-width: 768px)").matches) {
-    if (open) appEl.classList.add("show-sidebar"); else appEl.classList.remove("show-sidebar");
-  }
+  const appEl = $("#app");
+  if (!window.matchMedia("(max-width: 768px)").matches) return;
+  appEl.classList.toggle("show-sidebar", open);
+  document.getElementById("sidebar-overlay")?.classList.toggle("visible", open);
 }
 ["#dm-list","#group-list","#rail-groups"].forEach(sel=>{
   $(sel)?.addEventListener("click",()=>maybeToggleSidebar(false));
@@ -8289,42 +8297,66 @@ function maybeToggleSidebar(open) {
 $("#rail-home")?.addEventListener("click",()=>maybeToggleSidebar(true));
 $("#open-friends-btn")?.addEventListener("click",()=>maybeToggleSidebar(false));
 
-// Hamburger button toggles sidebar on mobile
-$("#mobile-sidebar-toggle")?.addEventListener("click", () => {
+/** Toggle the sidebar open on mobile, or expand it on desktop when collapsed. */
+function _sidebarOpenBtnClick() {
   const appEl = $("#app");
-  if (appEl.classList.contains("show-sidebar")) appEl.classList.remove("show-sidebar");
-  else appEl.classList.add("show-sidebar");
-});
+  if (window.matchMedia("(min-width: 769px)").matches) {
+    // Desktop: this button only shows when sidebar-collapsed — click expands it
+    _setSidebarCollapsed(false);
+  } else {
+    // Mobile: toggle show-sidebar
+    const open = !appEl.classList.contains("show-sidebar");
+    appEl.classList.toggle("show-sidebar", open);
+    document.getElementById("sidebar-overlay")?.classList.toggle("visible", open);
+  }
+}
+$("#mobile-sidebar-toggle")?.addEventListener("click", _sidebarOpenBtnClick);
 
 /* ─── B1: Sidebar collapse (desktop) ─────────────────────────────────────── */
+const KEY_COLLAPSE = "sc_sidebar_collapsed";
+
+function _setSidebarCollapsed(collapsed) {
+  const appEl = $("#app");
+  const btn   = $("#sidebar-collapse-btn");
+  appEl.classList.toggle("sidebar-collapsed", collapsed);
+  localStorage.setItem(KEY_COLLAPSE, collapsed ? "true" : "false");
+  if (btn) {
+    btn.setAttribute("aria-expanded", String(!collapsed));
+    btn.title = collapsed ? "Expand sidebar" : "Collapse sidebar";
+    btn.setAttribute("aria-label", collapsed ? "Expand sidebar" : "Collapse sidebar");
+  }
+}
+
 (function _initSidebarCollapse() {
   const appEl = $("#app");
   const btn = $("#sidebar-collapse-btn");
   if (!appEl || !btn) return;
-  const KEY = "sc_sidebar_collapsed";
   // Restore saved state
-  if (localStorage.getItem(KEY) === "true") {
-    appEl.classList.add("sidebar-collapsed");
-    btn.setAttribute("aria-expanded", "false");
-    btn.title = "Expand sidebar";
-    btn.setAttribute("aria-label", "Expand sidebar");
+  if (localStorage.getItem(KEY_COLLAPSE) === "true") {
+    _setSidebarCollapsed(true);
   }
   btn.addEventListener("click", () => {
-    const collapsed = appEl.classList.toggle("sidebar-collapsed");
-    localStorage.setItem(KEY, collapsed ? "true" : "false");
-    btn.setAttribute("aria-expanded", String(!collapsed));
-    btn.title = collapsed ? "Expand sidebar" : "Collapse sidebar";
-    btn.setAttribute("aria-label", collapsed ? "Expand sidebar" : "Collapse sidebar");
+    _setSidebarCollapsed(!appEl.classList.contains("sidebar-collapsed"));
   });
 })();
-// Close sidebar when tapping outside (mobile only)
+
+// Overlay click closes sidebar on mobile
+document.getElementById("sidebar-overlay")?.addEventListener("click", () => {
+  const appEl = $("#app");
+  appEl.classList.remove("show-sidebar");
+  document.getElementById("sidebar-overlay")?.classList.remove("visible");
+});
+
+// Close sidebar when tapping outside (mobile — fallback, no overlay)
 document.addEventListener("click", e => {
   if (!window.matchMedia("(max-width: 768px)").matches) return;
   const appEl = $("#app");
   if (!appEl?.classList.contains("show-sidebar")) return;
-  if (e.target.closest(".sidebar, .rail, #mobile-sidebar-toggle")) return;
+  if (e.target.closest(".sidebar, .rail, #mobile-sidebar-toggle, #sidebar-overlay")) return;
   appEl.classList.remove("show-sidebar");
+  document.getElementById("sidebar-overlay")?.classList.remove("visible");
 });
+
 
 
 /* =====================================================================

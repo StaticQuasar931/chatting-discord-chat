@@ -2184,38 +2184,70 @@ body.compact-mode .msg-head { gap: 4px; }
   .chat-header { padding: 0 8px; gap: 6px; }
   .chat-header-name { font-size: 16px; }
   .chat-header-sub { font-size: 11px; }
-  /* Hamburger button to toggle sidebar */
-  .mobile-sidebar-toggle {
-    display: inline-flex !important; align-items: center; justify-content: center;
-    width: 36px; height: 36px; flex-shrink: 0;
-    background: transparent; border-radius: var(--radius-sm); cursor: pointer;
-    color: var(--t-secondary);
-  }
-  .mobile-sidebar-toggle:hover { background: var(--c-input); color: var(--t-primary); }
+  /* sidebar-open-btn handled by .sidebar-open-btn rules above */
 }
-.mobile-sidebar-toggle { display: none; } /* Only visible on mobile */
+/* Legacy fallback — class may still appear in markup */
+.mobile-sidebar-toggle { display: none; }
 
 @media (max-width: 480px) {
   :root { --rail-w: 52px; }
   .rail-btn, .rail-group-avatar { width: 38px; height: 38px; border-radius: 19px; }
   .rail-btn.active::before, .rail-group-avatar.active::before { left: -10px; }
   .main-header { padding: 0 8px; }
-  .composer { padding: 0 6px 12px; padding-bottom: calc(12px + env(safe-area-inset-bottom)); }
   .message-group { padding: 4px 8px; gap: 10px; }
   .msg-followup { padding-left: 58px; padding-right: 8px; }
   .msg-avatar, .msg-avatar-fallback { width: 34px; height: 34px; }
   .msg-avatar-fallback { font-size: 13px; }
-  /* Tabs scroll on small screens */
   .tabs { overflow-x: auto; -webkit-overflow-scrolling: touch; flex-wrap: nowrap; }
   .tabs::-webkit-scrollbar { display: none; }
-  /* Sender info on message actions */
   .composer-input { min-height: 40px; }
-  /* Emoji/GIF buttons */
   .composer-gif-btn, .composer-emoji-btn { width: 32px !important; height: 32px; }
+  /* Chat header vibe badge: hide label, show icon only to save space */
+  .vibe-badge-label { display: none; }
+  .chat-vibe-badge { padding: 3px 5px; }
+  /* Settings nav scrolls horizontally on tiny screens */
+  .settings-discord-nav { overflow-x: auto; flex-direction: row; flex-shrink: 0; border-right: none; border-bottom: 1px solid var(--c-border); max-height: unset; min-width: unset; width: 100%; padding: 4px; gap: 2px; }
+  .settings-discord-nav .settings-discord-nav-item { flex-direction: column; padding: 6px 8px; font-size: 11px; min-width: 60px; text-align: center; border-radius: 6px; }
+  .settings-discord-nav .settings-discord-nav-item svg { margin: 0 auto 2px; }
+  .settings-layout { flex-direction: column; }
 }
-/* iOS safe-area for devices with home bar */
-@supports (padding-bottom: env(safe-area-inset-bottom)) {
-  .composer { padding-bottom: calc(10px + env(safe-area-inset-bottom)); }
+
+/* iOS / Android safe-area insets — notch, home bar */
+@supports (padding: env(safe-area-inset-bottom)) {
+  .composer {
+    padding-bottom: max(10px, env(safe-area-inset-bottom));
+  }
+  /* Keep the app from rendering behind the status bar */
+  @media (max-width: 768px) {
+    .app {
+      padding-top: env(safe-area-inset-top);
+    }
+    .sidebar {
+      top: env(safe-area-inset-top);
+    }
+  }
+}
+
+/* Prevent iOS rubber-band scroll from pulling the whole app */
+@media (max-width: 768px) {
+  html, body { overscroll-behavior: none; }
+  /* Make the messages area the only scrollable region on mobile */
+  .main { touch-action: pan-y; }
+}
+
+/* Touch-friendly interactive elements on mobile */
+@media (hover: none) and (pointer: coarse) {
+  /* Larger hit areas for common actions */
+  .msg-action-btn  { min-width: 36px; min-height: 36px; }
+  .quick-react-btn { min-width: 32px; min-height: 32px; font-size: 15px; }
+  .icon-btn        { min-width: 40px; min-height: 40px; }
+  .side-btn        { min-height: 48px; }
+  /* Disable hover effects that would linger on touch */
+  .msg-action-btn:hover  { background: transparent; }
+  .quick-react-btn:hover { background: transparent; }
+  /* Show message actions on tap (long-press handled by context menu) */
+  .message-group:active .msg-actions,
+  .msg-followup:active .msg-actions { opacity: 1; visibility: visible; }
 }
 
 /* =================================================
@@ -4201,24 +4233,61 @@ body.has-chat-accent .send-btn { background: var(--c-chat-accent, var(--c-accent
 .app.sidebar-collapsed { grid-template-columns: var(--rail-w) 0 1fr; }
 .app.sidebar-collapsed .sidebar { width: 0; min-width: 0; overflow: hidden; border-right-width: 0; }
 
-.sidebar-collapse-btn {
-  display: none; /* shown via JS on desktop */
-  position: absolute; right: -12px; top: 50%; transform: translateY(-50%);
-  width: 24px; height: 24px; border-radius: 50%;
-  background: var(--c-sidebar); border: 1px solid var(--c-border);
-  color: var(--t-secondary); font-size: 11px; cursor: pointer;
-  z-index: 10; align-items: center; justify-content: center;
-  transition: background .12s, color .12s, transform .22s;
-  box-shadow: var(--shadow-1);
-}
-.sidebar-collapse-btn:hover { background: var(--c-accent); color: #fff; border-color: var(--c-accent); }
-.app.sidebar-collapsed .sidebar-collapse-btn { transform: translateY(-50%) rotate(180deg); }
-
 /* Sidebar header needs relative positioning for the collapse button */
 .sidebar-header { position: relative; }
 
+/* Collapse tab — pokes right of sidebar edge, always visible on desktop */
+.sidebar-collapse-btn {
+  display: none;
+  position: absolute; right: -14px; top: 50%; transform: translateY(-50%);
+  width: 28px; height: 28px; border-radius: 50%;
+  background: var(--c-surface-2, #2b2d31);
+  border: 1px solid var(--c-border);
+  color: var(--t-muted); cursor: pointer;
+  z-index: 20; align-items: center; justify-content: center;
+  transition: background .15s, color .15s, transform .22s cubic-bezier(.4,0,.2,1);
+  box-shadow: 2px 0 8px rgba(0,0,0,.25);
+  padding: 0;
+}
+.sidebar-collapse-btn:hover { background: var(--c-accent); color: #fff; border-color: var(--c-accent); }
+/* Chevron rotates 180° when sidebar is collapsed */
+.app.sidebar-collapsed .sidebar-collapse-btn { transform: translateY(-50%) rotate(180deg); }
+
 @media (min-width: 769px) {
   .sidebar-collapse-btn { display: flex; }
+}
+
+/* Sidebar open button in chat header — only visible on mobile OR desktop-collapsed */
+.sidebar-open-btn {
+  display: none; /* hidden by default */
+  align-items: center; justify-content: center;
+  width: 36px; height: 36px; flex-shrink: 0;
+  background: transparent; border: none;
+  border-radius: var(--radius-sm); cursor: pointer;
+  color: var(--t-secondary); transition: background .12s, color .12s;
+}
+.sidebar-open-btn:hover { background: var(--c-input); color: var(--t-primary); }
+/* Show on mobile always */
+@media (max-width: 768px) {
+  .sidebar-open-btn { display: inline-flex !important; }
+}
+/* Show on desktop when sidebar is collapsed */
+@media (min-width: 769px) {
+  .app.sidebar-collapsed .sidebar-open-btn { display: inline-flex; }
+}
+
+/* ── Mobile sidebar overlay ─────────────────────────────── */
+.sidebar-overlay {
+  display: none;
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,.5);
+  z-index: 49; /* just below the sidebar (z-index: 50) */
+  opacity: 0;
+  transition: opacity .2s ease;
+}
+@media (max-width: 768px) {
+  .sidebar-overlay { display: block; pointer-events: none; }
+  .sidebar-overlay.visible { opacity: 1; pointer-events: auto; }
 }
 
 /* =================================================
@@ -4626,20 +4695,33 @@ button, [role="button"], a { min-width: 0; }
 .game-option-btn:hover { border-color:var(--c-accent); color:var(--c-accent); transform:translateX(3px); }
 
 /* =====================================================================
-   WORD BLUR — per-user slur/word filter
+   WORD BLUR — per-user slur/word filter (spoiler-pill style)
+   Opaque background completely hides the text.
+   Click once to reveal; click again to re-hide.
    ===================================================================== */
 .word-blur {
-  background: var(--c-input-2);
+  /* Solid background covers text — no filter needed */
+  background: rgba(148,155,164,.35);
   color: transparent;
   border-radius: 3px;
   cursor: pointer;
-  filter: blur(5px);
   user-select: none;
-  transition: filter .18s, color .18s;
-  padding: 0 2px;
+  padding: 0 3px;
+  display: inline;
+  transition: background .15s, color .15s;
+  /* Prevent text selection revealing content */
+  -webkit-user-select: none;
 }
-.word-blur:hover { filter: blur(3px); }
-.word-blur.revealed { filter: none; color: inherit; background: transparent; }
+/* Hover: lighten slightly, show it's interactive */
+.word-blur:hover {
+  background: rgba(148,155,164,.5);
+}
+/* Revealed: text visible, subtle background remains so it can be re-hidden */
+.word-blur.revealed {
+  color: inherit;
+  background: rgba(148,155,164,.15);
+  border-radius: 3px;
+}
 
 /* =====================================================================
    CHAT VIBE BADGE + PICKER

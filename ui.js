@@ -207,13 +207,21 @@ export function buildUI() {
       </button>
     </nav>
 
+    <!-- Sidebar overlay — tapping it closes sidebar on mobile -->
+    <div class="sidebar-overlay" id="sidebar-overlay" aria-hidden="true"></div>
+
     <!-- SIDEBAR -->
     <aside class="sidebar" aria-label="Conversations sidebar" role="navigation">
       <div class="sidebar-header">
         <input type="text" id="sidebar-search" placeholder="Find or start a conversation"
                aria-label="Search conversations" autocomplete="off" />
         <button class="sidebar-collapse-btn" id="sidebar-collapse-btn"
-                title="Collapse sidebar" aria-label="Collapse sidebar" aria-expanded="true">‹</button>
+                title="Collapse sidebar" aria-label="Collapse sidebar" aria-expanded="true">
+          <!-- Chevron left — rotates 180° when collapsed -->
+          <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+            <path fill="currentColor" d="M15.41 7.41L14 6l-6 6 6 6 1.41-1.41L10.83 12z"/>
+          </svg>
+        </button>
       </div>
       <div class="sidebar-content">
         <button class="side-btn" id="open-friends-btn" style="position:relative;">
@@ -322,8 +330,11 @@ export function buildUI() {
       <!-- CHAT VIEW -->
       <section id="chat-view" class="view hidden">
         <header class="main-header chat-header">
-          <button class="mobile-sidebar-toggle" id="mobile-sidebar-toggle" title="Toggle sidebar" aria-label="Open sidebar">
-            <svg viewBox="0 0 24 24" width="22" height="22"><path fill="currentColor" d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+          <!-- On mobile: hamburger. On desktop (when sidebar is collapsed): expands sidebar. -->
+          <button class="sidebar-open-btn" id="mobile-sidebar-toggle" title="Open sidebar" aria-label="Open sidebar">
+            <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+              <path fill="currentColor" d="M3 18h13v-2H3v2zm0-5h10v-2H3v2zm0-7v2h13V6H3zm18 9.59L17.42 12 21 8.41 19.59 7l-5 5 5 5L21 15.59z"/>
+            </svg>
           </button>
           <div class="chat-header-info">
             <div class="chat-header-avatar-wrap" id="chat-header-avatar-wrap"></div>
